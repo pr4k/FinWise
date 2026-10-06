@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="A private household finance planner." />
+    <title>FinWise — Household finance</title>
+    <link rel="stylesheet" href="/styles.css?v=20261005b" />
+    <link rel="stylesheet" href="/design.css?v=20261006a" />
+    <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
+    <script src="/api.js?v=20261002e" defer></script>
+    <script src="/view-state.js?v=20261002e" defer></script>
+    <script src="/categories.js?v=20261002e" defer></script>
+    <script src="/analytics.js?v=20261006a" defer></script>
+    <script src="/activity.js?v=20261002e" defer></script>
+    <script src="/time.js?v=20261002e" defer></script>
+    <script src="/reconciliation.js?v=20261002e" defer></script>
+    <script src="/app.js?v=20261006a" defer></script>
+  </head>
+  <body>
+    <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5m0 14h17M8 15l4-4 3 2 5-7"/></symbol>
+      <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 3h14v18l-3-2-4 2-4-2-3 2zM8 8h8M8 12h8M8 16h3"/></symbol>
+      <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H20v16H5a2 2 0 0 1-2-2V6.5A2.5 2.5 0 0 1 5.5 4M3 8h17M16 14h.01"/></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l1 2.5 2.5 1-2.5 1L19 23l-1-2.5-2.5-1 2.5-1z"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 16v4h16v-4"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a8 8 0 0 1-1.6.9l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.6-.9l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.9l-1.4-1.2 1.4-2.4 1.7.7a8 8 0 0 1 1.6-.9l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.6.9l1.7-.7 1.4 2.4-1.4 1.2a7 7 0 0 1 0 1.9Z" transform="translate(-1 -1)"/></symbol>
+    </svg>
+    <section id="auth-root" class="auth-root" aria-live="polite"><p>Connecting to FinWise…</p></section>
+    <div class="app-shell" hidden>
+      <aside class="sidebar" aria-label="Main navigation">
+        <a class="brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>finwise<span class="brand-dot">.</span></span></a>
+        <div class="household-card"><div class="household-icon">⌂</div><div><strong id="household-name"></strong><span id="household-currency"></span></div></div>
+        <nav class="nav-list" id="desktop-nav">
+          <div class="workspace-label">YOUR MONEY</div>
+          <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
+          <button class="nav-item" data-view="analytics"><svg><use href="#i-chart"/></svg><span>Analytics</span></button>
+          <button class="nav-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Transactions</span></button>
+          <button class="nav-item" data-view="accounts"><svg><use href="#i-wallet"/></svg><span>Accounts</span></button>
+          <button class="nav-item" data-view="budgets"><svg><use href="#i-wallet"/></svg><span>Budgets</span></button>
+          <div class="workspace-label nav-group-label">ORGANIZE</div>
+          <button class="nav-item" data-view="categories"><svg><use href="#i-grid"/></svg><span>Categories</span></button>
+          <button class="nav-item" data-view="statements"><svg><use href="#i-receipt"/></svg><span>Statements</span></button>
+          <button class="nav-item" data-view="reconcile"><svg><use href="#i-check"/></svg><span>Reconcile</span></button>
+          <button class="nav-item" data-view="changes"><svg><use href="#i-check"/></svg><span>Money Manager changes</span></button>
+          <button class="nav-item" data-view="imports"><svg><use href="#i-upload"/></svg><span>Imports</span></button>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <button class="nav-item settings-link" data-view="settings"><svg><use href="#i-settings"/></svg><span>Settings</span></button>
+        <div class="profile"><div class="avatar avatar-violet">•</div><div class="profile-copy"><strong id="user-name"></strong><span>Signed in</span></div><button data-action="logout" aria-label="Sign out">↪</button></div>
+      </aside>
+      <main class="main-area">
+        <header class="topbar">
+          <button class="mobile-menu icon-button" id="menu-button" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="desktop-nav"><svg><use href="#i-menu"/></svg></button>
+          <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Overview</strong></div>
+          <div class="topbar-actions">
+            <label class="scope-picker"><span class="scope-avatar">⌂</span><select id="report-scope" aria-label="View scope"><option value="personal">My personal view</option><option value="family">Family view</option></select><span class="chevron">⌄</span></label>
+            <label class="month-filter"><span>Month</span><input id="report-month" type="month" aria-label="Report month" required></label>
+          </div>
+        </header>
+        <div class="content" id="view-root" tabindex="-1"></div>
+        <nav class="bottom-nav" aria-label="Mobile navigation">
+          <button class="bottom-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Home</span></button>
+          <button class="bottom-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Activity</span></button>
+          <button class="bottom-add" data-action="transaction" aria-label="Add transaction"><svg><use href="#i-plus"/></svg></button>
+          <button class="bottom-item" data-view="budgets"><svg><use href="#i-wallet"/></svg><span>Budgets</span></button>
+          <button class="bottom-item" data-view="more"><svg><use href="#i-menu"/></svg><span>More</span></button>
+        </nav>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog class="balance-dialog live-dialog" id="editor" aria-labelledby="editor-title"></dialog>
+  </body>
+</html>

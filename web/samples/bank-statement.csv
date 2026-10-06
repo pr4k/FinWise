@@ -1,0 +1,3 @@
+Date,Description,Debit,Credit,Currency,Reference,Balance
+2026-08-01,Example card payment,25.00,,INR,EXAMPLE-001,975.00
+2026-08-02,Example salary deposit,,100.00,INR,EXAMPLE-002,1075.00

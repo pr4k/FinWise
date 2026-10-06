@@ -1,0 +1,39 @@
+# Local configuration and secrets (keep the documented template)
+.env
+.env.*
+!.env.example
+
+# Local household data, SQLite databases, and backups
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Rust and JavaScript build artifacts
+/target/
+node_modules/
+dist/
+build/
+coverage/
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Browser test output
+playwright-report/
+test-results/
+
+# Local logs and editor/OS files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
