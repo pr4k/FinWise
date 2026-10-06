@@ -4,6 +4,14 @@
   const pending = new Map();
   const reads = new Map();
   const cacheLifetime = 10000;
+  function requestKey() {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
   async function request(path, { method = 'GET', body, revision, key, signal } = {}) {
     // Only computed reports are reused. Activity, membership and account lists
     // must reflect another household member's changes on the next navigation.
@@ -36,7 +44,7 @@
     if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
     if (revision !== undefined) headers['If-Match'] = String(revision);
     if (method === 'POST' && !['auth/login','auth/logout'].includes(path)) {
-      if (!pending.has(signature)) pending.set(signature, key || crypto.randomUUID());
+      if (!pending.has(signature)) pending.set(signature, key || requestKey());
       headers['Idempotency-Key'] = pending.get(signature);
     }
     const response = await fetch(`/api/v1/${path}`, {

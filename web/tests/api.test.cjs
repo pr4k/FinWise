@@ -4,9 +4,9 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../api.js'),'utf8');
-function client(fetch) {
+function client(fetch, cryptoValue=webcrypto) {
   const events=[]; const window={dispatchEvent:e=>events.push(e.type)};
-  vm.runInNewContext(source,{window,fetch,FormData,File,crypto:webcrypto,Event});
+  vm.runInNewContext(source,{window,fetch,FormData,File,crypto:cryptoValue,Event});
   return {...window.finwiseAPI,events};
 }
 const response=(value,status=200)=>({ok:status<400,status,json:async()=>value});
@@ -23,6 +23,13 @@ test('ambiguous POST retry retains idempotency key and exact money strings',asyn
   assert.equal(JSON.parse(calls[1].options.body).amount,'90071992547409.91');
   await api.request('transactions',request);
   assert.notEqual(calls[1].options.headers['Idempotency-Key'],calls[2].options.headers['Idempotency-Key']);
+});
+test('POST works when randomUUID is unavailable',async()=>{
+  const api=client(async(_url,options)=>{
+    assert.match(options.headers['Idempotency-Key'],/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    return response({id:'created'},201);
+  },{getRandomValues:array=>webcrypto.getRandomValues(array)});
+  await api.request('auth/bootstrap',{method:'POST',body:{}});
 });
 test('collections follow every cursor without converting amounts',async()=>{
   const calls=[];
