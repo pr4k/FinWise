@@ -9,14 +9,42 @@
     <link rel="stylesheet" href="/styles.css?v=20261005b" />
     <link rel="stylesheet" href="/design.css?v=20261006a" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
-    <script src="/api.js?v=20261002e" defer></script>
+    <script src="/api.js?v=20261006b" defer></script>
     <script src="/view-state.js?v=20261002e" defer></script>
     <script src="/categories.js?v=20261002e" defer></script>
     <script src="/analytics.js?v=20261006a" defer></script>
     <script src="/activity.js?v=20261002e" defer></script>
     <script src="/time.js?v=20261002e" defer></script>
     <script src="/reconciliation.js?v=20261002e" defer></script>
-    <script src="/app.js?v=20261006a" defer></script>
+    <script src="/app.js?v=20261006b" defer></script>
+    <script>
+      function startupProblem(message) {
+        const auth = document.querySelector('#auth-root');
+        if (!auth || auth.hidden || auth.textContent.trim() !== 'Connecting to FinWise…') return;
+        auth.replaceChildren();
+        const card = document.createElement('section');
+        card.className = 'panel auth-card';
+        const title = document.createElement('h1');
+        title.textContent = 'FinWise could not start';
+        const detail = document.createElement('p');
+        detail.textContent = message;
+        const retry = document.createElement('button');
+        retry.className = 'primary-button';
+        retry.textContent = 'Retry connection';
+        retry.addEventListener('click', () => location.reload());
+        card.append(title, detail, retry);
+        auth.append(card);
+      }
+      window.addEventListener('error', event => {
+        if (event.target instanceof HTMLScriptElement)
+          startupProblem(`Could not load ${event.target.src}. Check the browser connection to the NAS.`);
+        else if (event.message)
+          startupProblem(`JavaScript error: ${event.message}`);
+      }, true);
+      window.addEventListener('unhandledrejection', event =>
+        startupProblem(`Startup error: ${event.reason?.message || event.reason || 'Unknown error'}`));
+      setTimeout(() => startupProblem('The app did not finish connecting. Check the browser connection to the NAS and retry.'), 20000);
+    </script>
   </head>
   <body>
     <svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">

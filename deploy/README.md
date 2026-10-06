@@ -25,6 +25,15 @@ sudo docker compose --env-file .env -f deploy/compose.yaml ps
 
 With `FINWISE_ALLOW_INSECURE_HTTP=true`, open `http://192.168.1.194:3000` from your LAN or through your Tailscale subnet route. Keep the NAS port off the public internet. HTTP traffic on the LAN segment between a separate Tailscale subnet router and TrueNAS is unencrypted, and browsers will not mark the page as secure. If you prefer HTTPS, leave `FINWISE_ALLOW_INSECURE_HTTP` unset and put an HTTPS reverse proxy in front of the published port. For local HTTP development, run the native command in `backend/README.md`. CORS remains disabled.
 
+If the page stays at **Connecting to FinWise…**, reload it without the browser cache, then check the API from the NAS:
+
+```sh
+curl -i http://192.168.1.194:3000/api/v1/auth/bootstrap-status
+sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise printenv FINWISE_ALLOW_INSECURE_HTTP
+```
+
+The API should return JSON with `"requires_https":false` when HTTP mode is enabled. If the request hangs or fails, check `sudo docker compose --env-file .env -f deploy/compose.yaml logs --tail=100 finwise`. If the API responds but the page still does not advance, open the browser developer console and check for failed JavaScript requests or errors.
+
 ## Updating a shell-managed NAS installation
 
 After new commits have been pushed to the public repository, run this single command from the repository root on the NAS:
