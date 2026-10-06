@@ -10,10 +10,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address: SocketAddr = std::env::var("FINWISE_BIND")
         .unwrap_or_else(|_| "127.0.0.1:3000".into())
         .parse()?;
-    let secure_cookies = std::env::var("FINWISE_INSECURE_LOCAL_COOKIES").as_deref() != Ok("true");
-    if !secure_cookies && !address.ip().is_loopback() {
+    let insecure_local = std::env::var("FINWISE_INSECURE_LOCAL_COOKIES").as_deref() == Ok("true");
+    let allow_insecure_http = std::env::var("FINWISE_ALLOW_INSECURE_HTTP").as_deref() == Ok("true");
+    if insecure_local && !address.ip().is_loopback() && !allow_insecure_http {
         return Err("Insecure cookies require a loopback bind address".into());
     }
+    let secure_cookies = !(insecure_local || allow_insecure_http);
     let pool = connect(&url).await?;
     let web = PathBuf::from(std::env::var("FINWISE_WEB_DIR").unwrap_or_else(|_| "web".into()));
     let listener = tokio::net::TcpListener::bind(address).await?;

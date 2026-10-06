@@ -12,7 +12,7 @@ FINWISE_INSECURE_LOCAL_COOKIES=true cargo run -p finwise-api
 
 Open `http://127.0.0.1:3000`. The same process serves `web/` and `/api/v1`. Migrations run automatically, with foreign keys enabled and SQLite WAL mode. The default database is `data/finwise.sqlite`. Stop with Ctrl-C.
 
-Secure cookies are the default. The local HTTP override requires binding to a loopback address. Outside local development, use an HTTPS reverse proxy and omit the override. CORS is not enabled. This core is not yet the hardened NAS release described in the implementation plan.
+Secure cookies are the default. The local HTTP override requires binding to a loopback address. `FINWISE_ALLOW_INSECURE_HTTP=true` explicitly permits HTTP session cookies on a non-loopback address for a trusted LAN/Tailscale subnet deployment. Otherwise, use an HTTPS reverse proxy. CORS is not enabled. This core is not yet the hardened NAS release described in the implementation plan.
 
 | Environment variable | Default |
 |---|---|
@@ -21,6 +21,7 @@ Secure cookies are the default. The local HTTP override requires binding to a lo
 | `DATABASE_URL` | SQLite file inside the data directory |
 | `FINWISE_WEB_DIR` | `web` |
 | `FINWISE_INSECURE_LOCAL_COOKIES` | `false` |
+| `FINWISE_ALLOW_INSECURE_HTTP` | `false` |
 | `FINWISE_UPLOAD_FILE_MAX_BYTES` | `8388608` (8 MiB; clamped to 1 KiB–32 MiB) |
 
 Container deployment instructions are in [deploy/README.md](../deploy/README.md). The server handles SIGINT and SIGTERM for graceful shutdown.

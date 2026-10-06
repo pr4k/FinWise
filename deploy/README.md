@@ -7,23 +7,30 @@ docker compose -f deploy/compose.yaml up --build -d
 curl --fail http://127.0.0.1:3000/health/ready
 ```
 
-Compose publishes to host loopback by default. To let a reverse proxy on another machine reach the NAS, create or edit the ignored `.env` file in the repository root and set `FINWISE_PUBLISH_IP` to the NAS's LAN address (for example, `192.168.1.194`). `FINWISE_PUBLISH_PORT` optionally changes the host port from 3000. Pass `--env-file .env` explicitly when running Compose from the repository root: with the Compose file under `deploy/`, automatic `.env` discovery may look there instead. These settings change only the host port mapping; the container still listens on port 3000. Do not set `FINWISE_INSECURE_LOCAL_COOKIES=true` inside the container. If you previously edited `deploy/compose.yaml` on the NAS to expose the port, move that address into `.env` and remove the local Compose edit before pulling updates; otherwise Git may reject the pull.
+Compose publishes to host loopback by default. Create or edit the ignored `.env` file in the repository root to configure the NAS address. For direct HTTP access through a trusted LAN or Tailscale subnet route, use:
+
+```sh
+FINWISE_PUBLISH_IP=192.168.1.194
+FINWISE_ALLOW_INSECURE_HTTP=true
+```
+
+`FINWISE_PUBLISH_PORT` optionally changes the host port from 3000. Pass `--env-file .env` explicitly when running Compose from the repository root: with the Compose file under `deploy/`, automatic `.env` discovery may look there instead. `FINWISE_PUBLISH_IP` changes only the host port mapping; the container still listens on port 3000. `FINWISE_ALLOW_INSECURE_HTTP=true` makes session cookies work over direct HTTP. Do not set `FINWISE_INSECURE_LOCAL_COOKIES=true` inside the container. If you previously edited `deploy/compose.yaml` on the NAS to expose the port, move that address into `.env` and remove the local Compose edit before pulling updates; otherwise Git may reject the pull.
 
 To apply the NAS address now:
 
 ```sh
-sudo docker compose --env-file .env -f deploy/compose.yaml up -d
+sudo docker compose --env-file .env -f deploy/compose.yaml up --build -d
 sudo docker compose --env-file .env -f deploy/compose.yaml ps
 ```
 
-Place an HTTPS reverse proxy in front of the published port for browser use. The container uses secure session cookies; direct plain-HTTP authentication is unsupported. Opening `http://<NAS-IP>:3000` through a Tailscale subnet route is still an HTTP page to the browser, so household setup and sign-in require an HTTPS URL. For HTTP development, run the native command in `backend/README.md`. CORS remains disabled.
+With `FINWISE_ALLOW_INSECURE_HTTP=true`, open `http://192.168.1.194:3000` from your LAN or through your Tailscale subnet route. Keep the NAS port off the public internet. HTTP traffic on the LAN segment between a separate Tailscale subnet router and TrueNAS is unencrypted, and browsers will not mark the page as secure. If you prefer HTTPS, leave `FINWISE_ALLOW_INSECURE_HTTP` unset and put an HTTPS reverse proxy in front of the published port. For local HTTP development, run the native command in `backend/README.md`. CORS remains disabled.
 
 ## Updating a shell-managed NAS installation
 
 After new commits have been pushed to the public repository, run this single command from the repository root on the NAS:
 
 ```sh
-./deploy/update.sh
+bash deploy/update.sh
 ```
 
 The NAS checkout must be on `main` with no local changes. On the NAS, make the public repository's Git remote HTTPS once so the script can pull without a GitHub SSH key:

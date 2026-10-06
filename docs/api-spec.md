@@ -44,7 +44,7 @@ Status: target implementation contract, 2026-09-30. A Rust/Axum core now impleme
 
 | Method and path | Purpose / request | Success |
 |---|---|---|
-| `GET /auth/bootstrap-status` | Check whether the one-time setup is still available. | `200 {"required":true}` |
+| `GET /auth/bootstrap-status` | Check whether the one-time setup is still available and whether this deployment requires HTTPS. | `200 {"required":true,"requires_https":true}` |
 | `POST /auth/bootstrap` | Create the first owner and household. One-time, rate-limited, idempotent. Body: owner name/email/password, household name/timezone/base currency. | `201 {"user":...,"household":...,"csrf_token":"..."}` + session cookie |
 | `POST /auth/login` | Email/password. Rotate cookie and CSRF token. | `200 {"user":...,"household":...,"csrf_token":"..."}` |
 | `POST /auth/logout` | Revoke current session. CSRF required. | `204` |

@@ -490,6 +490,49 @@ async fn setup() -> (Client, sqlx::SqlitePool) {
     client.csrf = body["csrf_token"].as_str().unwrap().into();
     (client, pool)
 }
+
+#[tokio::test]
+async fn opted_in_http_bootstrap_uses_a_non_secure_session_cookie() {
+    let pool = connect("sqlite::memory:").await.unwrap();
+    let mut client = Client {
+        app: router(
+            AppState {
+                pool,
+                secure_cookies: false,
+            },
+            Path::new("../web"),
+        ),
+        cookie: String::new(),
+        csrf: String::new(),
+    };
+    let (status, mode, _) = client
+        .call("GET", "auth/bootstrap-status", json!({}), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(mode["required"], true);
+    assert_eq!(mode["requires_https"], false);
+
+    let (status, body, headers) = client
+        .call(
+            "POST",
+            "auth/bootstrap",
+            setup_body(),
+            Some("http-bootstrap"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let cookie = headers["set-cookie"].to_str().unwrap();
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Lax"));
+    assert!(!cookie.contains("; Secure"));
+    client.cookie = cookie.split(';').next().unwrap().into();
+    client.csrf = body["csrf_token"].as_str().unwrap().into();
+    assert_eq!(
+        client.call("GET", "me", json!({}), None, None).await.0,
+        StatusCode::OK
+    );
+}
 fn transaction(kind: &str, amount: &str, account: &Value, category: &Value, scope: &str) -> Value {
     json!({"event_type":kind,"amount":amount,"currency":"INR","effective_date":"2026-09-15","description":"Synthetic entry","allocations":[{"category_id":category["id"],"amount":amount,"scope":scope}],"movements":[{"account_id":account["id"],"amount":if kind=="expense"{format!("-{amount}")}else{amount.to_owned()}}]})
 }
@@ -497,13 +540,12 @@ fn transaction(kind: &str, amount: &str, account: &Value, category: &Value, scop
 #[tokio::test]
 async fn authentication_rotation_csrf_and_error_contract() {
     let (client, pool) = setup().await;
-    assert_eq!(
-        client
-            .call("GET", "auth/bootstrap-status", json!({}), None, None)
-            .await
-            .1["required"],
-        false
-    );
+    let bootstrap_status = client
+        .call("GET", "auth/bootstrap-status", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(bootstrap_status["required"], false);
+    assert_eq!(bootstrap_status["requires_https"], true);
     assert_eq!(
         client
             .call(

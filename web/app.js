@@ -94,12 +94,12 @@ async function signedIn() {
 }
 async function start() {
   const localHttp=location.protocol==='http:' && ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
-  if(location.protocol!=='https:' && !localHttp) {
+  try { const status=await api.request('auth/bootstrap-status'); if(location.protocol!=='https:' && !localHttp && status.requires_https) {
     shell.hidden=true;authRoot.hidden=false;
-    authRoot.innerHTML='<section class="panel auth-card"><h1>Open FinWise over HTTPS</h1><p>Household setup and sign-in need a secure address. Use a Tailscale Serve HTTPS address or an HTTPS reverse proxy, then reload this page.</p></section>';
+    authRoot.innerHTML='<section class="panel auth-card"><h1>Open FinWise over HTTPS</h1><p>This server requires an HTTPS address for household setup and sign-in. Ask the server administrator to enable trusted HTTP access or configure HTTPS, then reload this page.</p></section>';
     return;
   }
-  try { const status=await api.request('auth/bootstrap-status'); if(status.required) authForm(true); else if(location.hash.startsWith('#join/')) await inviteView(); else { try { await signedIn(); } catch(e) { if(e.status===401) authForm(); else throw e; } } }
+    if(status.required) authForm(true); else if(location.hash.startsWith('#join/')) await inviteView(); else { try { await signedIn(); } catch(e) { if(e.status===401) authForm(); else throw e; } } }
   catch(e) { authRoot.innerHTML='<section class="panel auth-card"><h1>FinWise is unavailable</h1><p>Start the application with <code>./run.sh</code>, then reload this page.</p><button class="primary-button" onclick="location.reload()">Retry connection</button></section>'; failure(e,authRoot); }
 }
 function resetSession() { state.generation++; state.me=null; state.accounts=[]; state.categories=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); root.replaceChildren(); authForm(); }

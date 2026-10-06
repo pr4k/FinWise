@@ -161,7 +161,7 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
         let count: i64 = sqlx::query_scalar("SELECT count(*) FROM households")
             .fetch_one(&state.pool)
             .await?;
-        return ok(json!({"required":count==0}));
+        return ok(json!({"required":count==0,"requires_https":state.secure_cookies}));
     }
     if method == "GET" && path == "openapi.json" {
         return ok(openapi());
