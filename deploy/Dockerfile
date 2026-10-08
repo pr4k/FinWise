@@ -16,5 +16,6 @@ ENV FINWISE_BIND=0.0.0.0:3000 FINWISE_DATA_DIR=/data FINWISE_WEB_DIR=/app/web
 USER finwise
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl --fail --silent http://127.0.0.1:3000/health/ready || exit 1
+    CMD curl --fail --silent http://127.0.0.1:3000/health/ready > /dev/null \
+    && curl --fail --silent http://127.0.0.1:3000/ > /dev/null || exit 1
 ENTRYPOINT ["finwise-api"]

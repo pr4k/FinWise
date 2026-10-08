@@ -6,9 +6,9 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "${FINWISE_PUBLISH_IP:-127.0.0.1}:${FINWISE_PUBLISH_PORT:-3000}:3000"
+      - "${FINWISE_PUBLISH_IP:-0.0.0.0}:${FINWISE_PUBLISH_PORT:-3000}:3000"
     environment:
-      FINWISE_ALLOW_INSECURE_HTTP: ${FINWISE_ALLOW_INSECURE_HTTP:-false}
+      FINWISE_ALLOW_INSECURE_HTTP: ${FINWISE_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - finwise-data:/data
     read_only: true

@@ -1,38 +1,35 @@
 # Container deployment
 
-From the repository root:
+From the repository root on TrueNAS:
 
 ```sh
-docker compose -f deploy/compose.yaml up --build -d
+test -f .env || cp .env.example .env
+sudo docker compose --env-file .env -f deploy/compose.yaml up --build -d
+sudo docker compose --env-file .env -f deploy/compose.yaml ps
 curl --fail http://127.0.0.1:3000/health/ready
 ```
 
-Compose publishes to host loopback by default. Create or edit the ignored `.env` file in the repository root to configure the NAS address. For direct HTTP access through a trusted LAN or Tailscale subnet route, use:
+Compose publishes `0.0.0.0:3000` and allows HTTP sign-in by default. Open `http://<TrueNAS-Tailscale-IP>:3000` when Tailscale runs on TrueNAS. If you use a Tailscale subnet router, open `http://<TrueNAS-LAN-IP>:3000` through that route. Use the IP address with `http://`. Keep port 3000 off the public internet.
+
+To limit the published port to one TrueNAS interface, set `FINWISE_PUBLISH_IP` in the repository root `.env` and rerun the `up` command. Use the TrueNAS Tailscale IP when Tailscale runs on TrueNAS, or its LAN IP for a subnet route:
 
 ```sh
-FINWISE_PUBLISH_IP=192.168.1.194
-FINWISE_ALLOW_INSECURE_HTTP=true
+FINWISE_PUBLISH_IP=100.x.y.z
 ```
 
-`FINWISE_PUBLISH_PORT` optionally changes the host port from 3000. Pass `--env-file .env` explicitly when running Compose from the repository root: with the Compose file under `deploy/`, automatic `.env` discovery may look there instead. `FINWISE_PUBLISH_IP` changes only the host port mapping; the container still listens on port 3000. `FINWISE_ALLOW_INSECURE_HTTP=true` makes session cookies work over direct HTTP. Do not set `FINWISE_INSECURE_LOCAL_COOKIES=true` inside the container. If you previously edited `deploy/compose.yaml` on the NAS to expose the port, move that address into `.env` and remove the local Compose edit before pulling updates; otherwise Git may reject the pull.
+`FINWISE_PUBLISH_PORT` optionally changes the host port from 3000. Pass `--env-file .env` explicitly so Compose reads the repository root configuration. Check an existing `.env` for `FINWISE_PUBLISH_IP`, `FINWISE_PUBLISH_PORT`, or `FINWISE_ALLOW_INSECURE_HTTP` values that override these defaults. `FINWISE_PUBLISH_IP` changes only the host port mapping; the container still listens on port 3000. Compose passes `FINWISE_ALLOW_INSECURE_HTTP=true` to the container by default, allowing session cookies over direct HTTP. `FINWISE_INSECURE_LOCAL_COOKIES` in `.env` is for `./run.sh` and is not passed to the container. If you previously edited `deploy/compose.yaml` on the NAS, move those settings into `.env` and remove the local Compose edit before pulling updates; otherwise Git may reject the pull.
 
-To apply the NAS address now:
-
-```sh
-sudo docker compose --env-file .env -f deploy/compose.yaml up --build -d
-sudo docker compose --env-file .env -f deploy/compose.yaml ps
-```
-
-With `FINWISE_ALLOW_INSECURE_HTTP=true`, open `http://192.168.1.194:3000` from your LAN or through your Tailscale subnet route. Keep the NAS port off the public internet. HTTP traffic on the LAN segment between a separate Tailscale subnet router and TrueNAS is unencrypted, and browsers will not mark the page as secure. If you prefer HTTPS, leave `FINWISE_ALLOW_INSECURE_HTTP` unset and put an HTTPS reverse proxy in front of the published port. For local HTTP development, run the native command in `backend/README.md`. CORS remains disabled.
+HTTP traffic on the LAN segment between a separate Tailscale subnet router and TrueNAS is unencrypted. Browsers will not mark the page as secure. If you later put an HTTPS reverse proxy in front, set `FINWISE_ALLOW_INSECURE_HTTP=false`. For local HTTP development, run the native command in `backend/README.md`. CORS remains disabled.
 
 If the page stays at **Connecting to FinWise…**, reload it without the browser cache, then check the API from the NAS:
 
 ```sh
-curl -i http://192.168.1.194:3000/api/v1/auth/bootstrap-status
+curl -i http://127.0.0.1:3000/api/v1/auth/bootstrap-status
 sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise printenv FINWISE_ALLOW_INSECURE_HTTP
+sudo docker compose --env-file .env -f deploy/compose.yaml port finwise 3000
 ```
 
-The API should return JSON with `"requires_https":false` when HTTP mode is enabled. If the request hangs or fails, check `sudo docker compose --env-file .env -f deploy/compose.yaml logs --tail=100 finwise`. If the API responds but the page still does not advance, open the browser developer console and check for failed JavaScript requests or errors.
+The API should return JSON with `"requires_https":false`. The `port` command should show the NAS address and port 3000. Test `http://<TrueNAS-Tailscale-IP>:3000/health/ready` from a Tailscale device. If the local check works but the remote check fails, verify the TrueNAS firewall and Tailscale routing/ACLs. If the local check fails, check `sudo docker compose --env-file .env -f deploy/compose.yaml logs --tail=100 finwise`. If the API responds but the page still does not advance, reload without the browser cache and check the browser developer console.
 
 ## Updating a shell-managed NAS installation
 
