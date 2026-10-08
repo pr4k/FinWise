@@ -80,9 +80,6 @@ pub async fn project(
     let mut projected = opening
         .map(|v| money(text(v, "amount")?, currency))
         .transpose()?;
-    if opening_at.is_some_and(|v| v > cutoff) {
-        projected = None;
-    }
     // Ledger movements use asset signs; card values are displayed as positive debt.
     if account["subtype"] == "credit_card" {
         projected = projected
@@ -96,7 +93,13 @@ pub async fn project(
     let mut net = 0;
     for event in events(db, p, account).await? {
         let at = effective_at(&event, tz)?;
-        if at > cutoff || opening_at.is_some_and(|v| at < v) {
+        let direction = match opening_at {
+            Some(anchor) if cutoff < anchor && cutoff < at && at <= anchor => -1,
+            Some(anchor) if anchor < at && at <= cutoff => 1,
+            None if at <= cutoff => 1,
+            _ => 0,
+        };
+        if direction == 0 {
             continue;
         }
         snapshot.push(json!({"id":event["id"],"revision":event["revision"]}));
@@ -105,7 +108,13 @@ pub async fn project(
         }
         for movement in event["movements"].as_array().unwrap() {
             if movement["account_id"] == account["id"] {
-                net = add(net, money(text(movement, "amount")?, currency)?)?;
+                let delta = money(text(movement, "amount")?, currency)?;
+                net = add(
+                    net,
+                    delta
+                        .checked_mul(direction)
+                        .ok_or_else(|| ApiError::invalid("Balance out of range."))?,
+                )?;
             }
         }
     }
@@ -162,7 +171,9 @@ pub async fn derived(
             if opening_at.is_some_and(|opening| opening <= cutoff) {
                 None
             } else {
-                anchors.first()
+                anchors
+                    .iter()
+                    .find(|(at, _)| *at > cutoff && opening_at.is_none_or(|opening| *at < opening))
             }
         });
     if let Some((anchor_at, check)) = selected {
@@ -291,21 +302,18 @@ pub async fn ledger(
             .checked_sub(before_group)
             .ok_or_else(|| ApiError::invalid("Balance out of range."))?;
         let computed_from_start = if let (Some(opening), Some(opening_at)) = (opening, opening_at) {
-            if opening_at <= at {
-                let before_opening = *prefixes
-                    .range(..opening_at)
-                    .next_back()
-                    .map(|(_, v)| v)
-                    .unwrap_or(&0);
-                Some(signed(add(
-                    signed(money(text(opening, "amount")?, currency)?)?,
-                    prefix
-                        .checked_sub(before_opening)
-                        .ok_or_else(|| ApiError::invalid("Balance out of range."))?,
-                )?)?)
-            } else {
-                None
-            }
+            let baseline = *prefixes
+                .range(..=opening_at)
+                .next_back()
+                .map(|(_, v)| v)
+                .unwrap_or(&0);
+            let delta = prefix
+                .checked_sub(baseline)
+                .ok_or_else(|| ApiError::invalid("Balance out of range."))?;
+            Some(signed(add(
+                signed(money(text(opening, "amount")?, currency)?)?,
+                delta,
+            )?)?)
         } else {
             None
         };
@@ -319,7 +327,9 @@ pub async fn ledger(
                 if opening_at.is_some_and(|opening| opening <= at) {
                     None
                 } else {
-                    anchors.first()
+                    anchors.iter().find(|(check_at, _)| {
+                        *check_at > at && opening_at.is_none_or(|opening| *check_at < opening)
+                    })
                 }
             });
         let (value, source, anchor_at) = if let Some((check_at, check)) = check {
@@ -339,27 +349,12 @@ pub async fn ledger(
                 "balance_check",
                 Some(check_at.to_rfc3339()),
             )
-        } else if let (Some(opening), Some(opening_at)) = (opening, opening_at) {
-            if opening_at <= at {
-                let baseline = *prefixes
-                    .range(..opening_at)
-                    .next_back()
-                    .map(|(_, v)| v)
-                    .unwrap_or(&0);
-                let delta = prefix
-                    .checked_sub(baseline)
-                    .ok_or_else(|| ApiError::invalid("Balance out of range."))?;
-                (
-                    Some(signed(add(
-                        signed(money(text(opening, "amount")?, currency)?)?,
-                        delta,
-                    )?)?),
-                    "opening_balance",
-                    Some(opening_at.to_rfc3339()),
-                )
-            } else {
-                (None, "unknown", Some(opening_at.to_rfc3339()))
-            }
+        } else if let Some(opening_at) = opening_at {
+            (
+                computed_from_start,
+                "opening_balance",
+                Some(opening_at.to_rfc3339()),
+            )
         } else {
             (None, "unknown", None)
         };

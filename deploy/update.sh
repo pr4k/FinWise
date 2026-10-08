@@ -103,6 +103,9 @@ for ((attempt = 0; attempt < 45; attempt++)); do
 done
 
 echo "FinWise did not become healthy. Backup: $backup_file" >&2
+if [[ -n "$container_id" ]]; then
+    sudo docker inspect --format '{{range .State.Health.Log}}{{println .ExitCode .Output}}{{end}}' "$container_id" >&2 || true
+fi
 "${compose[@]}" logs --tail=100 finwise >&2
 exit 1
 }

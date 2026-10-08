@@ -6,7 +6,7 @@ From the repository root on TrueNAS:
 test -f .env || cp .env.example .env
 sudo docker compose --env-file .env -f deploy/compose.yaml up --build -d
 sudo docker compose --env-file .env -f deploy/compose.yaml ps
-curl --fail http://127.0.0.1:3000/health/ready
+sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise curl --fail http://127.0.0.1:3000/health/ready
 ```
 
 Compose publishes `0.0.0.0:3000` and allows HTTP sign-in by default. Open `http://<TrueNAS-Tailscale-IP>:3000` when Tailscale runs on TrueNAS. If you use a Tailscale subnet router, open `http://<TrueNAS-LAN-IP>:3000` through that route. Use the IP address with `http://`. Keep port 3000 off the public internet.
@@ -24,12 +24,12 @@ HTTP traffic on the LAN segment between a separate Tailscale subnet router and T
 If the page stays at **Connecting to FinWise…**, reload it without the browser cache, then check the API from the NAS:
 
 ```sh
-curl -i http://127.0.0.1:3000/api/v1/auth/bootstrap-status
+sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise curl -i http://127.0.0.1:3000/api/v1/auth/bootstrap-status
 sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise printenv FINWISE_ALLOW_INSECURE_HTTP
 sudo docker compose --env-file .env -f deploy/compose.yaml port finwise 3000
 ```
 
-The API should return JSON with `"requires_https":false`. The `port` command should show the NAS address and port 3000. Test `http://<TrueNAS-Tailscale-IP>:3000/health/ready` from a Tailscale device. If the local check works but the remote check fails, verify the TrueNAS firewall and Tailscale routing/ACLs. If the local check fails, check `sudo docker compose --env-file .env -f deploy/compose.yaml logs --tail=100 finwise`. If the API responds but the page still does not advance, reload without the browser cache and check the browser developer console.
+The API should return JSON with `"requires_https":false`. The `port` command should show the NAS address and port 3000. Test `http://<TrueNAS-Tailscale-IP>:3000/health/ready` from a Tailscale device. If the local check works but the remote check fails, verify the TrueNAS firewall and Tailscale routing/ACLs. If the local check fails, check `sudo docker compose --env-file .env -f deploy/compose.yaml logs --tail=100 finwise`. If the API works but `/` returns 404 and the container is unhealthy, check that `/app/web/index.html` is readable by the `finwise` user inside the container. The image sets ownership during build; rebuild it after pulling this change. If the API responds but the page still does not advance, reload without the browser cache and check the browser developer console.
 
 ## Updating a shell-managed NAS installation
 

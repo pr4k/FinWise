@@ -1315,6 +1315,65 @@ async fn persistent_database_reopens_and_migrations_are_repeatable() {
 }
 
 #[tokio::test]
+async fn known_balance_today_projects_backward_across_earlier_activity() {
+    let (client, _) = setup().await;
+    let food = client.category("Food", "expense").await;
+    for (subtype, today, expected_before, expected_after) in [
+        ("bank", "700.00", "1000.00", "900.00"),
+        ("credit_card", "700.00", "400.00", "500.00"),
+    ] {
+        let account = client.create("accounts", json!({"name":subtype,"subtype":subtype,"currency":"INR","timezone":"Asia/Kolkata","opening_balance":{"amount":today,"as_of":"2026-09-30T23:59:00+05:30"}})).await;
+        for (amount, at) in [
+            ("100.00", "2026-09-15T10:00:00+05:30"),
+            ("200.00", "2026-09-20T10:00:00+05:30"),
+        ] {
+            let mut event = transaction("expense", amount, &account, &food, "personal");
+            event["effective_at"] = json!(at);
+            event["effective_date"] = json!(&at[..10]);
+            client.create("transactions", event).await;
+        }
+        let id = account["id"].as_str().unwrap();
+        let balance = |date: &str| format!("accounts/{id}/balance-at?as_of={date}");
+        let before = client
+            .call(
+                "GET",
+                &balance("2026-09-14T12%3A00%3A00%2B05%3A30"),
+                json!({}),
+                None,
+                None,
+            )
+            .await;
+        let after = client
+            .call(
+                "GET",
+                &balance("2026-09-15T12%3A00%3A00%2B05%3A30"),
+                json!({}),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(before.1["amount"], expected_before);
+        assert_eq!(after.1["amount"], expected_after);
+        assert_eq!(before.1["source"], "opening_balance");
+        let ledger = client
+            .call(
+                "GET",
+                &format!("accounts/{id}/ledger"),
+                json!({}),
+                None,
+                None,
+            )
+            .await
+            .1;
+        let rows = ledger["data"].as_array().unwrap();
+        assert!(rows.iter().any(|r| r["transaction_id"].is_string()
+            && r["effective_date"] == "2026-09-15"
+            && r["balance_after"] == expected_after
+            && r["computed_from_start"] == expected_after));
+    }
+}
+
+#[tokio::test]
 async fn balance_checks_use_exact_cutoffs_and_preserve_stale_snapshots() {
     let (client, _) = setup().await;
     let bank=client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","timezone":"Asia/Kolkata","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
@@ -1393,7 +1452,7 @@ async fn starting_balance_and_manual_checks_can_be_corrected_and_removed() {
     );
     assert!(rows.iter().any(|r| r["transaction_id"].is_string()
         && r["effective_date"] == "2026-09-15"
-        && r["computed_from_start"].is_null()));
+        && r["computed_from_start"] == "1000.00"));
     let opening = client
         .call(
             "PATCH",

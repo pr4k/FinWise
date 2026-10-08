@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && mkdir -p /data && chown finwise:finwise /data
 WORKDIR /app
 COPY --from=builder /build/target/release/finwise-api /usr/local/bin/finwise-api
-COPY web /app/web
+COPY --chown=finwise:finwise web /app/web
 ENV FINWISE_BIND=0.0.0.0:3000 FINWISE_DATA_DIR=/data FINWISE_WEB_DIR=/app/web
 USER finwise
 EXPOSE 3000
