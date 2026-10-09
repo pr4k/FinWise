@@ -1,0 +1,42 @@
+name: finwise-ai-service
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NO_CLOUD: "1"
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    environment:
+      AI_SERVICE_OLLAMA_URL: http://ollama:11434
+      AI_SERVICE_MODEL: ${AI_SERVICE_MODEL:-qwen2.5:3b}
+      AI_SERVICE_MAPPING_PATH: /data/vendor_mapping.json
+      AI_SERVICE_CATEGORIES_PATH: /app/categories.json
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ai_mapping:/data
+      - ./categories.json:/app/categories.json:ro
+
+volumes:
+  ollama_models:
+  ai_mapping:

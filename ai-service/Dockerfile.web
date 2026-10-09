@@ -1,0 +1,5 @@
+FROM python:3.14-slim
+WORKDIR /app
+COPY ai_service.py categories.py xlsx_reader.py web_server.py index.html app.css model.css app.js ./
+EXPOSE 8765
+CMD ["python", "web_server.py", "--host", "0.0.0.0"]

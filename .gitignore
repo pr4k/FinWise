@@ -25,6 +25,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+/ai-service/vendor_mapping.json
+/ai-service/categories.json
+/ai-service/output/
 
 # Browser test output
 playwright-report/

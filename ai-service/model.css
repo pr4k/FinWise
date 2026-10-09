@@ -1,0 +1,10 @@
+.field-grid label:first-child { grid-column: auto; }
+.secondary-button { border: 1px solid #b7d5c0; background: #f0f8ef; color: #286949; border-radius: 9px; padding: 9px 14px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; margin-bottom: 14px; }
+.secondary-button:hover { background: #e5f3e6; }
+.secondary-button:disabled { opacity: .6; cursor: wait; }
+@media (max-width: 600px) { .field-grid label:first-child { grid-column: auto; } }
+ .category-list{margin:-5px 0 17px;font-size:12px;color:#496654}
+ .category-list summary{cursor:pointer;font-weight:700}
+ .category-list #category-list{max-height:180px;overflow:auto;border:1px solid #e1e9e2;border-radius:9px;padding:8px 12px;margin-top:8px;background:#fbfdfb}
+ .category-list #category-list div{padding:5px 0;border-bottom:1px solid #edf1ed;overflow-wrap:anywhere}
+ .category-list #category-list div:last-child{border-bottom:0}
