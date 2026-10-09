@@ -1,8 +1,12 @@
 use finwise_api::{AppState, connect, router};
-use std::{net::SocketAddr, path::PathBuf};
+use std::{io::BufRead, net::SocketAddr, path::PathBuf};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() && (args.len() != 2 || args[0] != "--reset-password") {
+        return Err("Usage: finwise-api --reset-password EMAIL (new password on stdin)".into());
+    }
     let data = PathBuf::from(std::env::var("FINWISE_DATA_DIR").unwrap_or_else(|_| "data".into()));
     tokio::fs::create_dir_all(&data).await?;
     let url = std::env::var("DATABASE_URL")
@@ -16,6 +20,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Insecure cookies require a loopback bind address".into());
     }
     let secure_cookies = !(insecure_local || allow_insecure_http);
+    if !args.is_empty() {
+        let pool = finwise_api::recovery::connect_existing(&url).await?;
+        let mut password = String::new();
+        std::io::stdin().lock().read_line(&mut password)?;
+        let password = password.trim_end_matches(['\r', '\n']);
+        if finwise_api::recovery::reset_password(&pool, &args[1], password).await? {
+            println!("Password reset; existing sessions revoked.");
+        } else {
+            return Err("No active account has that email address.".into());
+        }
+        return Ok(());
+    }
     let pool = connect(&url).await?;
     let web = PathBuf::from(std::env::var("FINWISE_WEB_DIR").unwrap_or_else(|_| "web".into()));
     let listener = tokio::net::TcpListener::bind(address).await?;

@@ -11,6 +11,16 @@ sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise curl --f
 
 Compose publishes `0.0.0.0:3000` and allows HTTP sign-in by default. Open `http://<TrueNAS-Tailscale-IP>:3000` when Tailscale runs on TrueNAS. If you use a Tailscale subnet router, open `http://<TrueNAS-LAN-IP>:3000` through that route. Use the IP address with `http://`. Keep port 3000 off the public internet.
 
+If an existing account cannot sign in, an administrator with NAS shell access can reset its password after deploying a build that includes the recovery command. From the repository root, run `sudo -v` first, then:
+
+```sh
+read -rsp 'New FinWise password: ' finwise_new_password; printf '\n'
+printf '%s\n' "$finwise_new_password" | sudo -n docker compose --env-file .env -f deploy/compose.yaml exec -T finwise finwise-api --reset-password 'ACCOUNT_EMAIL'
+unset finwise_new_password
+```
+
+Replace `ACCOUNT_EMAIL` with the registered email. The password must be at least 12 bytes. The command updates that account's password, revokes its sessions, and clears its login-attempt limit. It records a console-reset audit event and does not print the password. The audit schema does not store which NAS administrator ran the command.
+
 To limit the published port to one TrueNAS interface, set `FINWISE_PUBLISH_IP` in the repository root `.env` and rerun the `up` command. Use the TrueNAS Tailscale IP when Tailscale runs on TrueNAS, or its LAN IP for a subnet route:
 
 ```sh

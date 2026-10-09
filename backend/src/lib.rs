@@ -3,6 +3,7 @@ pub mod auth;
 pub mod balances;
 pub mod domain;
 pub mod error;
+pub mod recovery;
 pub mod recurring;
 pub mod reset;
 pub mod storage;
