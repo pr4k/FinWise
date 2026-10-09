@@ -6,6 +6,7 @@ use crate::{
 use chrono::Utc;
 use serde_json::{Value, json};
 use sqlx::{Row, SqliteConnection};
+use std::collections::HashMap;
 
 pub fn id() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -112,11 +113,21 @@ pub async fn list(db: &mut SqliteConnection, p: &Principal, kind: &str) -> Resul
             .bind(kind)
             .fetch_all(&mut *db)
             .await?;
+    let account_visibility = if kind == "transactions" {
+        Some(visible_accounts(db, p).await?)
+    } else {
+        None
+    };
     let mut result = Vec::new();
     for row in rows {
         let mut value: Value = serde_json::from_str(row.get::<&str, _>(0))
             .map_err(|_| ApiError::invalid("Invalid stored document."))?;
-        if visible(db, p, kind, &value).await? {
+        let permitted = if let Some(accounts) = &account_visibility {
+            transaction_visible(&value, accounts)?
+        } else {
+            visible(db, p, kind, &value).await?
+        };
+        if permitted {
             if kind == "transactions" {
                 attach_sources(db, p, &mut value).await?;
                 crate::reconciliation::decorate_transaction(db, &mut value).await?;
@@ -135,11 +146,12 @@ pub async fn transactions_in_period(
 ) -> Result<Vec<Value>> {
     let rows = sqlx::query("SELECT document FROM resources WHERE household_id=? AND kind='transactions' AND json_extract(document,'$.effective_date')>=? AND json_extract(document,'$.effective_date')<?")
         .bind(&p.household_id).bind(from).bind(to).fetch_all(&mut *db).await?;
+    let accounts = visible_accounts(db, p).await?;
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
         let mut value: Value = serde_json::from_str(row.get::<&str, _>(0))
             .map_err(|_| ApiError::invalid("Invalid stored document."))?;
-        if visible(db, p, "transactions", &value).await? {
+        if transaction_visible(&value, &accounts)? {
             if decorate {
                 attach_sources(db, p, &mut value).await?;
                 crate::reconciliation::decorate_transaction(db, &mut value).await?;
@@ -148,6 +160,39 @@ pub async fn transactions_in_period(
         }
     }
     Ok(result)
+}
+
+async fn visible_accounts(
+    db: &mut SqliteConnection,
+    p: &Principal,
+) -> Result<HashMap<String, bool>> {
+    let rows = sqlx::query("SELECT r.id,r.document,a.account_id FROM resources r LEFT JOIN account_access a ON a.account_id=r.id AND a.member_id=? WHERE r.household_id=? AND r.kind='accounts'")
+        .bind(&p.member_id).bind(&p.household_id).fetch_all(db).await?;
+    let mut accounts = HashMap::with_capacity(rows.len());
+    for row in rows {
+        let document: Value = serde_json::from_str(row.get::<&str, _>(1))
+            .map_err(|_| ApiError::invalid("Invalid stored document."))?;
+        accounts.insert(
+            row.get::<String, _>(0),
+            document["owner_id"] == p.user_id
+                || document["visibility"] == "shared"
+                || row.get::<Option<String>, _>(2).is_some(),
+        );
+    }
+    Ok(accounts)
+}
+
+fn transaction_visible(value: &Value, accounts: &HashMap<String, bool>) -> Result<bool> {
+    let Some(movements) = value["movements"].as_array() else {
+        return Ok(true);
+    };
+    for movement in movements {
+        let id = text(movement, "account_id")?;
+        if !accounts.get(id).copied().ok_or_else(ApiError::missing)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 pub async fn audit(
     db: &mut SqliteConnection,

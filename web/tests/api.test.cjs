@@ -43,3 +43,18 @@ test('expired session emits an event and surfaces the API error',async()=>{
   await assert.rejects(()=>api.request('accounts'),{message:'Sign in to continue.',status:401});
   assert.deepEqual(api.events,['session-expired']);
 });
+test('catalog reads are reused briefly and a mutation invalidates them',async()=>{
+  const calls=[];
+  const api=client(async(url,options)=>{
+    calls.push({url,method:options.method});
+    return response(options.method==='GET'?{data:[{id:String(calls.length)}],page:{}}:{id:'created'});
+  });
+  api.setCsrf('csrf-test');
+  const first=await api.collection('categories?include_archived=true');
+  const second=await api.collection('categories?include_archived=true');
+  assert.equal(first.data[0].id,second.data[0].id);
+  assert.equal(calls.length,1);
+  await api.request('categories',{method:'POST',body:{name:'Food'}});
+  const third=await api.collection('categories?include_archived=true');
+  assert.equal(third.data[0].id,'3');
+});

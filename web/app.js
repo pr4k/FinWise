@@ -196,6 +196,21 @@ async function renderRoute() {
     if(view==='reconcile') updateMatchComparison();
   } catch(e) { if(generation===state.generation && state.me) { root.innerHTML=heading(labels[view],'Could not load this view.',button('Retry','refresh')); failure(e); } }
 }
+async function loadBulkScopePanel(panel) {
+  if(!panel.open || panel.dataset.loaded || panel.dataset.loading) return;
+  const content=panel.querySelector('#bulk-scope-content');
+  panel.dataset.loading='true';
+  content.innerHTML='<p role="status">Loading eligible transactions…</p>';
+  try {
+    const fullHistory=await api.collection('transactions');
+    if(!panel.isConnected) return;
+    const movable=fullHistory.data.filter(t=>t.voided!==true && t.entered_by===state.me.user.id && t.allocations?.some(a=>a.scope==='personal'));
+    panel.querySelector('summary').textContent=`Move transactions to Family · ${movable.length} eligible`;
+    content.innerHTML=`<p class="helper">Choose transactions from all dates and accounts, then move their allocations to Family. Transfers have no scope. Balances and source records stay the same.</p>${movable.length?`<form id="bulk-scope-form"><label class="confirm-line"><input type="checkbox" id="bulk-scope-all"> Select all ${movable.length} personal transactions</label><div class="table-scroll"><table class="live-table"><thead><tr><th>Select</th><th>Date</th><th>Transaction</th><th>Amount</th></tr></thead><tbody>${movable.map(t=>`<tr><td><input type="checkbox" name="transaction_id" value="${h(t.id)}" aria-label="Select ${h(t.description||'transaction')}"></td><td>${h(t.effective_date)}</td><td>${h(t.description||'Untitled')}</td><td>${amount(t.amount,t.currency)}</td></tr>`).join('')}</tbody></table></div><button type="submit" class="primary-button">Move selected to Family</button></form>`:empty('No personal transactions remain.')}`;
+    panel.dataset.loaded='true';
+  } catch(error) { if(panel.isConnected) failure(error,content); }
+  finally { delete panel.dataset.loading; }
+}
 async function reconciliationComparison(session) {
   const path=`reconciliation/sessions/${id(session.id)}`;
   const [ledger,statement]=await Promise.all([api.collection(`${path}/items?side=ledger`),api.collection(`${path}/items?side=statement`)]);
@@ -415,11 +430,8 @@ const views = {
   },
   async overview() {
     const query=reportQuery();
-    const [summary,transactions,categories,accounts,daily]=await Promise.all([
-      api.request(`analytics/summary?${query}`),api.request(`analytics/transactions?${query}&limit=10`),
-      api.request(`analytics/categories?${query}`),api.request(`analytics/accounts?${query}`),
-      api.request(`analytics/series?${query}&grain=day`)
-    ]);
+    const [dashboard,transactions]=await Promise.all([api.request(`analytics/dashboard?${query}`),api.request(`analytics/transactions?${query}&limit=10`)]);
+    const {summary,categories,accounts,series:daily}=dashboard;
     const currency=state.me.household.base_currency;
     const monthLabel=new Intl.DateTimeFormat('en',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${state.month}-01T00:00:00Z`));
     const surplus=Number(summary.recorded_surplus);
@@ -457,18 +469,17 @@ const views = {
     const [year,month]=state.month.split('-').map(Number);
     const trendFrom=new Date(Date.UTC(year,month-6,1)).toISOString().slice(0,10);
     const trendQuery=new URLSearchParams({from:trendFrom,to:period().to,scope:state.scope,currency:state.me.household.base_currency,grain:'month'});
-    const [summary,categories,incomeCategories,merchants,series,trend,types,accounts,transfers,activity,comparison,comparisonCategories,comparisonSeries,budgetList,investments,obligations,recurring]=await Promise.all([
-      api.request(`analytics/summary?${query}`),api.request(`analytics/categories?${query}`),
-      api.request(`analytics/income-categories?${query}`),
-      api.request(`analytics/merchants?${query}`),api.request(`analytics/series?${query}&grain=day`),
-      api.request(`analytics/series?${trendQuery}`),api.request(`analytics/types?${query}`),
-      api.request(`analytics/accounts?${query}`),api.collection(`analytics/transfers?${query}`),
+    const categoryTrendMonths=Array.from({length:6},(_,index)=>new Date(Date.UTC(year,month-6+index,1)).toISOString().slice(0,7));
+    const categoryTrendReports=Promise.all(categoryTrendMonths.map(month=>month===state.month?Promise.resolve(null):api.request(`analytics/categories?${reportQuery(month)}`)));
+    const [dashboard,trend,transfers,activity,comparison,comparisonCategories,comparisonSeries,budgetList,investments,obligations,recurring,trendCategories]=await Promise.all([
+      api.request(`analytics/dashboard?${query}`),api.request(`analytics/series?${trendQuery}`),api.collection(`analytics/transfers?${query}`),
       api.request(`analytics/transactions?${query}&limit=1`),
       api.request(`analytics/summary?${reportQuery(state.compareMonth)}`),
       api.request(`analytics/categories?${reportQuery(state.compareMonth)}`),
       api.request(`analytics/series?${reportQuery(state.compareMonth)}&grain=day`),
-      api.collection(`budgets?month=${state.month}${state.scope==='combined'?'':`&scope=${state.scope}`}`),state.scope==='family'?Promise.resolve({data:[]}):api.collection('investments'),state.scope==='family'?Promise.resolve({data:[]}):api.collection('settle-ups'),api.request('recurring-transactions')
+      api.collection(`budgets?month=${state.month}${state.scope==='combined'?'':`&scope=${state.scope}`}`),state.scope==='family'?Promise.resolve({data:[]}):api.collection('investments'),state.scope==='family'?Promise.resolve({data:[]}):api.collection('settle-ups'),api.request('recurring-transactions'),categoryTrendReports
     ]);
+    const {summary,categories,'income-categories':incomeCategories,merchants,series,types,accounts}=dashboard;
     const categoryBars=(rows,kind)=>{
       const rolled=categoryView.rollup(rows,state.categories);
       const roots=categoryView.ordered(state.categories,kind).filter(({category})=>rolled.has(category.id));
@@ -508,7 +519,7 @@ const views = {
       {name:'Net spending',color:'#b83e4c',values:trend.data.map(row=>row.net_spending)},
       {name:'Recorded surplus',values:trend.data.map(row=>row.recorded_surplus),dashed:true}
     ],currency,'Monthly recorded income, net spending and surplus');
-    const categoryMonths=await Promise.all(trendMonths.map(month=>month===state.month?Promise.resolve(categories):api.request(`analytics/categories?${reportQuery(month)}`)));
+    const categoryMonths=trendMonths.map(month=>month===state.month?categories:trendCategories[categoryTrendMonths.indexOf(month)]);
     const categoryRollups=categoryMonths.map(response=>categoryView.rollup(response.data,state.categories));
     const rootCategories=categoryView.ordered(state.categories,'expense').filter(({category,depth})=>depth===0).map(({category})=>({id:category.id,name:category.name}));
     rootCategories.push({id:'uncategorized',name:'Uncategorized'});
@@ -564,15 +575,14 @@ const views = {
       state.transactionFilters.account=''; saveView();
     }
     const filters=state.transactionFilters;
-    const [values,fullHistory]=await Promise.all([api.collection(viewState.transactionsPath(state.month,!allDates,filters,state.scope)),api.collection('transactions')]);
+    const values=await api.collection(viewState.transactionsPath(state.month,!allDates,filters,state.scope));
     const eventAccounts=state.accounts.filter(a=>(!filters.account || a.id===filters.account) && (!filters.accountType || a.subtype===filters.accountType));
     const ledgers=await loadLedgerBalances(values.data,allDates,eventAccounts.map(a=>a.id));
     const balanceEvents=eventAccounts.flatMap(account=>(ledgers.get(account.id)||[]).filter(row=>['opening_balance','balance_check'].includes(row.event_type)).map(row=>({account,row})));
     const picker=`<div class="ledger-filters" role="group" aria-label="Filter transactions">${field('Account',`<select id="transaction-filter-account">${option('','All accounts',!filters.account)}${state.accounts.map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===filters.account)).join('')}</select>`)}${field('Account type',`<select id="transaction-filter-account-type">${option('','All types',!filters.accountType)}${['bank','credit_card','cash','settle_up'].map(v=>option(v,v.replace('_',' '),v===filters.accountType)).join('')}</select>`)}${field('Transaction type',`<select id="transaction-filter-event-type">${option('','All types',!filters.eventType)}${['expense','income','refund','transfer'].map(v=>option(v,v,v===filters.eventType)).join('')}</select>`)}${button('Clear filters','clear-transaction-filters')}</div>`;
     const legend='<div class="activity-legend" aria-label="Transaction amount key"><span class="income">+ Income</span><span class="expense">− Expense</span><span class="refund">+ Refund</span><span class="transfer">↔ Transfer</span></div>';
     const monthLabel=new Intl.DateTimeFormat('en',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${state.month}-01T00:00:00Z`));
-    const movable=fullHistory.data.filter(t=>t.voided!==true && t.entered_by===state.me.user.id && t.allocations?.some(a=>a.scope==='personal'));
-    const movePanel=`<details id="bulk-scope-panel" class="panel live-panel"><summary>Move transactions to Family · ${movable.length} eligible</summary><p class="helper">Choose transactions from all dates and accounts, then move their allocations to Family. Transfers have no scope. Balances and source records stay the same.</p>${movable.length?`<form id="bulk-scope-form"><label class="confirm-line"><input type="checkbox" id="bulk-scope-all"> Select all ${movable.length} personal transactions</label><div class="table-scroll"><table class="live-table"><thead><tr><th>Select</th><th>Date</th><th>Transaction</th><th>Amount</th></tr></thead><tbody>${movable.map(t=>`<tr><td><input type="checkbox" name="transaction_id" value="${h(t.id)}" aria-label="Select ${h(t.description||'transaction')}"></td><td>${h(t.effective_date)}</td><td>${h(t.description||'Untitled')}</td><td>${amount(t.amount,t.currency)}</td></tr>`).join('')}</tbody></table></div><button type="submit" class="primary-button">Move selected to Family</button></form>`:empty('No personal transactions remain.')}</details>`;
+    const movePanel='<details id="bulk-scope-panel" class="panel live-panel"><summary>Move transactions to Family</summary><div id="bulk-scope-content"><p class="helper">Open to load eligible transactions.</p></div></details>';
     return heading('Transactions',allDates?'Your transaction history':`${monthLabel} · Your money in and out`,button('Move to Family','show-bulk-scope')+button('Add balance check','transaction-balance')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+scopeTabs()+`<p class="analytics-scope-note">${state.scope==='combined'?'Your personal and shared family transactions together.':state.scope==='family'?'Shared family transactions.':'Your personal transactions.'} Each transaction appears once. Amounts show allocations in this view.</p>`+movePanel+
       `<section class="panel ledger-workspace" aria-label="Transaction ledger"><div class="ledger-heading"><div><h2>Recorded activity <span class="record-count">${values.data.length}</span></h2><p>${balanceEvents.length} balance ${balanceEvents.length===1?'marker':'markers'}${filters.account||filters.accountType||filters.eventType?' · Filters applied':''}</p></div><div class="ledger-view-actions">${button(allDates?`Show ${state.month}`:'Show all dates','transaction-period')}${navButton('changes','Money Manager changes ↗')}</div></div>${picker}<div class="ledger-caption"><span>Latest first</span>${legend}</div>${transactionTable(values.data,balanceEvents,filters.account)}<div class="ledger-footer"><span>${values.data.length} transactions shown</span><span>Transfers match either participating account.</span></div></section>`+coverage();
   },
@@ -1010,7 +1020,7 @@ async function saveMapping(form) {
 const actions = {
   'recurring-filter':el=>{state.recurringFilter=el.dataset.filter;renderRoute();},
   'recurring-status':async el=>{const field=el.dataset.field,value=el.dataset.value==='true';if(!['subscription','ignored'].includes(field))return;await api.request(`recurring-transactions/${id(el.dataset.key)}`,{method:'PUT',body:{[field]:value}});notify(field==='ignored'?(value?'Pattern ignored.':'Pattern restored to review.'):(value?'Marked as subscription.':'Subscription tag removed.'));await renderRoute();},
-  'show-bulk-scope':()=>{const panel=document.querySelector('#bulk-scope-panel');if(panel){panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});}},
+  'show-bulk-scope':()=>{const panel=document.querySelector('#bulk-scope-panel');if(panel){panel.open=true;loadBulkScopePanel(panel);panel.scrollIntoView({behavior:'smooth',block:'start'});}},
   'transaction-balance':transactionBalanceEditor,
   'transaction-balance-after':el=>{
     const row=state.ledgerBalances.get(el.dataset.account+':'+el.dataset.id);
@@ -1341,6 +1351,7 @@ document.addEventListener('submit',async event=>{
   finally { delete form.dataset.busy; if(submit) submit.disabled=false; }
 });
 window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#join/')) inviteView().catch(e=>failure(e,authRoot));else renderRoute();});
+document.addEventListener('toggle',event=>{if(event.target.id==='bulk-scope-panel') loadBulkScopePanel(event.target);},true);
 window.addEventListener('resize',syncMenuButton);
 syncMenuButton();
 document.querySelector('#report-scope').value=state.scope;

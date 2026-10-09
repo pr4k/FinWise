@@ -3685,6 +3685,71 @@
         }
       }
     },
+    "/analytics/dashboard": {
+      "get": {
+        "operationId": "get_analytics_dashboard",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/analytics/household": {
       "get": {
         "operationId": "get_analytics_household",

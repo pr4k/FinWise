@@ -129,6 +129,7 @@ route("/accounts/{id}/balance-checks/{check_id}", "delete", revision=True)
 route("/transfers", "get", "TransactionCollection", parameters=["account_id", "account_type", "from", "to", "cursor", "limit"])
 for report in ["summary", "series", "categories", "income-categories", "merchants", "types", "accounts", "transfers", "coverage", "transactions"]:
     route(f"/analytics/{report}", "get", parameters=["scope", "from", "to", "currency", "account_id", "category_id", "member_id", "cursor", "limit", "grain"])
+route("/analytics/dashboard", "get", parameters=["scope", "from", "to", "currency"])
 schemas["HouseholdMemberReport"] = obj({"id":S,"name":S,"income":M,"net_spending":M,"net_invested":M,"categories":arr(obj({"category_id":S,"amount":M},("category_id","amount"))),"investment_visibility":enum("own","shared_only")},("id","name","income","net_spending","net_invested","categories","investment_visibility"))
 schemas["HouseholdReport"] = obj({"data":arr(ref("HouseholdMemberReport")),"currency":S,"from":D,"to":D,"coverage":S},("data","currency","from","to","coverage"))
 route("/analytics/household", "get", "HouseholdReport", parameters=["from","to","currency"])

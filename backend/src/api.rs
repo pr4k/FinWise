@@ -1090,6 +1090,7 @@ async fn route(
             no_content()
         }
         ("GET", ["analytics", "household"]) => household_report(db, p, q).await,
+        ("GET", ["analytics", "dashboard"]) => analytics_dashboard(db, p, q).await,
         ("GET", ["analytics", report])
             if [
                 "summary",
@@ -1831,11 +1832,49 @@ async fn analytics(
     report: &str,
     q: &Query,
 ) -> Result<Reply> {
-    let (mut values, currency, meta) =
+    let (values, currency, meta) =
         report_inputs(db, p, q, ["transactions", "transfers"].contains(&report)).await?;
+    analytics_result(db, p, report, q, values, &currency, meta).await
+}
+
+async fn analytics_dashboard(db: &mut SqliteConnection, p: &Principal, q: &Query) -> Result<Reply> {
+    let (values, currency, meta) = report_inputs(db, p, q, false).await?;
+    let mut reports = serde_json::Map::new();
+    for report in [
+        "summary",
+        "categories",
+        "income-categories",
+        "merchants",
+        "series",
+        "types",
+        "accounts",
+    ] {
+        let input = values.clone();
+        let mut report_query = q.clone();
+        if report == "series" {
+            report_query.insert("grain".to_owned(), "day".to_owned());
+        }
+        let mut report_meta = meta.clone();
+        report_meta["filters"] = json!(report_query);
+        let (_, value) =
+            analytics_result(db, p, report, &report_query, input, &currency, report_meta).await?;
+        reports.insert(report.to_owned(), value);
+    }
+    ok(Value::Object(reports))
+}
+
+async fn analytics_result(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    report: &str,
+    q: &Query,
+    mut values: Vec<Value>,
+    currency: &str,
+    meta: Value,
+) -> Result<Reply> {
     match report {
         "summary" => {
-            let mut v = totals(&values, &currency)?;
+            let mut v = totals(&values, currency)?;
             v["meta"] = meta;
             v["balance_available"] = json!(false);
             v["budget_status"] = Value::Null;

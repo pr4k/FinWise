@@ -10,6 +10,32 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn analytics_dashboard_matches_individual_reports() {
+    let (client, _) = setup().await;
+    let account = client.account("Checking", "bank").await;
+    let category = client.category("Groceries", "expense").await;
+    let mut entry = transaction("expense", "42.00", &account, &category, "personal");
+    entry["effective_date"] = json!("2026-10-08");
+    client.create("transactions", entry).await;
+    let query = "from=2026-10-01&to=2026-11-01&scope=personal&currency=INR";
+    let dashboard = client.call("GET", &format!("analytics/dashboard?{query}"), json!({}), None, None).await;
+    assert_eq!(dashboard.0, StatusCode::OK, "{}", dashboard.1);
+    for report in ["summary", "categories", "income-categories", "merchants", "series", "types", "accounts"] {
+        let suffix = if report == "series" { "&grain=day" } else { "" };
+        let individual = client.call("GET", &format!("analytics/{report}?{query}{suffix}"), json!({}), None, None).await;
+        assert_eq!(individual.0, StatusCode::OK, "{}", individual.1);
+        if report == "summary" {
+            assert_eq!(dashboard.1[report]["net_spending"], individual.1["net_spending"]);
+        } else if report == "accounts" {
+            assert_eq!(dashboard.1[report]["data"][0]["signed_movements"], individual.1["data"][0]["signed_movements"]);
+            assert_eq!(dashboard.1[report]["data"][0]["balance"]["amount"], individual.1["data"][0]["balance"]["amount"]);
+        } else {
+            assert_eq!(dashboard.1[report]["data"], individual.1["data"], "{report}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn household_report_groups_visible_activity_and_opted_in_investments() {
     let (client, _) = setup().await;
     let account = client.account("Bank", "bank").await;

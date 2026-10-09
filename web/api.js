@@ -4,6 +4,7 @@
   const pending = new Map();
   const reads = new Map();
   const cacheLifetime = 10000;
+  let readGeneration = 0;
   function requestKey() {
     if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
     const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -13,18 +14,20 @@
     return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
   }
   async function request(path, { method = 'GET', body, revision, key, signal } = {}) {
-    // Only computed reports are reused. Activity, membership and account lists
-    // must reflect another household member's changes on the next navigation.
-    const cacheable=method==='GET' && !signal && /^analytics\/(summary|series|categories|income-categories|merchants|types|accounts)(\?|$)/.test(path);
+    // Keep repeated navigation responsive while bounding staleness from another
+    // household member's changes to ten seconds.
+    const cacheable=method==='GET' && !signal && (/^analytics\/(dashboard|summary|series|categories|income-categories|merchants|types|accounts)(\?|$)/.test(path)
+      || /^(accounts|categories)\?include_archived=true&limit=200$/.test(path));
     if (cacheable) {
       const saved=reads.get(path);
       if (saved && saved.expires>Date.now()) return saved.value;
       if (saved?.promise) return saved.promise;
+      const generation=readGeneration;
       const promise=fetchRequest(path,{method,body,revision,key,signal});
       reads.set(path,{promise});
       try {
         const value=await promise;
-        if (reads.get(path)?.promise===promise) {
+        if (generation===readGeneration && reads.get(path)?.promise===promise) {
           reads.delete(path);
           reads.set(path,{value,expires:Date.now()+cacheLifetime});
           if (reads.size>100) reads.delete(reads.keys().next().value);
@@ -33,7 +36,7 @@
       } catch(error) { if(reads.get(path)?.promise===promise) reads.delete(path); throw error; }
     }
     const value=await fetchRequest(path,{method,body,revision,key,signal});
-    if (method !== 'GET') reads.clear();
+    if (method !== 'GET') { readGeneration++; reads.clear(); }
     return value;
   }
   async function fetchRequest(path, { method, body, revision, key, signal }) {
@@ -72,5 +75,5 @@
     } while (cursor);
     return { data, meta };
   }
-  window.finwiseAPI = { request, collection, setCsrf(value) { if(csrf!==value) reads.clear(); csrf = value; }, reset() { csrf = ''; pending.clear(); reads.clear(); } };
+  window.finwiseAPI = { request, collection, setCsrf(value) { if(csrf!==value) { readGeneration++; reads.clear(); } csrf = value; }, reset() { csrf = ''; pending.clear(); readGeneration++; reads.clear(); } };
 })();
