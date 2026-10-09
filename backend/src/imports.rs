@@ -1089,12 +1089,21 @@ async fn update_mapping(
         "columns",
         "period",
         "coverage_claim",
+        "allocation_scope",
     ] {
         if let Some(value) = input.get(key) {
             config[key] = value.clone();
         }
     }
     validate_mapping_claim(&config)?;
+    if let Some(scope) = config["allocation_scope"].as_str()
+        && !["personal", "family"].contains(&scope)
+    {
+        return Err(ApiError::invalid("Invalid allocation scope."));
+    }
+    if config.get("allocation_scope").is_some() && !config["allocation_scope"].is_string() {
+        return Err(ApiError::invalid("Invalid allocation scope."));
+    }
     if let Some(locale) = config["date_locale"].as_str()
         && !["DMY", "MDY"].contains(&locale)
     {

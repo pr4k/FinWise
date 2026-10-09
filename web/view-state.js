@@ -1,7 +1,7 @@
 /* URL state contains only view preferences. No account or transaction data is stored here. */
 (() => {
   const validMonth = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
-  const validScope = value => ['personal','family'].includes(value);
+  const validScope = value => ['personal','family','combined'].includes(value);
   const accountTypes = ['bank','credit_card','cash','settle_up'];
   const eventTypes = ['expense','income','refund','transfer'];
   function readFilters(search) {
@@ -30,8 +30,12 @@
     }
     replace(url.pathname + url.search + url.hash);
   }
-  function transactionsPath(month, monthOnly, filters={}) {
+  function transactionsPath(month, monthOnly, filters={}, scope='') {
     const params=new URLSearchParams();
+    if(scope) {
+      if(!validScope(scope)) throw new Error('Invalid report scope.');
+      params.set('scope',scope);
+    }
     if(monthOnly) {
       if (!validMonth(month)) throw new Error('Invalid report month.');
       const [year, number] = month.split('-').map(Number);

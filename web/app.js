@@ -18,14 +18,15 @@ function syncMenuButton() {
   menuButton.setAttribute('aria-expanded',String(!mobile && !shell.classList.contains('sidebar-collapsed')));
   document.querySelector('.sidebar').inert=mobile || shell.classList.contains('sidebar-collapsed');
 }
-const labels = { overview:'Overview', analytics:'Analytics', transactions:'Transactions', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Budgets', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
+const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', recurring:'Recurring', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Budgets', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
 const previousMonth=new Date(`${savedView.month}-01T00:00:00Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
 const compareParam=new URLSearchParams(location.search).get('compare');
-const state = { me:null, accounts:[], categories:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
+const state = { me:null, accounts:[], categories:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), recurringFilter:'review', settlementFilter:'open', investmentFilter:'all', compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
 let toastTimer;
 const h = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const id = value => encodeURIComponent(value);
 const button = (title,action,extra='') => `<button type="button" class="outline-button" data-action="${action}" ${extra}>${h(title)}</button>`;
+const dangerButton = (title,action,extra='') => `<button type="button" class="outline-button danger-button" data-action="${action}" ${extra}>${h(title)}</button>`;
 const navButton = (view,title=labels[view]) => `<button type="button" class="outline-button" data-view="${view}">${h(title)}</button>`;
 const empty = message => `<p class="empty-state">${h(message)}</p>`;
 function displayMoney(value,currency) {
@@ -38,6 +39,7 @@ function displayMoney(value,currency) {
   return `${parts[1]}${whole}${parts[3]||''}`;
 }
 const amount = (value,currency=state.me?.household.base_currency || 'INR') => value == null ? 'Unknown' : `${h(currency)} ${displayMoney(value,currency)}`;
+const recurringAmount = item => item.min_amount===item.max_amount?amount(item.max_amount,item.currency):`${amount(item.min_amount,item.currency)}–${amount(item.max_amount,item.currency)}`;
 const moneyTone = (value,kind='asset') => value == null ? 'unknown' : Number(value)===0?'neutral':kind==='debt'?(Number(value)>0?'debt':'positive'):Number(value)<0?'negative':'positive';
 const moneyFigure = (value,currency,kind='asset') => `<strong class="money-figure ${moneyTone(value,kind)}">${amount(value,currency)}</strong>`;
 const accountBalance = a => moneyFigure(a.balance?.amount,a.currency,a.subtype==='credit_card'?'debt':'asset')+'<small>'+h(a.subtype==='credit_card'?'Amount owed':a.balance?.source==='balance_check'?'From observed check':a.balance?.source==='opening_balance'?'From known balance':'No balance anchor')+'</small>'+(a.subtype==='credit_card' && a.card_due?'<small class="due-line">Payment due '+(a.card_due.amount==null?'amount not entered':amount(a.card_due.amount,a.currency))+' · '+h(a.card_due.due_date)+'</small>':'');
@@ -45,6 +47,10 @@ const field = (label,input) => `<label class="field">${h(label)}${input.replace(
 const input = (name,extras='') => `<input name="${name}" ${extras}>`;
 const moneyInput = name => input(name,'inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" required placeholder="0.00"');
 const option = (value,label,selected=false) => `<option value="${h(value)}"${selected?' selected':''}>${h(label)}</option>`;
+function defaultTransactionScope() {
+  const saved=localStorage.getItem(`finwise-default-scope:${state.me?.user.id}`);
+  return saved==='family'?'family':'personal';
+}
 const accountOptions = selected => state.accounts.filter(a=>a.active!==false).map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===selected)).join('');
 const categoryName = key => categoryView.path(state.categories,key);
 const categoryOptions = (kind,selected='',exclude='') => {
@@ -59,6 +65,7 @@ function localDateTime(value) { const date=new Date(value); return `${date.getFu
 function period(month=state.month) { const [y,m]=month.split('-').map(Number); return {from:`${month}-01`,to:`${m===12?y+1:y}-${String(m===12?1:m+1).padStart(2,'0')}-01`}; }
 function reportQuery(month=state.month) { return new URLSearchParams({...period(month),scope:state.scope,currency:state.me.household.base_currency}).toString(); }
 function heading(title,description,actions='') { return `<div class="page-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h1>${h(title)}</h1><p>${h(description)}</p></div><div class="heading-actions">${actions}</div></div>`; }
+function scopeTabs() { return `<div class="analytics-scope-tabs" role="group" aria-label="View scope">${[['personal','Personal'],['family','Family'],['combined','Combined']].map(([scope,label])=>`<button type="button" data-action="analytics-scope" data-scope="${scope}" aria-pressed="${state.scope===scope}" class="${state.scope===scope?'active':''}">${label}</button>`).join('')}</div>`; }
 function panel(title,body) { return `<section class="panel live-panel"><h2>${h(title)}</h2>${body}</section>`; }
 function table(headers,rows) { return rows.length ? `<div class="table-scroll"><table class="live-table"><thead><tr>${headers.map(v=>`<th>${h(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map((v,i)=>`<td data-label="${h(headers[i])}">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : empty('No records yet.'); }
 function notify(message) { const toast=document.querySelector('#toast'); toast.textContent=message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.classList.remove('show'),6000); }
@@ -148,6 +155,8 @@ function transactionTable(values,balanceEvents=[],accountFilter='') {
       ];
     }
     const t=entry.transaction;
+    const scale=new Intl.NumberFormat('en',{style:'currency',currency:t.currency}).resolvedOptions().maximumFractionDigits;
+    const scopedAmount=t.event_type==='transfer'?t.amount:analyticsView.sumMoney(t.allocations.map(a=>a.amount),scale);
     const when=t.effective_at?h(new Date(t.effective_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})):'10:00 AM · assumed';
     const category=t.allocations.map(a=>h(categoryName(a.category_id))).join(', ');
     const accounts=t.movements.map(m=>{
@@ -161,9 +170,9 @@ function transactionTable(values,balanceEvents=[],accountFilter='') {
     }).join('');
     return [
       '<time datetime="'+h(t.effective_date)+'">'+h(t.effective_date)+'</time><small>'+when+'</small>',
-      '<div class="activity-title"><strong>'+h(t.description || 'Untitled')+'</strong><span class="activity-type">'+h(t.event_type)+'</span></div><div class="activity-meta"><small>'+(category||'Uncategorized')+' · '+(t.entered_by===state.me.user.id?'You':'Household member')+'</small>'+transactionIndicators(t)+'</div>',
+      '<div class="activity-title"><strong>'+h(t.description || 'Untitled')+'</strong><span class="activity-type">'+h(t.event_type)+'</span></div><div class="activity-meta"><small>'+(category||'Uncategorized')+' · '+(t.allocations?.length?([...new Set(t.allocations.map(a=>a.scope))].map(scope=>scope==='family'?'Family':'Personal').join(' / ')+' · '):'')+(t.entered_by===state.me.user.id?'You':'Household member')+'</small>'+transactionIndicators(t)+'</div>',
       accounts,
-      '<span class="activity-amount">'+(t.event_type==='income'||t.event_type==='refund'?'+ ':t.event_type==='expense'?'− ':t.event_type==='transfer'?'↔ ':'')+amount(t.amount,t.currency)+'</span>',
+      '<span class="activity-amount">'+(t.event_type==='income'||t.event_type==='refund'?'+ ':t.event_type==='expense'?'− ':t.event_type==='transfer'?'↔ ':'')+amount(scopedAmount,t.currency)+'</span>',
       button('Details','transaction-detail','data-id="'+h(t.id)+'"')
     ];
   });
@@ -219,8 +228,8 @@ async function reconciliationComparison(session) {
 function selectedComparison() {
   const form=document.querySelector('#match-form');
   if(!form) return null;
-  const data=new FormData(form);
-  return {ledger:data.getAll('ledger').map(key=>state.ledger.find(v=>v.id===key)).filter(Boolean),observations:data.getAll('observation').map(key=>state.observations.find(v=>v.id===key)).filter(Boolean)};
+  const formData=new FormData(form);
+  return {ledger:formData.getAll('ledger').map(key=>state.ledger.find(v=>v.id===key)).filter(Boolean),observations:formData.getAll('observation').map(key=>state.observations.find(v=>v.id===key)).filter(Boolean)};
 }
 function amendmentGroupFromRecent() {
   const recent=state.recentMatch;
@@ -307,7 +316,7 @@ function createFromStatementEditor() {
   state.createObservationIds=selected.observations.map(v=>v.id);
   const first=selected.observations[0];
   const description=selected.observations.length===1?first.description||'Statement transaction':`Grouped statement entries (${selected.observations.length})`;
-  editor('Create transaction from statement',`<p>${selected.observations.length} statement row${selected.observations.length===1?'':'s'} → one ${h(total.eventType)} of ${amount(total.total,total.currency)}. The rows will be attached to the new transaction.</p>${field('Description',input('description',`required maxlength="300" value="${h(description)}"`))}${field('Date',input('effective_date',`type="date" required value="${h(first.effective_date)}"`))}${field('Category',`<select name="category_id">${option('','Uncategorized')}${categoryOptions(total.eventType)}</select>`)}${field('Scope',`<select name="scope">${option('personal','Personal')}${option('family','Family')}</select>`)}${field('Why is this missing from Money Manager?',input('reason','required maxlength="500"'))}<p class="helper">FinWise balances and analytics will include the new transaction. It will be tagged for the Money Manager additions export.</p>`,'create-statement-form','Create and attach');
+  editor('Create transaction from statement',`<p>${selected.observations.length} statement row${selected.observations.length===1?'':'s'} → one ${h(total.eventType)} of ${amount(total.total,total.currency)}. The rows will be attached to the new transaction.</p>${field('Description',input('description',`required maxlength="300" value="${h(description)}"`))}${field('Date',input('effective_date',`type="date" required value="${h(first.effective_date)}"`))}${field('Category',`<select name="category_id">${option('','Uncategorized')}${categoryOptions(total.eventType)}</select>`)}${field('Scope',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}${field('Why is this missing from Money Manager?',input('reason','required maxlength="500"'))}<p class="helper">FinWise balances and analytics will include the new transaction. It will be tagged for the Money Manager additions export.</p>`,'create-statement-form','Create and attach');
 }
 function updateTransferCounterparts(preferred='') {
   const accountId=dialog.querySelector('#transfer-destination')?.value;
@@ -333,7 +342,77 @@ async function internalTransferEditor(forcedLedgerId=null) {
   editor('Connect internal transfer',`<p>${h(accountName(state.session.account_id))} · ${h(source.effective_date)} · ${amount(source.amount,source.currency)}<br>${h(source.description||'Transaction')}</p>${field('Other account',`<select name="counterpart_account_id" id="transfer-destination">${accounts.map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===destination)).join('')}</select>`)}${field('Other account statement row (optional)',`<select name="counterpart_observation_id" id="transfer-counterpart"></select>`)}${selected.ledger.length?'':field('Transfer description',input('description',`required maxlength="300" value="${h(source.description||'Internal transfer')}"`))}${field('Reason',input('reason','required maxlength="500"'))}<p class="helper">One transfer will connect both account ledgers. The selected statement row will be attached now; choose a row from the other account to reconcile that side too. Without one, its ledger leg stays open for later matching.${selected.ledger.length && !selected.observations.length?' Select a statement row on this account as well if you want to reconcile this side now.':''}</p>`,'internal-transfer-form','Connect transfer');
   updateTransferCounterparts(unique?.observation_id||'');
 }
+function analyticsPlanningPanels(plans,tracking,investments,obligations,recorded,currency) {
+  const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+  const snapshot=analyticsView.planningSummary(investments,obligations,state.month,currency,scale);
+  const budgetPanels=plans.length?plans.map((plan,index)=>{
+    const result=tracking[index],lines=result.data;
+    const planScale=new Intl.NumberFormat('en',{style:'currency',currency:plan.currency}).resolvedOptions().maximumFractionDigits;
+    const planned=analyticsView.sumMoney(lines.map(line=>line.planned),planScale);
+    const actual=analyticsView.sumMoney([...lines.map(line=>line.actual),result.unbudgeted],planScale);
+    const remaining=analyticsView.difference(planned,actual);
+    const savings=plan.savings_goal||'0';
+    const afterGoals=analyticsView.difference(analyticsView.difference(plan.expected_income,planned),savings);
+    const overspent=lines.filter(line=>Number(line.remaining)<0).sort((a,b)=>Number(a.remaining)-Number(b.remaining));
+    const categoryRows=[...lines.map(line=>({category_id:line.category_id,planned:line.planned,actual:line.actual,remaining:line.remaining})),...(result.unbudgeted_lines||[]).map(line=>({category_id:line.category_id,planned:null,actual:line.actual,remaining:null}))];
+    const detail=table(['Category','Limit','Actual','Remaining',''],categoryRows.sort((a,b)=>Number(b.actual)-Number(a.actual)).map(line=>[h(line.category_id==='uncategorized'?'Uncategorized':categoryName(line.category_id)),line.planned==null?'Unbudgeted':amount(line.planned,plan.currency),amount(line.actual,plan.currency),line.remaining==null?'—':amount(line.remaining,plan.currency),button('View entries','analytics-category-detail',`data-category="${h(line.category_id)}" data-currency="${h(plan.currency)}"`)]));
+    return `<div class="planning-subsection"><h3>${h(plan.name||'Monthly plan')} <small>· ${h(plan.scope)} · ${h(plan.state)}</small></h3><div class="budget-summary-grid"><article><span>Category limits</span><strong>${amount(planned,plan.currency)}</strong></article><article><span>Actual spending</span><strong>${amount(actual,plan.currency)}</strong></article><article><span>${Number(remaining)<0?'Over plan':'Remaining'}</span><strong class="${Number(remaining)<0?'bad':'good'}">${amount(remaining,plan.currency)}</strong></article><article><span>Unbudgeted spending</span><strong>${amount(result.unbudgeted,plan.currency)}</strong></article></div><p class="helper">Expected income ${amount(plan.expected_income,plan.currency)} · Savings goal ${amount(savings,plan.currency)} · Planned income after limits and savings ${amount(afterGoals,plan.currency)}.${state.scope!=='combined'&&plan.currency===currency?` Recorded income ${amount(recorded.income,currency)}.`:''}</p><div class="planning-insight"><strong>${overspent.length?`${overspent.length} categor${overspent.length===1?'y is':'ies are'} over limit`:'No category is over limit'}</strong><span>${overspent.length?`${h(categoryName(overspent[0].category_id))} has the largest overrun.`:'Review the full category breakdown below.'}</span></div><h4>Category detail</h4>${detail}</div>`;
+  }).join(''):empty(state.scope==='combined'?'No personal or family budget for this month. Create one to compare limits and actual spending.':'No budget for this month and scope. Create one to compare limits and actual spending.');
+  const budgetPanel=panel('Budget performance',`<p class="helper">${h(state.month)} · ${state.scope==='combined'?'Personal and family plans shown separately':`${h(state.scope)} plan`}. Actuals use recorded expense allocations and refunds. Transfers and settlements stay outside spending.</p>${budgetPanels}<div class="planning-actions">${navButton('budgets','Open budgets →')}</div>`);
+  const baseHoldings=snapshot.holdings.filter(item=>item.currency===currency);
+  const investmentStats=`<div class="budget-summary-grid"><article><span>Added in ${h(state.month)}</span><strong>${amount(snapshot.added,currency)}</strong></article><article><span>Withdrawn in ${h(state.month)}</span><strong>${amount(snapshot.withdrawn,currency)}</strong></article><article><span>Net added through month</span><strong>${snapshot.valuedCount?amount(snapshot.invested,currency):'No valuation'}</strong></article><article><span>Latest value by month-end</span><strong>${snapshot.valuedCount?amount(snapshot.value,currency):'No valuation'}</strong></article><article><span>Value less net additions</span><strong>${snapshot.valuedCount?amount(snapshot.gain,currency):'No valuation'}</strong></article></div>`;
+  const holdingRows=snapshot.holdings.map(item=>{
+    const last=item.snapshot,monthRecord=item.monthRecord;
+    const progress=item.type==='emergency_fund'&&Number(item.target)>0&&last?` · ${Math.min(100,Math.round(Number(last.value)/Number(item.target)*100))}% of ${amount(item.target,item.currency)} target`:'';
+    const goal=item.monthly_goal?`<small>Monthly goal ${amount(item.monthly_goal,item.currency)}</small>`:'';
+    return [h(item.name)+`<small>${h(item.type==='emergency_fund'?'Emergency fund':'Investment')}${progress}</small>`+goal,monthRecord?amount(monthRecord.contribution,item.currency):'—',last?h(last.month):'No valuation',last?amount(last.net_contributions,item.currency):'Unknown',last?amount(last.value,item.currency):'Unknown',last?amount(last.gain_loss,item.currency):'Unknown',button('View months','analytics-investment-detail',`data-id="${h(item.id)}"`)];
+  });
+  const investmentPanel=panel('Investments and emergency funds',`${investmentStats}<p class="helper">Your private holdings. ${snapshot.valuedCount} of ${baseHoldings.length} ${h(currency)} holdings have a value on or before ${h(state.month)}. Totals use those holdings only. Value less net additions includes market movement, interest, and unrecorded cash flows; it is not an investment return rate. Other currencies appear in the table only.</p>${table(['Holding','Added this month','Last valued','Net added','Value','Value change',''],holdingRows)}<div class="planning-actions">${navButton('investments','Open investments →')}</div>`);
+  const grouped=new Map();
+  for(const row of snapshot.settlementRows){const key=JSON.stringify([row.person.toLowerCase(),row.direction,row.currency]);const group=grouped.get(key)||{person:row.person,direction:row.direction,currency:row.currency,amounts:[]};group.amounts.push(row.asOfRemaining);grouped.set(key,group);}
+  const personRows=[...grouped.values()].sort((a,b)=>a.person.localeCompare(b.person)).map(group=>[h(group.person),h(group.direction==='owed_to_me'?'Owes me':'I owe'),amount(analyticsView.sumMoney(group.amounts,new Intl.NumberFormat('en',{style:'currency',currency:group.currency}).resolvedOptions().maximumFractionDigits),group.currency),button('View obligations','analytics-person-detail',`data-person="${h(group.person)}" data-direction="${h(group.direction)}" data-currency="${h(group.currency)}"`)]);
+  const settlePanel=panel('Settle-up position',`<div class="budget-summary-grid"><article><span>Others owed me</span><strong class="good">${amount(snapshot.owedToMe,currency)}</strong></article><article><span>I owed others</span><strong class="bad">${amount(snapshot.iOwe,currency)}</strong></article></div><p class="helper">Your private obligations at the end of ${h(state.month)}, after repayments dated through that month. ${h(currency)} totals are separate from other currencies and from income, spending, and account balances.</p>${table(['Person','Direction','Open amount',''],personRows)}<div class="planning-actions">${navButton('settlements','Open Settle up →')}</div>`);
+  return `<div class="analytics-planning">${budgetPanel}${state.scope!=='family'?investmentPanel+settlePanel:''}</div>`;
+}
 const views = {
+  async household(parts) {
+    const currency=state.me.household.base_currency;
+    const query=new URLSearchParams({...period(),currency});
+    const report=await api.request(`analytics/household?${query}`);
+    const members=report.data;
+    const selected=members.find(member=>member.id===parts[0]);
+    const monthLabel=new Intl.DateTimeFormat('en',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${state.month}-01T00:00:00Z`));
+    const metric=(label,value,tone='')=>`<div class="household-amount ${tone}"><span>${label}</span><strong>${amount(value,currency)}</strong></div>`;
+    const cards=members.map(member=>`<button type="button" class="household-person ${selected?.id===member.id?'selected':''}" data-view="household" data-member="${h(member.id)}" aria-label="View ${h(member.name)} category spending"><span class="household-person-head"><span class="person-avatar" aria-hidden="true">${h(member.name.slice(0,1).toUpperCase())}</span><span><strong>${h(member.name)}${member.id===state.me.user.id?' · You':''}</strong><small>${member.id===state.me.user.id?'Your visible records':'Shared records you can access'}</small></span><span class="household-person-arrow" aria-hidden="true">→</span></span><span class="household-person-metrics">${metric('Earned',member.income,'earned')}${metric('Spent',member.net_spending,'spent')}${metric('Invested',member.net_invested,'invested')}</span></button>`).join('');
+    let detail='';
+    if(selected) {
+      const rolled=categoryView.rollup(selected.categories.map(row=>({id:row.category_id,amount:row.amount,currency,count:0})),state.categories);
+      const roots=[...rolled].filter(([key])=>key==='uncategorized'||!state.categories.find(category=>category.id===key)?.parent_id).sort((a,b)=>Number(b[1].amount)-Number(a[1].amount));
+      const max=Math.max(1,...roots.map(([,row])=>Math.abs(Number(row.amount))));
+      const rows=roots.map(([key,row])=>`<li><span><strong>${h(key==='uncategorized'?'Uncategorized':state.categories.find(category=>category.id===key)?.name||'Category')}</strong><small>${amount(row.amount,currency)}</small></span><span class="household-category-track" aria-hidden="true"><i style="width:${Math.abs(Number(row.amount))/max*100}%"></i></span></li>`).join('');
+      detail=`<section class="panel household-detail"><div class="overview-panel-heading"><div><span class="section-kicker">CATEGORY DETAIL</span><h2>${h(selected.name)} · Expenses</h2></div>${navButton('household','All members')}</div>${rows?`<ul class="household-categories">${rows}</ul>`:empty('No visible expenses recorded for this month.')}<p class="helper">Amounts are net of refunds. Open a category in Analytics for the full household category breakdown.</p></section>`;
+    }
+    return heading('Household 360',`${monthLabel} · ${members.length} household member${members.length===1?'':'s'}`)+`<div class="household-grid">${cards||empty('No household members yet.')}</div>${detail}<p class="helper household-note">Members are credited for transactions they entered. Your personal allocations and accessible family allocations are included. Other members’ private accounts and investments remain private; their invested amount covers holdings they chose to share. All amounts use ${h(currency)} and recorded data only.</p>`;
+  },
+  async recurring() {
+    const {data}=await api.request('recurring-transactions');
+    const review=data.filter(item=>!item.subscription&&!item.ignored);
+    const tagged=data.filter(item=>item.subscription&&!item.ignored);
+    const ignored=data.filter(item=>item.ignored);
+    const groups={review,subscriptions:tagged,ignored};
+    const shown=groups[state.recurringFilter]||review;
+    const tabs=`<div class="recurring-tabs" role="group" aria-label="Recurring payment status">${[['review','To review',review.length],['subscriptions','Subscriptions',tagged.length],['ignored','Ignored',ignored.length]].map(([filter,label,count])=>`<button type="button" data-action="recurring-filter" data-filter="${filter}" aria-pressed="${state.recurringFilter===filter}" class="${state.recurringFilter===filter?'active':''}">${label}<span>${count}</span></button>`).join('')}</div>`;
+    const rows=shown.map(item=>{
+      const history=item.occurrences.map(o=>`<li><time datetime="${h(o.date)}">${h(o.date)}</time><strong>${amount(o.amount,item.currency)}</strong><span>${h(o.source==='bank_statement'?'Bank statement':'Money Manager / ledger')}</span></li>`).join('');
+      const status=item.ignored?'Ignored':item.subscription?'Subscription':'Possible recurring';
+      const actions=item.ignored?button('Restore to review','recurring-status',`data-key="${h(item.key)}" data-field="ignored" data-value="false"`):
+        `${button(item.subscription?'Remove subscription tag':'Mark as subscription','recurring-status',`data-key="${h(item.key)}" data-field="subscription" data-value="${item.subscription?'false':'true'}"`)}${button('Ignore','recurring-status',`data-key="${h(item.key)}" data-field="ignored" data-value="true"`)}`;
+      return `<article class="panel recurring-card ${item.ignored?'is-ignored':item.subscription?'is-subscription':''}"><div class="recurring-card-main"><div class="recurring-card-title"><span class="recurring-status">${status}</span><h2>${h(item.name)}</h2><p>${h(accountName(item.account_id))}</p></div><div class="recurring-card-price"><span>Observed payment${item.min_amount===item.max_amount?'':' range'}</span><strong>${recurringAmount(item)}</strong><small>${h(item.frequency)} · ${h(item.count)} payments</small></div></div><div class="recurring-card-meta"><span>First seen <strong>${h(item.first_date)}</strong></span><span>Latest <strong>${h(item.last_date)}</strong></span></div><div class="recurring-card-actions">${actions}</div><details class="recurring-history"><summary>Payment history <span>${item.count}</span></summary><ul>${history}</ul></details></article>`;
+    }).join('');
+    const summary=`<div class="recurring-summary"><div><span>Needs review</span><strong>${review.length}</strong><small>Detected patterns</small></div><div><span>Subscriptions</span><strong>${tagged.length}</strong><small>Saved tags</small></div><div><span>Ignored</span><strong>${ignored.length}</strong><small>Hidden from review</small></div></div>`;
+    const noRows={review:'No patterns need review. Import more months to find repeating payments.',subscriptions:'No subscriptions tagged yet. Mark a pattern as a subscription from To review.',ignored:'No ignored patterns.'};
+    return heading('Recurring transactions','Review repeating payments and keep track of subscriptions.')+summary+tabs+`<p class="helper recurring-note">Patterns come from your visible Money Manager transactions and bank statements. Bank evidence linked to a ledger transaction counts once. Ignored patterns stay in the Ignored tab and can be restored.</p><div class="recurring-list">${rows||empty(noRows[state.recurringFilter]||noRows.review)}</div>`;
+  },
   async overview() {
     const query=reportQuery();
     const [summary,transactions,categories,accounts,daily]=await Promise.all([
@@ -366,9 +445,10 @@ const views = {
     const recent=transactions.data.map(t=>{
       const incoming=['income','refund'].includes(t.event_type),outgoing=t.event_type==='expense';
       const tone=incoming?'positive':outgoing?'negative':'neutral';
-      return `<li><button type="button" class="recent-item ${tone}" data-action="transaction-detail" data-id="${h(t.id)}"><span class="recent-icon" aria-hidden="true">${incoming?'↙':outgoing?'↗':'⇄'}</span><span class="recent-copy"><strong>${h(t.description||'Untitled')}</strong><small>${h(t.effective_date)} · ${h([...new Set(t.movements.map(m=>accountName(m.account_id)))].join(' → '))}</small></span><span class="recent-value">${incoming?'+ ':outgoing?'− ':''}${amount(t.amount,t.currency)}<small>${h(t.event_type)}</small></span></button></li>`;
+      const scopedAmount=t.event_type==='transfer'?t.amount:analyticsView.sumMoney(t.allocations.map(a=>a.amount),new Intl.NumberFormat('en',{style:'currency',currency:t.currency}).resolvedOptions().maximumFractionDigits);
+      return `<li><button type="button" class="recent-item ${tone}" data-action="transaction-detail" data-id="${h(t.id)}"><span class="recent-icon" aria-hidden="true">${incoming?'↙':outgoing?'↗':'⇄'}</span><span class="recent-copy"><strong>${h(t.description||'Untitled')}</strong><small>${h(t.effective_date)} · ${h([...new Set(t.movements.map(m=>accountName(m.account_id)))].join(' → '))}</small></span><span class="recent-value">${incoming?'+ ':outgoing?'− ':''}${amount(scopedAmount,t.currency)}<small>${h(t.event_type)}</small></span></button></li>`;
     }).join('');
-    return heading('Your finances',`${monthLabel} · ${state.scope==='family'?'Family':'Personal'} overview`,navButton('imports','Import statements')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+
+    return heading('Your finances',`${monthLabel} · ${state.scope[0].toUpperCase()+state.scope.slice(1)} overview`,navButton('imports','Import statements')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+
       cards+coverage()+`<div class="overview-workspace"><section class="panel live-panel overview-activity"><div class="overview-panel-heading"><div><span class="section-kicker">THE LATEST MOVEMENTS</span><h2>Recent activity</h2></div>${navButton('transactions','View all activity →')}</div>${recent?`<ul class="recent-list">${recent}</ul>`:empty('Your activity will appear here when you add a transaction.')}</section>${snapshot}</div>`+
       (!state.accounts.length?panel('Get started',`<p>Import your Money Manager workbook, map the account and category labels, then review before committing.</p>${navButton('imports','Start an import')}`):'');
   },
@@ -377,7 +457,7 @@ const views = {
     const [year,month]=state.month.split('-').map(Number);
     const trendFrom=new Date(Date.UTC(year,month-6,1)).toISOString().slice(0,10);
     const trendQuery=new URLSearchParams({from:trendFrom,to:period().to,scope:state.scope,currency:state.me.household.base_currency,grain:'month'});
-    const [summary,categories,incomeCategories,merchants,series,trend,types,accounts,transfers,activity,comparison,comparisonCategories,comparisonSeries]=await Promise.all([
+    const [summary,categories,incomeCategories,merchants,series,trend,types,accounts,transfers,activity,comparison,comparisonCategories,comparisonSeries,budgetList,investments,obligations,recurring]=await Promise.all([
       api.request(`analytics/summary?${query}`),api.request(`analytics/categories?${query}`),
       api.request(`analytics/income-categories?${query}`),
       api.request(`analytics/merchants?${query}`),api.request(`analytics/series?${query}&grain=day`),
@@ -386,7 +466,8 @@ const views = {
       api.request(`analytics/transactions?${query}&limit=1`),
       api.request(`analytics/summary?${reportQuery(state.compareMonth)}`),
       api.request(`analytics/categories?${reportQuery(state.compareMonth)}`),
-      api.request(`analytics/series?${reportQuery(state.compareMonth)}&grain=day`)
+      api.request(`analytics/series?${reportQuery(state.compareMonth)}&grain=day`),
+      api.collection(`budgets?month=${state.month}${state.scope==='combined'?'':`&scope=${state.scope}`}`),state.scope==='family'?Promise.resolve({data:[]}):api.collection('investments'),state.scope==='family'?Promise.resolve({data:[]}):api.collection('settle-ups'),api.request('recurring-transactions')
     ]);
     const categoryBars=(rows,kind)=>{
       const rolled=categoryView.rollup(rows,state.categories);
@@ -452,8 +533,16 @@ const views = {
     const balanceRows=knownBalances.map(balanceItem).join('');
     const missingBalances=unknownBalances.length?`<details class="glance-missing"><summary>${unknownBalances.length} ${unknownBalances.length===1?'account needs':'accounts need'} a balance anchor</summary><ul>${unknownBalances.map(balanceItem).join('')}</ul></details>`:'';
     const glance=`<div class="analytics-glance"><section class="panel glance-story"><span class="glance-eyebrow">${h(state.month)} · ${h(state.scope)} · recorded</span><h2>${overIncome?'Spending exceeded income by':Number(gap)<0?'Income exceeded spending by':'Income and spending matched'}</h2><strong class="glance-figure ${overIncome?'negative':'positive'}">${amount(overIncome?gap:Number(gap)<0?analyticsView.negate(gap):gap,currency)}</strong><div class="glance-equation"><span>Income <strong>${amount(summary.income,currency)}</strong></span><span>Net spending <strong>${amount(summary.net_spending,currency)}</strong></span></div><p>${overIncome?'This month’s spending may have used earlier balances, credit, or income missing from the records. Review the categories and account activity to find the cause.':'This compares recorded income and expenses for the selected month.'}</p><small>Transfers: ${amount(summary.transfer_volume,currency)} between accounts; excluded from spending. Coverage unconfirmed.</small><div class="glance-actions">${navButton('transactions','Review transactions')}</div></section><section class="panel glance-drivers"><h2>Where spending went</h2>${expenseDrivers?`<ul>${expenseDrivers}${remainingDrivers.length?`<li><span>Other categories</span><strong>${amount(analyticsView.sumMoney(remainingDrivers,currencyScale),currency)}</strong></li>`:''}</ul>`:empty('No recorded expense categories for this month.')}<small>Category amounts are net of refunds; positive categories may not add up to net spending when refunds exceed purchases in another category.</small></section><section class="panel glance-balances"><h2>Account balances now</h2>${balanceRows?`<ul>${balanceRows}</ul>`:visibleAccounts.length?'':'<p class="empty-state">No accounts available.</p>'}${missingBalances}<small>Current account estimates, not month-end balances. Card amounts owed are liabilities.</small><div class="glance-actions">${navButton('accounts','View accounts')}</div></section></div>`;
-    return heading('Analytics',`${state.month} · ${state.scope} allocations`)+
-      glance+recent+
+    const budgetTracking=await Promise.all(budgetList.data.map(plan=>api.request(`budgets/${id(plan.id)}/tracking`)));
+    const planning=analyticsPlanningPanels(budgetList.data,budgetTracking,investments.data,obligations.data,summary,currency);
+    const subscriptionMonth=analyticsView.subscriptionMonth(recurring.data,state.month);
+    const subscriptions=subscriptionMonth.rows;
+    const subscriptionTotals=subscriptionMonth.totals.map(total=>`<div class="subscription-total"><span>${h(state.month)} · ${h(total.currency)}</span><strong>${amount(total.amount,total.currency)}</strong><small>${h(total.count)} observed payment${total.count===1?'':'s'}${total.statementCount?` · ${h(total.statementCount)} from bank statements`:''}</small></div>`).join('');
+    const subscriptionCards=subscriptions.map(item=>`<article class="analytics-subscription"><div><span class="recurring-status">Subscription</span><h3>${h(item.name)}</h3><p>${h(accountName(item.account_id))} · ${h(item.frequency)}</p></div><div class="analytics-subscription-amount"><strong>${amount(item.monthAmount,item.currency)}</strong><small>${item.monthCount?`${h(item.monthCount)} payment${item.monthCount===1?'':'s'} in ${h(state.month)}${item.statementCount?` · ${h(item.statementCount)} statement-only`:''}`:`No payment in ${h(state.month)}`}</small><small>Typical: ${recurringAmount(item)}</small></div></article>`).join('');
+    const subscriptionPanel=`<section class="panel live-panel analytics-subscriptions"><div class="overview-panel-heading"><div><span class="section-kicker">REPEATING PAYMENTS</span><h2>Subscriptions <span class="subscription-count">${subscriptions.length}</span></h2></div>${navButton('recurring','Manage recurring →')}</div><p class="helper">Observed payments for tagged subscriptions in ${h(state.month)}, across accounts you can access. Totals stay separate by currency and are not added to spending again. This section is independent of the selected report scope.</p><div class="subscription-totals">${subscriptionTotals||`<div class="subscription-total subscription-total-empty"><span>${h(state.month)}</span><strong>No payments recorded</strong><small>Tagged subscriptions may have payments in other months.</small></div>`}</div><div class="analytics-subscription-grid">${subscriptionCards||empty('No subscriptions tagged yet. Review recurring transactions to add one.')}</div></section>`;
+    const scopeNote=state.scope==='combined'?'Your personal allocations plus shared family allocations, counted once. Personal and family budgets remain separate.':state.scope==='personal'?'Your personal allocations, budget, investments, and settle-up balances.':'Shared family allocations and the family budget.';
+    return heading('Analytics',`${state.month} · ${state.scope[0].toUpperCase()+state.scope.slice(1)} view`)+
+      scopeTabs()+`<p class="analytics-scope-note">${scopeNote} Account balances below show accounts you can access, regardless of allocation scope.</p>`+glance+subscriptionPanel+recent+planning+
       panel('Income, expenses and surplus over the month',`${cashflowChart}<p class="helper">Each line accumulates recorded entries from the first day of the selected month. Transfers are excluded; missing source coverage can make a line appear flat.</p>`)+
       panel('Where expenses changed over six months',`${categoryTrendChart}<p class="helper">Top four expense categories plus all remaining categories. Refunds stay in net spending; source coverage is unconfirmed.</p>${categoryTrendTable}`)+
       `<div class="analytics-lead">${panel('Six-month income and spending',monthlyCashflowChart)}${panel('Spending by category',categoryBars(categories.data,'expense'))}</div>`+
@@ -475,14 +564,16 @@ const views = {
       state.transactionFilters.account=''; saveView();
     }
     const filters=state.transactionFilters;
-    const values=await api.collection(viewState.transactionsPath(state.month,!allDates,filters));
+    const [values,fullHistory]=await Promise.all([api.collection(viewState.transactionsPath(state.month,!allDates,filters,state.scope)),api.collection('transactions')]);
     const eventAccounts=state.accounts.filter(a=>(!filters.account || a.id===filters.account) && (!filters.accountType || a.subtype===filters.accountType));
     const ledgers=await loadLedgerBalances(values.data,allDates,eventAccounts.map(a=>a.id));
     const balanceEvents=eventAccounts.flatMap(account=>(ledgers.get(account.id)||[]).filter(row=>['opening_balance','balance_check'].includes(row.event_type)).map(row=>({account,row})));
     const picker=`<div class="ledger-filters" role="group" aria-label="Filter transactions">${field('Account',`<select id="transaction-filter-account">${option('','All accounts',!filters.account)}${state.accounts.map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===filters.account)).join('')}</select>`)}${field('Account type',`<select id="transaction-filter-account-type">${option('','All types',!filters.accountType)}${['bank','credit_card','cash','settle_up'].map(v=>option(v,v.replace('_',' '),v===filters.accountType)).join('')}</select>`)}${field('Transaction type',`<select id="transaction-filter-event-type">${option('','All types',!filters.eventType)}${['expense','income','refund','transfer'].map(v=>option(v,v,v===filters.eventType)).join('')}</select>`)}${button('Clear filters','clear-transaction-filters')}</div>`;
     const legend='<div class="activity-legend" aria-label="Transaction amount key"><span class="income">+ Income</span><span class="expense">− Expense</span><span class="refund">+ Refund</span><span class="transfer">↔ Transfer</span></div>';
     const monthLabel=new Intl.DateTimeFormat('en',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${state.month}-01T00:00:00Z`));
-    return heading('Transactions',allDates?'Your complete transaction history':`${monthLabel} · Your money in and out`,button('Add balance check','transaction-balance')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+
+    const movable=fullHistory.data.filter(t=>t.voided!==true && t.entered_by===state.me.user.id && t.allocations?.some(a=>a.scope==='personal'));
+    const movePanel=`<details id="bulk-scope-panel" class="panel live-panel"><summary>Move transactions to Family · ${movable.length} eligible</summary><p class="helper">Choose transactions from all dates and accounts, then move their allocations to Family. Transfers have no scope. Balances and source records stay the same.</p>${movable.length?`<form id="bulk-scope-form"><label class="confirm-line"><input type="checkbox" id="bulk-scope-all"> Select all ${movable.length} personal transactions</label><div class="table-scroll"><table class="live-table"><thead><tr><th>Select</th><th>Date</th><th>Transaction</th><th>Amount</th></tr></thead><tbody>${movable.map(t=>`<tr><td><input type="checkbox" name="transaction_id" value="${h(t.id)}" aria-label="Select ${h(t.description||'transaction')}"></td><td>${h(t.effective_date)}</td><td>${h(t.description||'Untitled')}</td><td>${amount(t.amount,t.currency)}</td></tr>`).join('')}</tbody></table></div><button type="submit" class="primary-button">Move selected to Family</button></form>`:empty('No personal transactions remain.')}</details>`;
+    return heading('Transactions',allDates?'Your transaction history':`${monthLabel} · Your money in and out`,button('Move to Family','show-bulk-scope')+button('Add balance check','transaction-balance')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+scopeTabs()+`<p class="analytics-scope-note">${state.scope==='combined'?'Your personal and shared family transactions together.':state.scope==='family'?'Shared family transactions.':'Your personal transactions.'} Each transaction appears once. Amounts show allocations in this view.</p>`+movePanel+
       `<section class="panel ledger-workspace" aria-label="Transaction ledger"><div class="ledger-heading"><div><h2>Recorded activity <span class="record-count">${values.data.length}</span></h2><p>${balanceEvents.length} balance ${balanceEvents.length===1?'marker':'markers'}${filters.account||filters.accountType||filters.eventType?' · Filters applied':''}</p></div><div class="ledger-view-actions">${button(allDates?`Show ${state.month}`:'Show all dates','transaction-period')}${navButton('changes','Money Manager changes ↗')}</div></div>${picker}<div class="ledger-caption"><span>Latest first</span>${legend}</div>${transactionTable(values.data,balanceEvents,filters.account)}<div class="ledger-footer"><span>${values.data.length} transactions shown</span><span>Transfers match either participating account.</span></div></section>`+coverage();
   },
   async accounts(parts) {
@@ -524,19 +615,22 @@ const views = {
     return heading('Monthly statements','Compare uploaded balances with the recorded account ledger.')+`<div class="statement-account-picker">${field('Account',`<select id="statement-account">${accountOptions(account.id)}</select>`)}</div>`+panel(`${account.name} · ${state.month}`,summary+`<div class="statement-status"><span>Ledger entries awaiting a match: <strong>${h(value.ledger_unmatched_count)}</strong></span><span>Statement rows awaiting a match: <strong>${h(value.observation_unmatched_count)}</strong></span><span>Coverage: <strong>${h(value.coverage)}</strong></span></div>${account.subtype==='credit_card'&&account.card_due?`<p class="helper">Payment due ${h(account.card_due.due_date)} · ${amount(account.card_due.amount,account.currency)}</p>`:''}`)+panel('Uploaded statement months',`<p class="helper">Opening is inferred from the first reported balance minus its movement. A file covering part of a month is not a full monthly statement.</p><div class="statement-month-list">${monthCards||empty('No uploaded statement months for this account.')}</div>`)+coverage();
   },
   async budgets() {
-    const plans=await api.collection(`budgets?month=${state.month}&scope=${state.scope}`);
-    if(!plans.data.length) return heading('Monthly budgets',`${state.month} · ${state.scope}`,button('Create budget','budget'))+coverage()+panel('Plan this month',`<p>No budget exists for this month and scope. Create a plan with category limits, then compare recorded spending with those limits over time.</p>${button('Create budget','budget')}`);
+    const plans=await api.collection(`budgets?month=${state.month}${state.scope==='combined'?'':`&scope=${state.scope}`}`);
+    if(!plans.data.length) { const create=state.scope==='combined'?button('Create personal budget','budget-personal')+button('Create family budget','budget-family'):button('Create budget','budget');return heading('Monthly budgets',`${state.month} · ${state.scope}`,create)+coverage()+panel('Plan this month',`<p>No budget exists for this month and scope. Create a plan with category limits, then compare recorded spending with those limits over time.</p>${create}`); }
     const tracking=await Promise.all(plans.data.map(b=>api.request(`budgets/${id(b.id)}/tracking`)));
     const previous=new Date(Date.UTC(Number(state.month.slice(0,4)),Number(state.month.slice(5,7))-2,1)).toISOString().slice(0,7);
-    const dailyReports=await Promise.all(plans.data.map(async b=>{const query=month=>new URLSearchParams({...period(month),scope:b.scope,currency:b.currency,grain:'day'});const [daily,prior]=await Promise.all([api.request(`analytics/series?${query(state.month)}`),api.request(`analytics/series?${query(previous)}`)]);return {daily,prior};}));
+    const dailyReports=await Promise.all(plans.data.map(async b=>{const query=month=>new URLSearchParams({...period(month),scope:b.scope,currency:b.currency,grain:'day'});const [daily,prior,summary]=await Promise.all([api.request(`analytics/series?${query(state.month)}`),api.request(`analytics/series?${query(previous)}`),api.request(`analytics/summary?${new URLSearchParams({...period(state.month),scope:b.scope,currency:b.currency})}`)]);return {daily,prior,summary};}));
     const today=householdDate();
     return heading('Monthly budgets',`${state.month} · ${state.scope}`)+coverage()+plans.data.map((b,i)=>{
-      const {daily,prior}=dailyReports[i],cutoff=state.month<today.slice(0,7)?daily.data.length:state.month===today.slice(0,7)?Number(today.slice(-2)):0;
+      const {daily,prior,summary:recorded}=dailyReports[i],cutoff=state.month<today.slice(0,7)?daily.data.length:state.month===today.slice(0,7)?Number(today.slice(-2)):0;
       const lines=tracking[i].data,scale=new Intl.NumberFormat('en',{style:'currency',currency:b.currency}).resolvedOptions().maximumFractionDigits;
       const planned=analyticsView.sumMoney(lines.map(line=>line.planned),scale);
       const actual=analyticsView.sumMoney([...lines.map(line=>line.actual),tracking[i].unbudgeted],scale);
       const remaining=analyticsView.difference(planned,actual);
       const incomeGap=analyticsView.difference(b.expected_income,planned);
+      const plannedSavings=b.savings_goal||'0';
+      const afterPlan=analyticsView.difference(incomeGap,plannedSavings);
+      const actualSavings=analyticsView.difference(recorded.income,actual);
       const labels=daily.data.map(row=>row.period.slice(-2));
       const actualLine=analyticsView.cumulativeMoney(daily.data,'net_spending',scale).map((value,day)=>day<cutoff?value:null);
       const priorLine=analyticsView.cumulativeMoney(prior.data,'net_spending',scale);
@@ -546,10 +640,51 @@ const views = {
       const canManage=b.owner_id===state.me.user.id||(b.scope==='family'&&['owner','admin'].includes(state.me.membership.role));
       const actions=canManage?`<div class="budget-plan-actions">${b.state==='archived'?'':button('Edit plan','edit-budget',`data-id="${h(b.id)}"`)}${b.state==='draft'?button('Activate','activate-budget',`data-id="${h(b.id)}" data-revision="${b.revision}"`):''}${button('Copy to next month','copy-budget',`data-id="${h(b.id)}" data-revision="${b.revision}"`)}</div>`:'';
       const summary=`<div class="budget-summary-grid"><article><span>Planned limits</span><strong>${amount(planned,b.currency)}</strong></article><article><span>Recorded spending</span><strong class="${Number(actual)>Number(planned)?'bad':'spend'}">${amount(actual,b.currency)}</strong></article><article><span>${Number(remaining)<0?'Over plan':'Remaining'}</span><strong class="${Number(remaining)<0?'bad':'good'}">${amount(Number(remaining)<0?analyticsView.negate(remaining):remaining,b.currency)}</strong></article><article><span>Expected income</span><strong>${amount(b.expected_income,b.currency)}</strong></article></div>`;
-      const incomeNote=`<p class="budget-income-gap ${Number(incomeGap)<0?'bad':'good'}">${Number(incomeGap)<0?'Planned limits exceed expected income by':'Expected income after planned limits'} <strong>${amount(Number(incomeGap)<0?analyticsView.negate(incomeGap):incomeGap,b.currency)}</strong></p>`;
+      const incomeNote=`<div class="budget-summary-grid"><article><span>Recorded income</span><strong>${amount(recorded.income,b.currency)}</strong></article><article><span>Planned savings</span><strong>${amount(plannedSavings,b.currency)}</strong></article><article><span>Recorded income less spending</span><strong class="${Number(actualSavings)<0?'bad':'good'}">${amount(actualSavings,b.currency)}</strong></article><article><span>Income left after limits and savings goal</span><strong class="${Number(afterPlan)<0?'bad':'good'}">${amount(afterPlan,b.currency)}</strong></article></div><p class="helper">Recorded income less spending is a cash-flow measure. Investment additions and transfers are excluded from spending; compare those separately in Investments.</p>`;
       const categoryCards=`<div class="budget-progress-list">${lines.map(l=>{const percent=Number(l.planned)>0?Math.max(0,Math.min(100,Number(l.actual)/Number(l.planned)*100)):0;return `<article class="budget-progress"><div><strong>${h(categoryName(l.category_id))}</strong><span>${amount(l.actual,b.currency)} of ${amount(l.planned,b.currency)}</span></div><div class="budget-track" role="progressbar" aria-label="${h(categoryName(l.category_id))} budget used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(percent)}"><span class="budget-fill ${Number(l.remaining)<0?'red':percent>=80?'orange':'green'}" style="width:${percent}%"></span></div><small class="${Number(l.remaining)<0?'negative':''}">${Number(l.remaining)<0?'Over by':'Remaining'} ${amount(Number(l.remaining)<0?analyticsView.negate(l.remaining):l.remaining,b.currency)}</small></article>`;}).join('')||empty('No category limits yet.')}</div><p class="budget-unbudgeted">Unbudgeted spending <strong>${amount(tracking[i].unbudgeted,b.currency)}</strong></p>`;
-      return panel(`${b.name || b.month} · ${b.state}`,actions+summary+incomeNote+`<h3>Spending through the month</h3>${chart}<p class="helper">The guide divides the full monthly limit evenly across days; it is a reference, not a forecast. Recorded values include unbudgeted spending. The prior month may end on an earlier calendar day. Flat lines do not confirm complete coverage.</p><details class="budget-day-details"><summary>Show daily amounts</summary>${dailyDetails}</details><h3>Category limits</h3>${categoryCards}`);
+      return panel(`${b.name || b.month} · ${b.state}`,actions+summary+incomeNote+`<h3>Spending through the month</h3>${chart}<p class="helper">The guide divides the full monthly limit evenly across days; it is a reference, not a forecast. Recorded values include unbudgeted spending. The prior month may end on an earlier calendar day. Flat lines do not confirm complete coverage.</p><details class="budget-day-details"><summary>Show daily amounts</summary>${dailyDetails}</details><h3>Category limits</h3>${categoryCards}<h3>Detailed variance</h3>${table(['Category','Limit','Actual','Remaining'],lines.map(l=>[h(categoryName(l.category_id)),amount(l.planned,b.currency),amount(l.actual,b.currency),amount(l.remaining,b.currency)]))}<h3>Unbudgeted categories</h3>${table(['Category','Spent'],(tracking[i].unbudgeted_lines||[]).map(l=>[h(categoryName(l.category_id)),amount(l.actual,b.currency)]))}`);
     }).join('');
+  },
+  async settlements() {
+    const obligations=(await api.collection('settle-ups')).data;
+    const currency=state.me.household.base_currency;
+    const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+    const open=obligations.filter(v=>v.status==='open');
+    const total=direction=>analyticsView.sumMoney(open.filter(v=>v.currency===currency&&v.direction===direction).map(v=>v.remaining),scale);
+    const overview=`<section class="finance-hero"><div class="finance-hero-intro"><span class="section-kicker">PRIVATE SETTLEMENTS</span><h2>Know exactly what is outstanding.</h2><p>Loans and purchase splits stay separate from income and spending. Repayments reduce each person's balance.</p></div><div class="finance-metrics"><article><span>To collect</span><strong class="positive">${amount(total('owed_to_me'),currency)}</strong><small>${open.filter(v=>v.direction==='owed_to_me'&&v.currency===currency).length} open obligations</small></article><article><span>To pay</span><strong class="negative">${amount(total('i_owe'),currency)}</strong><small>${open.filter(v=>v.direction==='i_owe'&&v.currency===currency).length} open obligations</small></article><article><span>People</span><strong>${new Set(open.map(v=>v.person.toLowerCase())).size}</strong><small>With an open balance</small></article></div></section>`;
+    const byPerson=new Map();
+    for(const v of open) {const key=JSON.stringify([v.person.toLowerCase(),v.direction,v.currency]);const entry=byPerson.get(key)||{person:v.person,direction:v.direction,currency:v.currency,amounts:[]};entry.amounts.push(v.remaining);byPerson.set(key,entry);}
+    const people=[...byPerson.values()].sort((a,b)=>a.person.localeCompare(b.person)).map(v=>`<article class="person-chip"><span class="person-avatar" aria-hidden="true">${h(v.person.slice(0,1).toUpperCase())}</span><span><strong>${h(v.person)}</strong><small>${h(v.direction==='owed_to_me'?'Owes me':'I owe')}</small></span><b>${amount(analyticsView.sumMoney(v.amounts,new Intl.NumberFormat('en',{style:'currency',currency:v.currency}).resolvedOptions().maximumFractionDigits),v.currency)}</b></article>`).join('');
+    const filters=[['open','Open'],['owed_to_me','Owed to me'],['i_owe','I owe'],['settled','Settled'],['all','All']];
+    const tabs=`<div class="finance-tabs" role="group" aria-label="Filter obligations">${filters.map(([key,label])=>`<button type="button" class="${state.settlementFilter===key?'active':''}" data-action="settlement-filter" data-filter="${key}" aria-pressed="${state.settlementFilter===key}">${label}</button>`).join('')}</div>`;
+    const visible=obligations.filter(v=>state.settlementFilter==='all'||(state.settlementFilter==='open'?v.status==='open':state.settlementFilter==='settled'?v.status==='settled':v.status==='open'&&v.direction===state.settlementFilter));
+    const cards=visible.map(v=>{
+      const paid=analyticsView.difference(v.amount,v.remaining),ratio=Math.max(0,Math.min(100,Number(paid)/Number(v.amount)*100));
+      const history=v.repayments.length?`<details class="finance-history"><summary>Payment history <span>${v.repayments.length}</span></summary><div class="finance-history-rows">${v.repayments.map(payment=>`<div><span><strong>${h(payment.date)}</strong><small>${h(payment.note||'Repayment')}</small></span><b>${amount(payment.amount,v.currency)}</b>${button('Remove payment','repayment-remove',`data-id="${h(v.id)}" data-payment="${h(payment.id)}" data-revision="${v.revision}"`)}</div>`).join('')}</div></details>`:'';
+      return `<article class="finance-card settlement-card"><div class="finance-card-head"><span class="person-avatar" aria-hidden="true">${h(v.person.slice(0,1).toUpperCase())}</span><div><span class="finance-eyebrow">${h(v.kind==='split'?'PURCHASE SPLIT':v.kind==='loan'?'LOAN':'PERSONAL DEBT')}</span><h3>${h(v.person)}</h3></div><span class="finance-badge ${v.status==='settled'?'complete':v.direction==='i_owe'?'outgoing':'incoming'}">${h(v.status==='settled'?'Settled':v.direction==='i_owe'?'I owe':'Owes me')}</span></div><div class="finance-card-amount"><span>Remaining</span><strong>${amount(v.remaining,v.currency)}</strong><small>of ${amount(v.amount,v.currency)} · opened ${h(v.date)}</small></div><p class="finance-description">${h(v.description)}</p><div class="finance-progress" role="progressbar" aria-label="Amount repaid" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(ratio)}"><span style="width:${ratio}%"></span></div><div class="finance-progress-caption"><span>Repaid ${amount(paid,v.currency)}</span><span>${Math.round(ratio)}%</span></div>${history}<div class="finance-card-actions">${v.status==='open'?button('Record payment','repayment',`data-id="${h(v.id)}"`):''}${button('Edit','settlement-edit',`data-id="${h(v.id)}"`)}${dangerButton(v.split_id?'Delete split':'Delete','settlement-delete',`data-id="${h(v.id)}" data-revision="${v.revision}" data-split="${v.split_id?'true':'false'}"`)}</div></article>`;
+    }).join('');
+    return heading('Settle up','Track each person, payment, and shared purchase.',button('Add loan or debt','settlement')+button('Split a purchase','split'))+overview+(people?`<section class="finance-section"><div class="finance-section-head"><h2>People with open balances</h2><small>Amounts stay in their original currency</small></div><div class="person-grid">${people}</div></section>`:'')+`<section class="finance-section"><div class="finance-section-head"><h2>Obligations</h2><small>${visible.length} shown</small></div>${tabs}<div class="finance-card-grid">${cards||`<div class="finance-empty">${empty('No obligations match this filter.')}${button('Add loan or debt','settlement')}</div>`}</div></section><p class="helper finance-footnote">Record a bank or cash transfer separately when a payment should change an account balance. Deleting a split removes its linked obligations but leaves the original expense.</p>`;
+  },
+  async investments() {
+    const holdings=(await api.collection('investments')).data;
+    const currency=state.me.household.base_currency;
+    const inCurrency=holdings.filter(v=>v.currency===currency);
+    const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+    const valued=inCurrency.filter(v=>v.current_value!=null);
+    const sum=key=>analyticsView.sumMoney(valued.map(v=>v[key]),scale);
+    const added=analyticsView.sumMoney(inCurrency.map(v=>v.records.find(r=>r.month===state.month)?.contribution||'0'),scale);
+    const summary=`<section class="finance-hero"><div class="finance-hero-intro"><span class="section-kicker">YOUR PORTFOLIO</span><h2>A clearer view of what you added and what changed.</h2><p>Values come from your latest recorded month, not live market prices.</p></div><div class="finance-metrics"><article><span>Latest recorded value</span><strong>${valued.length?amount(sum('current_value'),currency):'No valuation'}</strong><small>${valued.length} of ${inCurrency.length} ${h(currency)} holdings valued</small></article><article><span>Net added to valued holdings</span><strong>${valued.length?amount(sum('net_contributions'),currency):'No valuation'}</strong><small>Contributions less withdrawals</small></article><article><span>Value change</span><strong class="${Number(sum('gain_loss'))<0?'negative':'positive'}">${valued.length?amount(sum('gain_loss'),currency):'No valuation'}</strong><small>Value less net additions</small></article><article><span>Added in ${h(state.month)}</span><strong>${amount(added,currency)}</strong><small>Across ${h(currency)} holdings</small></article></div></section>`;
+    const filters=[['all','All'],['investment','Investments'],['emergency_fund','Emergency funds']];
+    const tabs=`<div class="finance-tabs" role="group" aria-label="Filter holdings">${filters.map(([key,label])=>`<button type="button" class="${state.investmentFilter===key?'active':''}" data-action="investment-filter" data-filter="${key}" aria-pressed="${state.investmentFilter===key}">${label}</button>`).join('')}</div>`;
+    const cards=holdings.filter(v=>state.investmentFilter==='all'||v.type===state.investmentFilter).map(v=>{
+      const latest=v.records.at(-1);
+      const current=v.records.find(r=>r.month===state.month),pct=Number(v.target)>0&&v.current_value!=null?Math.max(0,Math.min(100,Number(v.current_value)/Number(v.target)*100)):null;
+      const goal=v.target?`<div class="finance-goal"><div><span>${h(v.type==='emergency_fund'?'Emergency target':'Target value')}</span><strong>${amount(v.target,v.currency)}</strong></div><div class="finance-progress" role="progressbar" aria-label="Target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct==null?0:Math.round(pct)}"><span style="width:${pct||0}%"></span></div><small>${pct==null?'Add a valuation to see progress.':`${Math.round(pct)}% reached`}</small></div>`:'';
+      const monthly=v.monthly_goal?`<p class="finance-goal-note">${h(state.month)} added <strong>${amount(current?.contribution||'0',v.currency)}</strong> of ${amount(v.monthly_goal,v.currency)} monthly goal</p>`:'';
+      const history=v.records.length?`<details class="finance-history"><summary>Monthly history <span>${v.records.length}</span></summary><div class="finance-history-rows">${[...v.records].reverse().map(r=>`<div><span><strong>${h(r.month)}</strong><small>Added ${amount(r.contribution,v.currency)} · Withdrawn ${amount(r.withdrawal,v.currency)}</small></span><b>${amount(r.value,v.currency)}<small>Change ${amount(r.gain_loss,v.currency)}</small></b>${button('Delete month','investment-month-delete',`data-id="${h(v.id)}" data-month="${h(r.month)}" data-revision="${v.revision}"`)}</div>`).join('')}</div></details>`:'';
+      return `<article class="finance-card investment-card"><div class="finance-card-head"><span class="finance-icon" aria-hidden="true">${v.type==='emergency_fund'?'✚':'↗'}</span><div><span class="finance-eyebrow">${h(v.type==='emergency_fund'?'EMERGENCY FUND':'INVESTMENT')}</span><h3>${h(v.name)}</h3></div><span class="finance-badge">${h(v.currency)}</span></div><div class="finance-card-amount"><span>Latest value</span><strong>${amount(v.current_value,v.currency)}</strong><small>${latest?`Valued ${h(latest.month)}`:'No monthly value yet'}</small></div><div class="finance-inline-metrics"><div><span>Net added</span><strong>${amount(v.net_contributions,v.currency)}</strong></div><div><span>Value change</span><strong class="${Number(v.gain_loss)<0?'negative':'positive'}">${amount(v.gain_loss,v.currency)}</strong></div></div>${goal}${monthly}${history}<div class="finance-card-actions">${button('Add or correct month','investment-month',`data-id="${h(v.id)}"`)}${button('Edit plan','investment-edit',`data-id="${h(v.id)}"`)}${dangerButton('Delete holding','investment-delete',`data-id="${h(v.id)}" data-revision="${v.revision}"`)}</div></article>`;
+    }).join('');
+    return heading('Investments','Manage holdings, emergency funds, and monthly valuations.',button('Add investment or fund','investment'))+summary+`<section class="finance-section"><div class="finance-section-head"><div><h2>Holdings</h2><p>${h(holdings.length)} tracked · Value change includes market movement, interest, and unrecorded cash flows.</p></div></div>${tabs}<div class="finance-card-grid">${cards||`<div class="finance-empty">${empty('No holdings match this filter.')}${button('Add investment or fund','investment')}</div>`}</div></section><p class="helper finance-footnote">Portfolio totals include only valued ${h(currency)} holdings. Other currencies stay in their own cards. Deleting a holding removes its monthly history from active views.</p>`;
   },
   async imports(parts,generation) { return importView(parts,generation); },
   async reconcile(parts) {
@@ -580,7 +715,7 @@ const views = {
     const members=await api.request(`households/${id(state.me.household.id)}/members`);
     const canInvite=['owner','admin'].includes(state.me.membership.role);
     const invite=canInvite?panel('Add a member',`<form id="invite-form">${field('Email address',input('email','type="email" required autocomplete="email"'))}${field('Role',`<select name="role">${option('member','Member')}${state.me.membership.role==='owner'?option('admin','Admin'):''}</select>`)}<p class="helper">Create a one-day invitation link and share it with the intended person. FinWise does not send email. Private accounts stay private unless you grant access.</p><button type="submit" class="primary-button">Create invitation link</button></form>${state.inviteLink?`<div class="invite-link">${field('Share this link now',input('link',`readonly value="${h(state.inviteLink)}"`))}${button('Copy link','copy-invite-link')}</div>`:''}`):'';
-    return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
+    return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+panel('Default transaction scope',`<form id="default-scope-form">${field('Scope for new transactions and imports',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<p class="helper">Saved in this browser for your account. You can choose a different scope during import review or when adding a transaction.</p><button type="submit" class="primary-button">Save default</button></form>`)+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
   },
   async more() { return heading('Workspace','Choose a view.')+`<div class="mobile-more">${Object.entries(labels).filter(([v])=>v!=='more').map(([v,name])=>navButton(v,name)).join('')}${button('Sign out','logout')}</div>`; }
 };
@@ -589,6 +724,35 @@ function editor(title,fields,formId,submit='Save') {
   dialog.innerHTML=`<div class="dialog-head"><h2 id="editor-title">${h(title)}</h2><button type="button" class="icon-button" data-action="close-editor" aria-label="Close">×</button></div><form id="${formId}">${fields}<div class="dialog-actions">${button('Cancel','close-editor')}<button class="primary-button" type="submit">${h(submit)}</button></div></form>`;
   addModalChips();
   dialog.showModal();
+}
+function detailDialog(title,body) {
+  dialog.innerHTML=`<div class="dialog-head"><h2 id="editor-title">${h(title)}</h2><button type="button" class="icon-button" data-action="close-editor" aria-label="Close">×</button></div><div class="detail-dialog-body">${body}</div><div class="dialog-actions">${button('Close','close-editor')}</div>`;
+  dialog.showModal();
+}
+async function analyticsCategoryDetail(key,currency) {
+  const query=new URLSearchParams({...period(),scope:state.scope,currency});
+  if(key!=='uncategorized')query.set('category_id',key);
+  const rows=(await api.collection(`analytics/transactions?${query}`)).data.flatMap(transaction=>(transaction.allocations||[]).filter(a=>key==='uncategorized'?a.category_id==null:a.category_id===key).filter(()=>['expense','refund'].includes(transaction.event_type)).map(a=>({transaction,allocation:a})));
+  const name=key==='uncategorized'?'Uncategorized':categoryName(key);
+  const signed=({transaction,allocation})=>transaction.event_type==='refund'?analyticsView.negate(allocation.amount):allocation.amount;
+  const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+  const total=analyticsView.sumMoney(rows.map(signed),scale);
+  detailDialog(`${name} · ${state.month}`,`<p class="detail-lead">Recorded net spending ${amount(total,currency)} across ${rows.length} allocation${rows.length===1?'':'s'} in the ${h(state.scope)} scope.</p>${table(['Date','Transaction','Type','Allocation',''],rows.map(row=>[h(row.transaction.effective_date),h(row.transaction.description||'Transaction'),h(row.transaction.event_type),amount(signed(row),currency),button('Open','analytics-open-transaction',`data-id="${h(row.transaction.id)}"`)]))}<p class="helper">Refunds reduce spending. Each row is an allocation from a visible ledger transaction.</p>`);
+}
+async function analyticsInvestmentDetail(key) {
+  const item=await api.request(`investments/${id(key)}`);
+  const records=item.records.filter(r=>r.month<=state.month);
+  const last=records.at(-1);
+  const rows=records.map((record,index)=>[h(record.month),amount(record.contribution,item.currency),amount(record.withdrawal,item.currency),amount(record.net_contributions,item.currency),amount(record.value,item.currency),amount(record.gain_loss,item.currency),amount(analyticsView.difference(record.gain_loss,index?records[index-1].gain_loss:'0'),item.currency)]);
+  detailDialog(item.name,`<p class="detail-lead">${h(item.type==='emergency_fund'?'Emergency fund':'Investment')} · ${h(item.currency)} · Records through ${h(state.month)}. ${last?`Latest recorded value ${amount(last.value,item.currency)} in ${h(last.month)}.`:'No value recorded by this month.'}</p>${table(['Month','Added','Withdrawn','Net added','Value','Value change','Change since prior record'],rows)}<p class="helper">Value change equals recorded value less cumulative net additions. Change since the prior record is the difference between those two snapshots, including market movement, interest, and unrecorded cash flows.</p>`);
+}
+async function analyticsPersonDetail(person,direction,currency) {
+  const obligations=(await api.collection('settle-ups')).data.filter(v=>v.person.toLowerCase()===person.toLowerCase()&&v.direction===direction&&v.currency===currency&&v.date.slice(0,7)<=state.month);
+  const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+  const rows=obligations.map(item=>{const payments=item.repayments.filter(payment=>payment.date.slice(0,7)<=state.month);const paid=analyticsView.sumMoney(payments.map(payment=>payment.amount),scale);return {item,payments,paid,remaining:analyticsView.difference(item.amount,paid)};});
+  const open=analyticsView.sumMoney(rows.map(row=>row.remaining),scale);
+  const paymentRows=rows.flatMap(row=>row.payments.map(payment=>[h(payment.date),h(row.item.description),h(payment.note||'Payment'),amount(payment.amount,currency)]));
+  detailDialog(`${person} · ${direction==='owed_to_me'?'Owes me':'I owe'}`,`<p class="detail-lead">At the end of ${h(state.month)}, ${amount(open,currency)} remained across ${rows.length} obligation${rows.length===1?'':'s'}.</p><h3>Obligations</h3>${table(['Opened','Description','Original','Paid by month-end','Remaining'],rows.map(row=>[h(row.item.date),h(row.item.description),amount(row.item.amount,currency),amount(row.paid,currency),amount(row.remaining,currency)]))}<h3>Payments through month-end</h3>${table(['Date','For','Note','Amount'],paymentRows)}<p class="helper">Later payments are excluded from this historical view. Deleting an obligation removes it from current and historical Analytics views.</p>`);
 }
 
 function monthResetPanel() {
@@ -646,7 +810,7 @@ function categoryEditor(key=null,parentKey=null) {
 }
 function transactionEditor() {
   if(!state.accounts.some(a=>a.active!==false)) { notify('Add an active account first.'); return; }
-  editor('Add transaction',field('Description',input('description','required maxlength="240"'))+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Amount',moneyInput('amount'))+field('Date',input('effective_date',`type="date" required value="${localDate()}"`))+field('Account / transfer source',`<select name="account_id" required>${accountOptions()}</select>`)+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}</div><div id="allocation-fields">${field('Category','<select name="category_id" id="transaction-category"></select>')}${field('Scope',`<select name="scope">${option('personal','Personal',state.scope==='personal')}${option('family','Family',state.scope==='family')}</select>`)}</div>`,'transaction-form');
+  editor('Add transaction',field('Description',input('description','required maxlength="240"'))+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Amount',moneyInput('amount'))+field('Date',input('effective_date',`type="date" required value="${localDate()}"`))+field('Account / transfer source',`<select name="account_id" required>${accountOptions()}</select>`)+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}</div><div id="allocation-fields">${field('Category','<select name="category_id" id="transaction-category"></select>')}${field('Scope',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}</div>`,'transaction-form');
   updateCategories();
 }
 function updateCategories() { const kind=document.querySelector('#event-type').value; const transfer=kind==='transfer'; document.querySelector('#transfer-target').hidden=!transfer; document.querySelector('#allocation-fields').hidden=transfer; document.querySelector('#transaction-category').innerHTML=option('','Uncategorized')+categoryOptions(kind==='income'?'income':'expense'); }
@@ -693,11 +857,37 @@ function budgetCategoryAverages(months,scale) {
   const count=BigInt(months.length||1);
   return new Map([...totals].map(([key,total])=>{const average=(total+count/2n)/count;const digits=average.toString().padStart(scale+1,'0');return [key,scale?digits.slice(0,-scale)+'.'+digits.slice(-scale):digits];}));
 }
-async function budgetEditor(key=null) {
+function settlementEditor() {
+  editor('Add loan or debt',field('Person',input('person','required maxlength="100"'))+field('Direction',`<select name="direction">${option('owed_to_me','They owe me')}${option('i_owe','I owe them')}</select>`)+field('Type',`<select name="kind">${option('loan','Loan')}${option('other','Other debt')}</select>`)+field('Amount',moneyInput('amount'))+field('Date',input('date',`type="date" required value="${h(householdDate())}"`))+field('What is this for?',input('description','required maxlength="500"')),'settlement-form','Save obligation');
+}
+async function splitEditor() {
+  const expenses=(await api.collection(`transactions?event_type=expense&${new URLSearchParams(period())}`)).data;
+  editor('Split a purchase',`<p class="helper">Enter your share and one other person per line as “Name: amount”. All shares must add up to the total. If someone else paid, include that person among the shares.</p>`+field('Who paid?',`<select name="payer_type">${option('me','I paid')}${option('other','Someone else paid')}</select>`)+field('Payer name if someone else paid',input('payer_name','maxlength="100" placeholder="Alex"'))+field('Link recorded expense if you paid (optional)',`<select name="transaction_id">${option('','No linked expense')}${expenses.map(v=>option(v.id,`${v.effective_date} · ${v.description||'Expense'} · ${v.currency} ${v.amount}`)).join('')}</select>`)+field('Description',input('description','required maxlength="500"'))+field('Date',input('date',`type="date" required value="${h(householdDate())}"`))+field('Purchase total',moneyInput('total'))+field('My share',moneyInput('my_share'))+field('Other shares','<textarea name="shares" rows="4" required placeholder="Alex: 500.00&#10;Sam: 500.00"></textarea>'),'split-form','Create split');
+}
+async function repaymentEditor(key) {
+  const v=await api.request(`settle-ups/${id(key)}`);
+  editor('Record repayment',input('obligation_id',`type="hidden" value="${h(v.id)}"`)+input('revision',`type="hidden" value="${v.revision}"`)+`<p>${h(v.person)} · ${h(v.direction==='owed_to_me'?'they paid me':'I paid them')} · remaining ${amount(v.remaining,v.currency)}</p>`+field('Amount',moneyInput('amount'))+field('Date',input('date',`type="date" required value="${h(householdDate())}"`))+field('Note (optional)',input('note','maxlength="500"')),'repayment-form','Record repayment');
+}
+async function settlementEditEditor(key) {
+  const v=await api.request(`settle-ups/${id(key)}`);
+  editor('Edit obligation',input('obligation_id',`type="hidden" value="${h(v.id)}"`)+input('revision',`type="hidden" value="${v.revision}"`)+field('Person',input('person',`required maxlength="100" value="${h(v.person)}"`))+field('Amount',input('amount',`inputmode="decimal" required value="${h(v.amount)}" ${v.kind==='split'?'readonly':''}`))+field('Date',input('date',`type="date" required value="${h(v.date)}"`))+field('Description',input('description',`required maxlength="500" value="${h(v.description)}"`))+(v.kind==='split'?'<p class="helper">A split amount is locked because all shares must still equal the purchase total.</p>':''),'settlement-edit-form','Save obligation');
+}
+function investmentEditor() {
+  editor('Add investment or emergency fund',field('Name',input('name','required maxlength="100" placeholder="Index fund or rainy-day cash"'))+field('Type',`<select name="type">${option('investment','Investment')}${option('emergency_fund','Emergency fund')}</select>`)+field('Currency',input('currency',`required pattern="[A-Z]{3}" value="${h(state.me.household.base_currency)}"`))+field('Target value (optional)',input('target','inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" placeholder="0.00"'))+field('Monthly addition goal (optional)',input('monthly_goal','inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" placeholder="0.00"'))+field('Household view',`<select name="visibility">${option('private','Private')}${option('shared','Share monthly invested totals')}</select>`),'investment-form','Create');
+}
+async function investmentEditEditor(key) {
+  const v=await api.request(`investments/${id(key)}`);
+  editor('Edit investment plan',input('investment_id',`type="hidden" value="${h(v.id)}"`)+input('revision',`type="hidden" value="${v.revision}"`)+field('Name',input('name',`required maxlength="100" value="${h(v.name)}"`))+field('Target value',input('target',`inputmode="decimal" value="${h(v.target||'0')}"`))+field('Monthly addition goal',input('monthly_goal',`inputmode="decimal" value="${h(v.monthly_goal||'0')}"`))+field('Household view',`<select name="visibility">${option('private','Private',v.visibility!=='shared')}${option('shared','Share monthly invested totals',v.visibility==='shared')}</select>`),'investment-edit-form','Save plan');
+}
+async function investmentMonthEditor(key) {
+  const v=await api.request(`investments/${id(key)}`), existing=v.records.find(r=>r.month===state.month);
+  editor(`Monthly value · ${v.name}`,input('investment_id',`type="hidden" value="${h(v.id)}"`)+input('revision',`type="hidden" value="${v.revision}"`)+field('Month',input('month',`type="month" required value="${h(state.month)}"`))+field('Added during month',input('contribution',`inputmode="decimal" required value="${h(existing?.contribution||'0')}"`))+field('Withdrawn during month',input('withdrawal',`inputmode="decimal" required value="${h(existing?.withdrawal||'0')}"`))+field('Month-end value',input('value',`inputmode="decimal" required value="${h(existing?.value||'0')}"`))+`<p class="helper">For an existing holding, put its starting cost basis in “Added” on the first month. Later changes equal recorded value minus cumulative net additions. This does not post ledger transactions.</p>`,'investment-month-form','Save month');
+}
+async function budgetEditor(key=null,createScope=state.scope) {
   const existing=key?await api.request(`budgets/${id(key)}`):null;
   if(existing?.state==='archived') throw new Error('Archived plans cannot be edited.');
   const budgetMonth=existing?.month||state.month;
-  const budgetScope=existing?.scope||state.scope,budgetCurrency=existing?.currency||state.me.household.base_currency;
+  const budgetScope=existing?.scope||(createScope==='combined'?'personal':createScope),budgetCurrency=existing?.currency||state.me.household.base_currency;
   const [year,month]=budgetMonth.split('-').map(Number);
   const months=[3,2,1].map(offset=>new Date(Date.UTC(year,month-1-offset,1)).toISOString().slice(0,7));
   const results=await Promise.all(months.map(month=>api.request(`analytics/categories?${new URLSearchParams({...period(month),scope:budgetScope,currency:budgetCurrency})}`)));
@@ -711,7 +901,7 @@ async function budgetEditor(key=null) {
     const suggested=average && Number(average)>0;
     return `<div class="budget-input-row">${field(categoryName(category.id),input(`category-${category.id}`,`inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" placeholder="No limit" value="${h(currentLines.get(category.id)||'')}"`))}${suggested?`<button type="button" class="quick-chip average-chip" data-action="use-budget-average" data-average-for="${h(category.id)}" data-value="${h(average)}">3-month avg · ${amount(average,budgetCurrency)}</button>`:''}</div>`;
   }).join('');
-  editor(existing?'Edit monthly budget':'Create monthly budget',(existing?input('budget_id',`type="hidden" value="${h(existing.id)}"`)+input('revision',`type="hidden" value="${existing.revision}"`):'')+field('Name',input('name',`required value="${h(existing?.name||`${budgetMonth} budget`)}"`))+field('Expected income',input('expected_income',`inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" required value="${h(existing?.expected_income||'')}" placeholder="0.00"`))+`<div class="budget-suggestion"><div><strong>Start from recorded spending</strong><p>Average of ${h(months.join(', '))}. Months with no recorded spending count as zero. Coverage is unconfirmed, so review each limit.</p></div>${[...averages.values()].some(v=>Number(v)>0)?button('Apply averages','apply-budget-averages'):''}</div><p class="helper">${h(budgetMonth)} · ${h(budgetScope)} · ${h(budgetCurrency)}</p>${archivedLines.length?`<p class="helper">${archivedLines.length} archived category limit(s) cannot be revised and will be removed when you save this edit.</p>`:''}<div class="budget-input-grid">${lines}</div>`,existing?'budget-edit-form':'budget-form',existing?'Save budget':'Create draft');
+  editor(existing?'Edit monthly budget':'Create monthly budget',(existing?input('budget_id',`type="hidden" value="${h(existing.id)}"`)+input('revision',`type="hidden" value="${existing.revision}"`):input('scope',`type="hidden" value="${h(budgetScope)}"`))+field('Name',input('name',`required value="${h(existing?.name||`${budgetMonth} budget`)}"`))+field('Expected income',input('expected_income',`inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" required value="${h(existing?.expected_income||'')}" placeholder="0.00"`))+field('Monthly savings goal',input('savings_goal',`inputmode="decimal" pattern="[0-9]+(\\.[0-9]+)?" value="${h(existing?.savings_goal||'0')}" placeholder="0.00"`))+`<div class="budget-suggestion"><div><strong>Start from recorded spending</strong><p>Average of ${h(months.join(', '))}. Months with no recorded spending count as zero. Coverage is unconfirmed, so review each limit.</p></div>${[...averages.values()].some(v=>Number(v)>0)?button('Apply averages','apply-budget-averages'):''}</div><p class="helper">${h(budgetMonth)} · ${h(budgetScope)} · ${h(budgetCurrency)}</p>${archivedLines.length?`<p class="helper">${archivedLines.length} archived category limit(s) cannot be revised and will be removed when you save this edit.</p>`:''}<div class="budget-input-grid">${lines}</div>`,existing?'budget-edit-form':'budget-form',existing?'Save budget':'Create draft');
 }
 
 // Import review state is reconstructed from the server and URL after a reload.
@@ -721,7 +911,7 @@ async function importView(parts,generation) {
     const history=await api.collection('imports');
     const cleanup=state.cleanupPreview;
     const cleanupPanel=panel('Reimport Money Manager entries',`<form id="cleanup-preview-form" class="form-grid">${field('Period',`<select name="period_type"><option value="month">Month</option><option value="year">Year</option></select>`)}${field('Month',input('month',`type="month" required value="${h(state.month)}"`))}${field('Year',input('year',`type="number" min="1" max="9998" required value="${h(state.month.slice(0,4))}"`))}<button type="submit" class="outline-button">Preview entries</button></form><p class="helper">Only transactions created from your Money Manager imports are included. Manual transactions and bank statement observations remain.</p>${cleanup?`<p><strong>${h(cleanup.count)} transactions</strong> found for ${h(cleanup.period)}.${cleanup.skipped_mixed_sources?` ${h(cleanup.skipped_mixed_sources)} entries with mixed sources were skipped.`:''}</p>${table(['Date','Description','Type','Amount'],cleanup.transactions.slice(0,50).map(t=>[h(t.effective_date),h(t.description),h(t.event_type),amount(t.amount,t.currency)]))}${cleanup.count?`<form id="cleanup-apply-form"><p class="helper">Removing these transactions changes balances and reports. Reconciliation links return to review. Upload the workbook again afterward to recreate its rows.</p><button type="submit" class="primary-button">Remove ${h(cleanup.count)} imported transactions</button></form>`:''}`:''}`);
-    return heading('Imports','Upload Money Manager or bank statement CSV/XLSX files.')+panel('Upload files',`<form id="upload-form">${field('Source','<select name="source_kind"><option value="money_manager">Money Manager</option><option value="bank_statement">Bank statement CSV / XLSX</option></select>')}${field('Files (up to 4; 8 MiB each by default)',input('files','type="file" accept=".xlsx,.csv" multiple required'))}<p class="helper">Uploads are staged for review. Bank statements become reconciliation evidence, not ledger transactions.</p><button type="submit" class="primary-button">Upload and review</button></form><div class="sample-download"><a class="outline-button" href="/samples/bank-statement.csv" download="bank-statement-sample.csv">Download sample bank statement CSV</a><p class="helper">Replace the example rows with your own statement movements before uploading. Choose Bank statement CSV / XLSX as the source.</p></div>`)+cleanupPanel+panel('Import history',table(['Uploaded','State','Files'],history.data.map(b=>[h(b.created_at.slice(0,10)),h(b.state),b.files.map(f=>button(f.filename,'open-import',`data-batch="${h(b.id)}" data-file="${h(f.id)}"`)).join(' ')])));
+    return heading('Imports','Upload Money Manager or bank statement CSV/XLSX files.')+panel('Upload files',`<form id="upload-form">${field('Source','<select name="source_kind"><option value="money_manager">Money Manager</option><option value="bank_statement">Bank statement CSV / XLSX</option></select>')}${field('Scope for all imported transactions',`<select name="import_scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}${field('Files (up to 4; 8 MiB each by default)',input('files','type="file" accept=".xlsx,.csv" multiple required'))}<p class="helper">Uploads are staged for review. Scope applies to Money Manager transactions; bank statements become reconciliation evidence.</p><button type="submit" class="primary-button">Upload and review</button></form><div class="sample-download"><a class="outline-button" href="/samples/bank-statement.csv" download="bank-statement-sample.csv">Download sample bank statement CSV</a><p class="helper">Replace the example rows with your own statement movements before uploading. Choose Bank statement CSV / XLSX as the source.</p></div>`)+cleanupPanel+panel('Import history',table(['Uploaded','State','Files'],history.data.map(b=>[h(b.created_at.slice(0,10)),h(b.state),b.files.map(f=>button(f.filename,'open-import',`data-batch="${h(b.id)}" data-file="${h(f.id)}"`)).join(' ')])));
   }
   let batch=await api.request(`imports/${id(state.batch)}`);
   const fileId=state.file || batch.files[0]?.id;
@@ -751,7 +941,7 @@ async function importView(parts,generation) {
     ?table(['Row','Date','Particulars','Movement','Statement balance','Review'],preview.data.slice(0,200).map(r=>[h(r.raw_row_ref.row_number),h(r.effective_date),h(r.description || '—'),amount(r.signed_movement,r.currency),amount(r.statement_balance,r.currency),review(r)]))
     :table(['Row','Date','Description / Note','Type','Account','Category / counterpart','Amount','Review'],preview.data.slice(0,200).map(r=>[h(r.raw_row_ref.row_number),h(r.effective_date),h(r.description || '—'),h(r.event_type),h(r.source_account || accountName(r.account_id)),h([r.source_category,r.source_subcategory].filter(Boolean).join(' › ')),amount(r.signed_movement,r.currency),review(r)]));
   html+=panel('Source rows (first 200 shown)',previewRows);
-  if(file.state!=='committed') html+=panel('Commit selected file',`<form id="commit-form"><label class="confirm-line"><input type="checkbox" required> I reviewed the mappings, amounts, and overlap indicators. Commit ready rows from this file.</label><p class="helper">${file.source_kind==='bank_statement'?'Bank rows become evidence only.':'Expenses and income create personal ledger entries; uniquely paired transfers count once.'} Exact repeat rows attach their source references to existing transactions. Changed or ambiguous rows stay in review, and existing edits are preserved. Coverage remains unconfirmed.</p><button type="submit" class="primary-button" ${preview.meta.row_count===preview.meta.unresolved_count?'disabled':''}>Commit ready rows</button></form>`);
+  if(file.state!=='committed') html+=panel('Commit selected file',`<form id="commit-form"><label class="confirm-line"><input type="checkbox" required> I reviewed the mappings, amounts, and overlap indicators. Commit ready rows from this file.</label><p class="helper">${file.source_kind==='bank_statement'?'Bank rows become evidence only.':`Expenses and income create ${h(file.mapping.allocation_scope||'personal')} ledger entries; uniquely paired transfers count once.`} Exact repeat rows attach their source references to existing transactions. Changed or ambiguous rows stay in review, and existing edits are preserved. Coverage remains unconfirmed.</p><button type="submit" class="primary-button" ${preview.meta.row_count===preview.meta.unresolved_count?'disabled':''}>Commit ready rows</button></form>`);
   if(state.importResult?.batch===batch.id && state.importResult?.file===fileId) html+=panel('Commit result',table(['Outcome','Count'],Object.entries(state.importResult.value.counts).map(([k,v])=>[h(k.replaceAll('_',' ')),h(v)]))+navButton('transactions','View imported transactions'));
   return html;
 }
@@ -773,7 +963,8 @@ function mappingForm(file,rows) {
   let content='';
   if(file.source_kind==='bank_statement') content=field('Statement account',`<select name="bank_account" required>${option('','Select an account')}${accountOptions(file.mapping.account_id || file.account_id)}</select>`)+field('Date format',`<select name="date_locale">${option('DMY','Day / month / year',file.mapping.date_locale!=='MDY')}${option('MDY','Month / day / year',file.mapping.date_locale==='MDY')}</select>`)+`<p>Choose the account before previewing amounts. The supplied XLSX layout uses Date, Particulars, Withdrawals, Deposits and Balance; flat CSV can use Date, Description, Debit, Credit and Currency.</p>`;
   else {
-    content=table(['Source account','Destination account','Type when creating'],keys.accounts.map((a,i)=>{
+    content+=field('Scope for all imported transactions',`<select name="allocation_scope">${option('personal','Personal',(file.mapping.allocation_scope||defaultTransactionScope())==='personal')}${option('family','Family',(file.mapping.allocation_scope||defaultTransactionScope())==='family')}</select>`);
+    content+=table(['Source account','Destination account','Type when creating'],keys.accounts.map((a,i)=>{
       const selected=file.mapping.account_aliases?.[a.name] || rows.find(r=>r.source_account?.trim()===a.name)?.account_id || matchingAccount(a.name,a.currency) || 'new';
       return [h(a.name)+`<small>${h(a.currency)}</small>`,`<select name="account-${i}" aria-label="Map account ${h(a.name)}">${option('new',`Create: ${a.name}`,selected==='new')}${state.accounts.filter(v=>v.currency===a.currency && v.active!==false).map(v=>option(v.id,v.name,v.id===selected)).join('')}</select>`,`<select name="subtype-${i}" aria-label="Type for ${h(a.name)}">${['bank','credit_card','cash','settle_up'].map(v=>option(v,v.replace('_',' '))).join('')}</select>`];
     }))+table(['Source category / subcategory','Event kind','Canonical category'],keys.categories.map((c,i)=>{
@@ -789,6 +980,7 @@ async function saveMapping(form) {
   const data=new FormData(form); const file=state.fileInfo; const batchId=state.batch, fileId=state.file, keys=state.mappingKeys; const mapping={...file.mapping};
   if(file.source_kind==='bank_statement') { mapping.account_id=data.get('bank_account'); mapping.currency=state.accounts.find(a=>a.id===mapping.account_id)?.currency; mapping.date_locale=data.get('date_locale'); }
   else {
+    mapping.allocation_scope=data.get('allocation_scope');
     mapping.account_aliases={...(mapping.account_aliases || {})}; mapping.category_mappings=[];
     // Reuse names after a partial failure; each successful create is immediately remembered.
     for(const [i,a] of keys.accounts.entries()) {
@@ -816,6 +1008,9 @@ async function saveMapping(form) {
 }
 
 const actions = {
+  'recurring-filter':el=>{state.recurringFilter=el.dataset.filter;renderRoute();},
+  'recurring-status':async el=>{const field=el.dataset.field,value=el.dataset.value==='true';if(!['subscription','ignored'].includes(field))return;await api.request(`recurring-transactions/${id(el.dataset.key)}`,{method:'PUT',body:{[field]:value}});notify(field==='ignored'?(value?'Pattern ignored.':'Pattern restored to review.'):(value?'Marked as subscription.':'Subscription tag removed.'));await renderRoute();},
+  'show-bulk-scope':()=>{const panel=document.querySelector('#bulk-scope-panel');if(panel){panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});}},
   'transaction-balance':transactionBalanceEditor,
   'transaction-balance-after':el=>{
     const row=state.ledgerBalances.get(el.dataset.account+':'+el.dataset.id);
@@ -829,7 +1024,19 @@ const actions = {
   'reset-add-month':async()=>{const month=document.querySelector('#reset-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('Choose a valid month.');if(state.resetMonths.length>=24)throw new Error('Select at most 24 months.');state.resetMonths=[...new Set([...state.resetMonths,month])].sort();state.resetPreview=null;await renderRoute();},
   'reset-remove-month':async el=>{state.resetMonths=state.resetMonths.filter(month=>month!==el.dataset.month);state.resetPreview=null;await renderRoute();},
   'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:transactionEditor,
-  'transaction-detail':el=>transactionDetail(el.dataset.id), 'edit-transaction':el=>transactionEditEditor(el.dataset.id), 'delete-transaction':async el=>{const t=await api.request(`transactions/${id(el.dataset.id)}`);if(!window.confirm(`Delete ${t.description || 'this transaction'} (${t.currency} ${t.amount})? Its prior revisions will be retained.`)) return;await api.request(`transactions/${id(t.id)}`,{method:'DELETE',revision:t.revision,body:{reason:'Deleted by user'}});dialog.close();notify('Transaction deleted.');await renderRoute();}, 'account-ledger':el=>navigate('accounts',[el.dataset.id]), 'edit-account':el=>editAccountEditor(el.dataset.id), balance:el=>balanceEditor(el.dataset.id), 'opening-balance':el=>openingBalanceEditor(el.dataset.id), 'edit-balance-check':el=>balanceCheckEditor(el.dataset.account,el.dataset.id), 'remove-balance-check':async el=>{const check=state.selectedChecks?.find(c=>c.id===el.dataset.id);if(!check || !window.confirm(`Remove the balance check from ${check.as_of}? Its audit history will be retained.`)) return;await api.request(`accounts/${id(el.dataset.account)}/balance-checks/${id(check.id)}`,{method:'DELETE',revision:check.revision});notify('Balance check removed.');await renderRoute();}, budget:()=>budgetEditor(), 'edit-budget':el=>budgetEditor(el.dataset.id),
+  settlement:settlementEditor, split:splitEditor, repayment:el=>repaymentEditor(el.dataset.id), 'settlement-edit':el=>settlementEditEditor(el.dataset.id),
+  'settlement-filter':el=>{state.settlementFilter=el.dataset.filter;renderRoute();}, 'investment-filter':el=>{state.investmentFilter=el.dataset.filter;renderRoute();},
+  'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;document.querySelector('#report-scope').value=state.scope;saveView();renderRoute();},
+  'repayment-remove':async el=>{if(!window.confirm('Remove this payment? The obligation balance will increase.'))return;await api.request(`settle-ups/${id(el.dataset.id)}/repayments/${id(el.dataset.payment)}`,{method:'DELETE',revision:Number(el.dataset.revision),body:{}});notify('Payment removed.');await renderRoute();},
+  'settlement-delete':async el=>{const item=await api.request(`settle-ups/${id(el.dataset.id)}`);const group=item.split_id?(await api.collection('settle-ups')).data.filter(v=>v.split_id===item.split_id):[item];const message=item.split_id?`Delete this purchase split and all ${group.length} related balances? Recorded payments will be removed from Settle up. The linked expense will remain.`:`Delete the ${item.currency} ${item.amount} obligation for ${item.person} and its payment history?`;if(!window.confirm(message))return;await api.request(`settle-ups/${id(item.id)}`,{method:'DELETE',revision:item.revision,body:{}});notify(item.split_id?'Split deleted.':'Obligation deleted.');await renderRoute();},
+  investment:investmentEditor, 'investment-month':el=>investmentMonthEditor(el.dataset.id), 'investment-edit':el=>investmentEditEditor(el.dataset.id),
+  'investment-delete':async el=>{const holding=await api.request(`investments/${id(el.dataset.id)}`);if(!window.confirm(`Delete ${holding.name} and its ${holding.records.length} monthly record${holding.records.length===1?'':'s'} from Investments and Analytics? This will not delete bank transactions.`))return;await api.request(`investments/${id(holding.id)}`,{method:'DELETE',revision:holding.revision,body:{}});notify('Holding deleted.');await renderRoute();},
+  'investment-month-delete':async el=>{const holding=await api.request(`investments/${id(el.dataset.id)}`);const record=holding.records.find(r=>r.month===el.dataset.month);if(!record)throw new Error('This monthly record has changed. Reload the holding.');if(!window.confirm(`Delete ${record.month} for ${holding.name}? Later net additions and value change will be recalculated.`))return;await api.request(`investments/${id(holding.id)}/months/${id(record.month)}`,{method:'DELETE',revision:holding.revision,body:{}});notify('Monthly record deleted.');await renderRoute();},
+  'analytics-category-detail':el=>analyticsCategoryDetail(el.dataset.category,el.dataset.currency),
+  'analytics-investment-detail':el=>analyticsInvestmentDetail(el.dataset.id),
+  'analytics-person-detail':el=>analyticsPersonDetail(el.dataset.person,el.dataset.direction,el.dataset.currency),
+  'analytics-open-transaction':async el=>{dialog.close();await transactionDetail(el.dataset.id);},
+  'transaction-detail':el=>transactionDetail(el.dataset.id), 'edit-transaction':el=>transactionEditEditor(el.dataset.id), 'delete-transaction':async el=>{const t=await api.request(`transactions/${id(el.dataset.id)}`);if(!window.confirm(`Delete ${t.description || 'this transaction'} (${t.currency} ${t.amount})? Its prior revisions will be retained.`)) return;await api.request(`transactions/${id(t.id)}`,{method:'DELETE',revision:t.revision,body:{reason:'Deleted by user'}});dialog.close();notify('Transaction deleted.');await renderRoute();}, 'account-ledger':el=>navigate('accounts',[el.dataset.id]), 'edit-account':el=>editAccountEditor(el.dataset.id), balance:el=>balanceEditor(el.dataset.id), 'opening-balance':el=>openingBalanceEditor(el.dataset.id), 'edit-balance-check':el=>balanceCheckEditor(el.dataset.account,el.dataset.id), 'remove-balance-check':async el=>{const check=state.selectedChecks?.find(c=>c.id===el.dataset.id);if(!check || !window.confirm(`Remove the balance check from ${check.as_of}? Its audit history will be retained.`)) return;await api.request(`accounts/${id(el.dataset.account)}/balance-checks/${id(check.id)}`,{method:'DELETE',revision:check.revision});notify('Balance check removed.');await renderRoute();}, budget:()=>budgetEditor(), 'budget-personal':()=>budgetEditor(null,'personal'), 'budget-family':()=>budgetEditor(null,'family'), 'edit-budget':el=>budgetEditor(el.dataset.id),
   'activate-budget':async el=>{await api.request(`budgets/${id(el.dataset.id)}/activate`,{method:'POST',revision:el.dataset.revision,body:{}});await renderRoute();},
   'copy-budget':async el=>{const next=new Date(Date.UTC(Number(state.month.slice(0,4)),Number(state.month.slice(5,7)),1)).toISOString().slice(0,7);await api.request(`budgets/${id(el.dataset.id)}/copy`,{method:'POST',revision:el.dataset.revision,body:{month:next}});setMonth(next);navigate('budgets');notify(`Budget copied to ${next} as a draft.`);},
   'open-import':el=>navigate('imports',[el.dataset.batch,el.dataset.file]),
@@ -850,7 +1057,7 @@ const actions = {
   'start-session':()=>editor('Start account review',field('Bank or card account',`<select name="account_id" required>${state.accounts.filter(a=>['bank','credit_card'].includes(a.subtype)).map(a=>option(a.id,a.name)).join('')}</select>`)+`<p>${h(state.month)}</p>`,'session-form','Start review')
 };
 document.addEventListener('click',async event=>{
-  const nav=event.target.closest('[data-view]'); if(nav) { navigate(nav.dataset.view); return; }
+  const nav=event.target.closest('[data-view]'); if(nav) { navigate(nav.dataset.view,nav.dataset.member?[nav.dataset.member]:[]); return; }
   if(event.target.closest('#menu-button')) {
     if(window.matchMedia('(max-width:760px)').matches) navigate('more');
     else {
@@ -878,6 +1085,9 @@ document.addEventListener('change',async event=>{
   }
   if(event.target.id==='report-month' && /^\d{4}-\d{2}$/.test(event.target.value)) { setMonth(event.target.value); if(state.view==='transactions' && location.hash.slice(1)==='transactions/all') navigate('transactions'); else renderRoute(); }
   if(event.target.id==='report-scope') { state.scope=event.target.value; saveView(); renderRoute(); }
+  if(event.target.id==='bulk-scope-all') {
+    document.querySelectorAll('#bulk-scope-form [name="transaction_id"]').forEach(box=>{box.checked=event.target.checked;});
+  }
   if(event.target.id==='compare-month' && /^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) { const chosen=event.target.value;state.compareMonth=chosen===state.month?new Date(Date.UTC(Number(chosen.slice(0,4)),Number(chosen.slice(5,7))-2,1)).toISOString().slice(0,7):chosen;if(chosen===state.month)notify(`Comparison moved to ${state.compareMonth} so the periods differ.`);const url=new URL(location.href);url.searchParams.set('compare',state.compareMonth);history.replaceState(null,'',url.pathname+url.search+url.hash);renderRoute(); }
   if(event.target.id==='event-type') updateCategories();
   if(event.target.id==='account-subtype') document.querySelector('#card-due-fields').hidden=event.target.value!=='credit_card';
@@ -899,7 +1109,8 @@ document.addEventListener('submit',async event=>{
   const form=event.target; if(!(form instanceof HTMLFormElement)) return;
   event.preventDefault(); if(form.dataset.busy) return;
   form.dataset.busy='true'; const submit=form.querySelector('[type="submit"]'); if(submit) submit.disabled=true;
-  const data=Object.fromEntries(new FormData(form));
+  const formData=new FormData(form);
+  const data=Object.fromEntries(formData);
   try {
     if(form.id==='balance-account-form') { dialog.close(); balanceEditor(data.account_id); return; }
     if(form.id==='transaction-detail-form') { dialog.close();return; }
@@ -959,10 +1170,27 @@ document.addEventListener('submit',async event=>{
     }
     if(form.id==='upload-form') {
       const files=[...form.elements.files.files]; if(!files.length || files.length>4) throw new Error('Select between one and four files.');
-      const body=new FormData(); body.append('manifest',JSON.stringify({files:files.map(()=>({source_kind:data.source_kind}))})); files.forEach(file=>body.append('files[]',file));
+      const body=new FormData(); body.append('manifest',JSON.stringify({files:files.map(()=>({source_kind:data.source_kind,...(data.source_kind==='money_manager'?{mapping:{allocation_scope:data.import_scope==='family'?'family':'personal'}}:{})}))})); files.forEach(file=>body.append('files[]',file));
       const upload=await api.request('imports',{method:'POST',body}); state.importResult=null; navigate('imports',[upload.id,upload.files[0].id]); return;
     }
     if(form.id==='mapping-form') { await saveMapping(form); return; }
+    if(form.id==='default-scope-form') {
+      localStorage.setItem(`finwise-default-scope:${state.me.user.id}`,data.scope==='family'?'family':'personal');
+      notify('Default transaction scope saved in this browser.');
+      await renderRoute();return;
+    }
+    if(form.id==='bulk-scope-form') {
+      const ids=formData.getAll('transaction_id');
+      if(!ids.length) throw new Error('Select at least one transaction.');
+      if(!window.confirm(`Move ${ids.length} selected transaction${ids.length===1?'':'s'} to Family?`)) return;
+      let updated=0;
+      for(let start=0;start<ids.length;start+=5000) {
+        const result=await api.request('transactions/bulk-scope',{method:'POST',body:{ids:ids.slice(start,start+5000),scope:'family'}});
+        updated+=result.updated;
+      }
+      notify(`${updated} transaction${updated===1?'':'s'} moved to Family.`);
+      await renderRoute();return;
+    }
     if(form.id==='commit-form') {
       const batch=state.batch, file=state.file;
       const value=await api.request(`imports/${id(batch)}/commit`,{method:'POST',revision:state.batchInfo.revision,body:{files:[file]}});
@@ -970,7 +1198,29 @@ document.addEventListener('submit',async event=>{
       const first=state.preview.find(r=>r.effective_date)?.effective_date; if(first) setMonth(first.slice(0,7));
       notify('Commit completed. Review the outcome counts below.'); await renderRoute(); return;
     }
-    if(form.id==='account-form') {
+    if(form.id==='settlement-form') {
+      await api.request('settle-ups',{method:'POST',body:{person:data.person,direction:data.direction,kind:data.kind,amount:data.amount,currency:state.me.household.base_currency,date:data.date,description:data.description}});
+      notify('Obligation recorded.');
+    } else if(form.id==='split-form') {
+      const shares=String(data.shares).split(/\r?\n/).filter(line=>line.trim()).map(line=>{const match=/^(.+):\s*([0-9]+(?:\.[0-9]+)?)$/.exec(line.trim());if(!match)throw new Error('Enter each share as “Name: amount”, one per line.');return {person:match[1].trim(),amount:match[2]};});
+      if(data.payer_type==='other' && !String(data.payer_name||'').trim())throw new Error('Enter the name of the person who paid.');
+      const paidBy=data.payer_type==='other'?String(data.payer_name).trim():'me';
+      await api.request('settle-ups/splits',{method:'POST',body:{description:data.description,date:data.date,currency:state.me.household.base_currency,total:data.total,my_share:data.my_share,paid_by:paidBy,shares,...(data.transaction_id?{transaction_id:data.transaction_id}:{})}});
+      notify('Split created. The balance is ready in Settle up.');
+    } else if(form.id==='repayment-form') {
+      await api.request(`settle-ups/${id(data.obligation_id)}/repayments`,{method:'POST',revision:data.revision,body:{amount:data.amount,date:data.date,note:data.note}});
+      notify('Repayment recorded.');
+    } else if(form.id==='settlement-edit-form') {
+      await api.request(`settle-ups/${id(data.obligation_id)}`,{method:'PATCH',revision:data.revision,body:{person:data.person,amount:data.amount,date:data.date,description:data.description}});notify('Obligation updated.');
+    } else if(form.id==='investment-form') {
+      const body={name:data.name,type:data.type,currency:data.currency,visibility:data.visibility};if(data.target)body.target=data.target;if(data.monthly_goal)body.monthly_goal=data.monthly_goal;
+      await api.request('investments',{method:'POST',body});notify('Investment created. Add a monthly value to begin tracking.');
+    } else if(form.id==='investment-edit-form') {
+      await api.request(`investments/${id(data.investment_id)}`,{method:'PATCH',revision:data.revision,body:{name:data.name,target:data.target||'0',monthly_goal:data.monthly_goal||'0',visibility:data.visibility}});notify('Investment plan updated.');
+    } else if(form.id==='investment-month-form') {
+      await api.request(`investments/${id(data.investment_id)}/months/${id(data.month)}`,{method:'PUT',revision:data.revision,body:{contribution:data.contribution,withdrawal:data.withdrawal,value:data.value}});
+      notify('Monthly value saved.');
+    } else if(form.id==='account-form') {
       const body={name:data.name,subtype:data.subtype,currency:data.currency,visibility:data.visibility};
       if(data.opening) { if(!data.as_of) throw new Error('Supply an opening balance timestamp.'); body.opening_balance={amount:data.opening,as_of:new Date(data.as_of).toISOString()}; }
       if(data.subtype==='credit_card' && (data.due_amount || data.due_date)) { if(!data.due_date) throw new Error('Add a payment due date when entering a statement payment amount.'); body.card_due={due_date:data.due_date}; if(data.due_amount) body.card_due.amount=data.due_amount; }
@@ -1017,9 +1267,9 @@ document.addEventListener('submit',async event=>{
     } else if(form.id==='budget-form'||form.id==='budget-edit-form') {
       const lines=Object.entries(data).filter(([k,v])=>k.startsWith('category-') && v!=='').map(([k,v])=>({category_id:k.slice(9),amount:v}));
       if(form.id==='budget-edit-form') {
-        await api.request(`budgets/${id(data.budget_id)}`,{method:'PATCH',revision:data.revision,body:{name:data.name,expected_income:data.expected_income,lines}});
+        await api.request(`budgets/${id(data.budget_id)}`,{method:'PATCH',revision:data.revision,body:{name:data.name,expected_income:data.expected_income,savings_goal:data.savings_goal||'0',lines}});
         notify('Budget limits updated. Actual spending has been recalculated.');
-      } else await api.request('budgets',{method:'POST',body:{name:data.name,expected_income:data.expected_income,month:state.month,scope:state.scope,currency:state.me.household.base_currency,lines}});
+      } else await api.request('budgets',{method:'POST',body:{name:data.name,expected_income:data.expected_income,savings_goal:data.savings_goal||'0',month:state.month,scope:data.scope,currency:state.me.household.base_currency,lines}});
     } else if(form.id==='session-form') {
       const existing=(await api.collection(`reconciliation/sessions?account_id=${id(data.account_id)}&month=${encodeURIComponent(state.month)}`)).data[0];
       if(existing?.state==='open') { dialog.close(); navigate('reconcile',[existing.id]); return; }

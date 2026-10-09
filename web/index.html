@@ -6,17 +6,17 @@
     <meta name="theme-color" content="#ffffff" />
     <meta name="description" content="A private household finance planner." />
     <title>FinWise — Household finance</title>
-    <link rel="stylesheet" href="/styles.css?v=20261005b" />
+    <link rel="stylesheet" href="/styles.css?v=20261009h" />
     <link rel="stylesheet" href="/design.css?v=20261006a" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
     <script src="/api.js?v=20261006b" defer></script>
-    <script src="/view-state.js?v=20261002e" defer></script>
+    <script src="/view-state.js?v=20261009c" defer></script>
     <script src="/categories.js?v=20261002e" defer></script>
-    <script src="/analytics.js?v=20261006a" defer></script>
+    <script src="/analytics.js?v=20261009h" defer></script>
     <script src="/activity.js?v=20261002e" defer></script>
     <script src="/time.js?v=20261002e" defer></script>
     <script src="/reconciliation.js?v=20261002e" defer></script>
-    <script src="/app.js?v=20261006b" defer></script>
+    <script src="/app.js?v=20261009h" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -70,10 +70,14 @@
         <nav class="nav-list" id="desktop-nav">
           <div class="workspace-label">YOUR MONEY</div>
           <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
+          <button class="nav-item" data-view="household"><svg><use href="#i-grid"/></svg><span>Household</span></button>
           <button class="nav-item" data-view="analytics"><svg><use href="#i-chart"/></svg><span>Analytics</span></button>
           <button class="nav-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Transactions</span></button>
+          <button class="nav-item" data-view="recurring"><svg><use href="#i-receipt"/></svg><span>Recurring</span></button>
           <button class="nav-item" data-view="accounts"><svg><use href="#i-wallet"/></svg><span>Accounts</span></button>
           <button class="nav-item" data-view="budgets"><svg><use href="#i-wallet"/></svg><span>Budgets</span></button>
+          <button class="nav-item" data-view="settlements"><svg><use href="#i-check"/></svg><span>Settle up</span></button>
+          <button class="nav-item" data-view="investments"><svg><use href="#i-chart"/></svg><span>Investments</span></button>
           <div class="workspace-label nav-group-label">ORGANIZE</div>
           <button class="nav-item" data-view="categories"><svg><use href="#i-grid"/></svg><span>Categories</span></button>
           <button class="nav-item" data-view="statements"><svg><use href="#i-receipt"/></svg><span>Statements</span></button>
@@ -90,7 +94,7 @@
           <button class="mobile-menu icon-button" id="menu-button" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="desktop-nav"><svg><use href="#i-menu"/></svg></button>
           <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Overview</strong></div>
           <div class="topbar-actions">
-            <label class="scope-picker"><span class="scope-avatar">⌂</span><select id="report-scope" aria-label="View scope"><option value="personal">My personal view</option><option value="family">Family view</option></select><span class="chevron">⌄</span></label>
+            <label class="scope-picker"><span class="scope-avatar">⌂</span><select id="report-scope" aria-label="View scope"><option value="personal">My personal view</option><option value="family">Family view</option><option value="combined">Combined view</option></select><span class="chevron">⌄</span></label>
             <label class="month-filter"><span>Month</span><input id="report-month" type="month" aria-label="Report month" required></label>
           </div>
         </header>

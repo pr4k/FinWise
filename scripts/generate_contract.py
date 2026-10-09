@@ -35,7 +35,7 @@ schemas = {
     "Allocation": obj({"category_id": {"type": ["string", "null"]}, "amount": M, "scope": enum("personal", "family"), "beneficiary_id": S}, ("amount", "scope")),
     "TransactionInput": obj({"event_type": enum("expense", "income", "refund", "transfer"), "amount": M, "currency": S, "effective_date": D, "effective_at": {"type":"string","format":"date-time"}, "description": S, "merchant": S, "movements": arr(ref("Movement")), "allocations": arr(ref("Allocation"))}, ("event_type", "amount", "currency", "effective_date", "movements", "allocations")),
     "BudgetLine": obj({"category_id": S, "amount": M}, ("category_id", "amount")),
-    "BudgetInput": obj({"name": S, "month": {"type": "string", "pattern": r"^\d{4}-\d{2}$"}, "scope": enum("personal", "family"), "currency": S, "expected_income": M, "lines": arr(ref("BudgetLine")), "targets": obj({})}, ("month", "scope", "currency", "expected_income", "lines")),
+    "BudgetInput": obj({"name": S, "month": {"type": "string", "pattern": r"^\d{4}-\d{2}$"}, "scope": enum("personal", "family"), "currency": S, "expected_income": M, "savings_goal": M, "lines": arr(ref("BudgetLine")), "targets": obj({})}, ("month", "scope", "currency", "expected_income", "lines")),
     "Revision": obj({"expected_revision": I}),
     "Reason": obj({"expected_revision": I, "reason": S}, ("reason",)),
     "InviteInput": obj({"email": S, "role": enum("admin", "member"), "token": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$", "writeOnly": True, "description": "Generate 32 random bytes in the client; transmit the token to the invitee privately. Server persists only its hash."}, "expires_at": {"type": "string", "format": "date-time"}}, ("email", "role", "token")),
@@ -92,7 +92,7 @@ for health in ["live", "ready"]:
     route(f"/health/{health}", "get", public=True)
 for plural, name in [("accounts", "Account"), ("categories", "Category"), ("transactions", "Transaction"), ("budgets", "Budget")]:
     query = ["cursor", "limit"]
-    query += {"accounts": ["include_archived"], "categories": ["include_archived", "kind"], "transactions": ["account_id", "account_type", "category_id", "member_id", "event_type", "reconciliation_state", "from", "to", "q", "sort"], "budgets": ["month", "scope"]}[plural]
+    query += {"accounts": ["include_archived"], "categories": ["include_archived", "kind"], "transactions": ["account_id", "account_type", "category_id", "member_id", "event_type", "reconciliation_state", "from", "to", "q", "sort", "scope"], "budgets": ["month", "scope"]}[plural]
     route(f"/{plural}", "get", name + "Collection", parameters=query)
     route(f"/{plural}", "post", name, name + "Input")
     route(f"/{plural}/{{id}}", "get", name)
@@ -101,6 +101,15 @@ for kind in ["transactions", "budgets"]:
     route(f"/{kind}/{{id}}/revisions", "get")
 route("/transactions/{id}/void", "post", "Transaction", "Reason", revision=True)
 route("/transactions/{id}", "delete", request="Reason", revision=True)
+schemas["BulkScopeInput"] = obj({"ids": arr(S), "scope": enum("personal", "family")}, ("ids", "scope"))
+schemas["BulkScopeResult"] = obj({"updated": I, "scope": enum("personal", "family")}, ("updated", "scope"))
+route("/transactions/bulk-scope", "post", "BulkScopeResult", "BulkScopeInput")
+schemas["RecurringOccurrence"] = obj({"id": S, "source": enum("money_manager_or_ledger", "bank_statement"), "date": D, "amount": M}, ("id", "source", "date", "amount"))
+schemas["RecurringTransaction"] = obj({"key": S, "name": S, "account_id": S, "currency": S, "frequency": enum("weekly", "monthly", "quarterly", "yearly", "unconfirmed"), "subscription": B, "ignored": B, "count": I, "first_date": D, "last_date": D, "min_amount": M, "max_amount": M, "occurrences": arr(ref("RecurringOccurrence"))}, ("key", "name", "account_id", "currency", "frequency", "subscription", "ignored", "count", "first_date", "last_date", "min_amount", "max_amount", "occurrences"))
+schemas["RecurringCollection"] = obj({"data": arr(ref("RecurringTransaction")), "page": obj({}), "meta": obj({})}, ("data", "page", "meta"))
+schemas["RecurringTagInput"] = obj({"subscription": B, "ignored": B})
+route("/recurring-transactions", "get", "RecurringCollection")
+route("/recurring-transactions/{key}", "put", "RecurringTransaction", "RecurringTagInput")
 for action in ["archive", "restore"]:
     route(f"/categories/{{id}}/{action}", "post", "Category", "Revision", revision=True)
 route("/accounts/{id}/access/{member_id}", "put", revision=True)
@@ -120,6 +129,9 @@ route("/accounts/{id}/balance-checks/{check_id}", "delete", revision=True)
 route("/transfers", "get", "TransactionCollection", parameters=["account_id", "account_type", "from", "to", "cursor", "limit"])
 for report in ["summary", "series", "categories", "income-categories", "merchants", "types", "accounts", "transfers", "coverage", "transactions"]:
     route(f"/analytics/{report}", "get", parameters=["scope", "from", "to", "currency", "account_id", "category_id", "member_id", "cursor", "limit", "grain"])
+schemas["HouseholdMemberReport"] = obj({"id":S,"name":S,"income":M,"net_spending":M,"net_invested":M,"categories":arr(obj({"category_id":S,"amount":M},("category_id","amount"))),"investment_visibility":enum("own","shared_only")},("id","name","income","net_spending","net_invested","categories","investment_visibility"))
+schemas["HouseholdReport"] = obj({"data":arr(ref("HouseholdMemberReport")),"currency":S,"from":D,"to":D,"coverage":S},("data","currency","from","to","coverage"))
+route("/analytics/household", "get", "HouseholdReport", parameters=["from","to","currency"])
 for action in ["activate", "archive", "copy"]:
     route(f"/budgets/{{id}}/{action}", "post", "Budget", revision=True)
 route("/budgets/{id}/tracking", "get", parameters=["from", "to"])
@@ -134,7 +146,7 @@ for method in ["patch", "delete"]:
 for name in ["ImportBatch", "SourceFile", "ImportJob"]:
     schemas[name] = obj({"id": S, "state": S, "revision": I}, ("id", "state", "revision"))
 schemas["ImportManifest"] = obj({"files": arr(obj({"source_kind": enum("money_manager", "bank_statement"), "account_id": S, "mapping": obj({})}, ("source_kind",)))}, ("files",))
-schemas["ImportMapping"] = obj({"expected_revision": I, "mapping": obj({"account_id": S, "currency": S, "date_locale": enum("DMY", "MDY"), "account_aliases": obj({}), "category_mappings": arr(obj({"source_label": S, "subcategory": S, "event_kind": enum("expense", "income"), "category_id": S}))})})
+schemas["ImportMapping"] = obj({"expected_revision": I, "mapping": obj({"account_id": S, "currency": S, "date_locale": enum("DMY", "MDY"), "allocation_scope": enum("personal", "family"), "account_aliases": obj({}), "category_mappings": arr(obj({"source_label": S, "subcategory": S, "event_kind": enum("expense", "income"), "category_id": S}))})})
 route("/imports", "get", parameters=["cursor", "limit"])
 route("/imports", "post", "ImportBatch")
 schemas["MoneyManagerCleanupInput"] = obj({"period": S, "preview_token": S}, ("period",))
@@ -229,6 +241,30 @@ for path, method, request, params in reconciliation_routes:
         response = "ReconciliationAmendment"
     route(path, method, response=response, request=request, revision=method == "post", parameters=params)
 paths["/reconciliation/sessions"]["post"]["responses"]["201"] = {"description": "Created account/month session", "content": {"application/json": {"schema": ref("ReconciliationSession")}}}
+
+schemas["SettlementInput"] = obj({"person":S,"direction":enum("owed_to_me","i_owe"),"kind":enum("loan","split","other"),"amount":M,"currency":S,"date":D,"description":S},("person","direction","kind","amount","currency","date","description"))
+schemas["SplitInput"] = obj({"description":S,"date":D,"currency":S,"total":M,"my_share":M,"paid_by":S,"transaction_id":S,"shares":arr(obj({"person":S,"amount":M},("person","amount")))},("description","date","currency","total","my_share","shares"))
+schemas["RepaymentInput"] = obj({"amount":M,"date":D,"note":S,"expected_revision":I},("amount","date"))
+schemas["InvestmentInput"] = obj({"name":S,"type":enum("investment","emergency_fund"),"currency":S,"target":M,"monthly_goal":M,"notes":S,"visibility":enum("private","shared")},("name","type","currency"))
+schemas["InvestmentMonthInput"] = obj({"contribution":M,"withdrawal":M,"value":M,"expected_revision":I},("contribution","withdrawal","value"))
+for path, method, request, revision, params in [
+    ("/settle-ups","get",None,False,["status","cursor","limit"]),
+    ("/settle-ups","post","SettlementInput",False,[]),
+    ("/settle-ups/splits","post","SplitInput",False,[]),
+    ("/settle-ups/{id}","get",None,False,[]),
+    ("/settle-ups/{id}","patch","SettlementInput",True,[]),
+    ("/settle-ups/{id}","delete",None,True,[]),
+    ("/settle-ups/{id}/repayments","post","RepaymentInput",True,[]),
+    ("/settle-ups/{id}/repayments/{payment_id}","delete",None,True,[]),
+    ("/investments","get",None,False,["cursor","limit"]),
+    ("/investments","post","InvestmentInput",False,[]),
+    ("/investments/{id}","get",None,False,[]),
+    ("/investments/{id}","patch","InvestmentInput",True,[]),
+    ("/investments/{id}","delete",None,True,[]),
+    ("/investments/{id}/months/{month}","put","InvestmentMonthInput",True,[]),
+    ("/investments/{id}/months/{month}","delete",None,True,[]),
+]:
+    route(path,method,request=request,revision=revision,parameters=params)
 
 # Register the remaining contract surface explicitly; it must not simulate success.
 deferred = {

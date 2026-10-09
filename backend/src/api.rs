@@ -4,7 +4,7 @@ use crate::{
     balances,
     domain::{self, add, format_money, money, text},
     error::{ApiError, Result},
-    imports, reconciliation, storage,
+    imports, planning, reconciliation, recurring, storage,
 };
 use axum::{
     Json,
@@ -343,6 +343,21 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
             if path.starts_with("reconciliation/") {
                 reconciliation::authorize_replay(&mut tx, &p, &value).await?;
             }
+            if path.starts_with("settle-ups") || path.starts_with("investments") {
+                let kind = if path.starts_with("settle-ups") {
+                    "settlement_obligations"
+                } else {
+                    "investments"
+                };
+                if let Some(id) = value["id"].as_str() {
+                    storage::get(&mut tx, &p, kind, id).await?;
+                }
+                if let Some(items) = value["obligations"].as_array() {
+                    for item in items {
+                        storage::get(&mut tx, &p, kind, text(item, "id")?).await?;
+                    }
+                }
+            }
             // Recheck referenced account access before replaying financial data.
             if path.starts_with("transfers/review-queue/")
                 && path.ends_with("/pair")
@@ -482,6 +497,7 @@ const BUDGET_FIELDS: &[&str] = &[
     "scope",
     "currency",
     "expected_income",
+    "savings_goal",
     "lines",
     "targets",
 ];
@@ -504,8 +520,68 @@ async fn route(
     if path.starts_with("reconciliation/sessions") {
         return reconciliation::route(db, p, method, path, q, headers, body).await;
     }
+    if path.starts_with("settle-ups") || path.starts_with("investments") {
+        return planning::route(db, p, method, path, q, headers, body).await;
+    }
     let segments: Vec<&str> = path.split('/').collect();
     match (method, segments.as_slice()) {
+        ("GET", ["recurring-transactions"]) => {
+            allowed_query(q, &[])?;
+            ok(recurring::list(db, p).await?)
+        }
+        ("PUT", ["recurring-transactions", key]) => ok(recurring::tag(db, p, key, body).await?),
+        ("POST", ["transactions", "bulk-scope"]) => {
+            allowed_body(body, &["ids", "scope"])?;
+            let scope = text(body, "scope")?;
+            if !["personal", "family"].contains(&scope) {
+                return Err(ApiError::invalid("Invalid allocation scope."));
+            }
+            let ids = body["ids"]
+                .as_array()
+                .ok_or_else(|| ApiError::invalid("Select transactions."))?;
+            if ids.is_empty() || ids.len() > 5000 {
+                return Err(ApiError::invalid("Select between 1 and 5000 transactions."));
+            }
+            let mut seen = std::collections::HashSet::new();
+            let mut changes = Vec::new();
+            for value in ids {
+                let id = value
+                    .as_str()
+                    .ok_or_else(|| ApiError::invalid("Invalid transaction ID."))?;
+                if !seen.insert(id) {
+                    return Err(ApiError::invalid("Duplicate transaction ID."));
+                }
+                storage::get(db, p, "transactions", id).await?;
+                let before = storage::raw(db, p, "transactions", id).await?;
+                if before["voided"] == true {
+                    return Err(ApiError::conflict(
+                        "Voided transactions cannot change scope.",
+                    ));
+                }
+                let mut after = before.clone();
+                let allocations = after["allocations"]
+                    .as_array_mut()
+                    .ok_or_else(|| ApiError::invalid("Invalid transaction allocations."))?;
+                if allocations.is_empty() {
+                    return Err(ApiError::invalid("Transfers have no allocation scope."));
+                }
+                for allocation in allocations {
+                    allocation["scope"] = json!(scope);
+                    if scope == "family" {
+                        allocation.as_object_mut().unwrap().remove("beneficiary_id");
+                    }
+                }
+                domain::validate_transaction(&after)?;
+                if before["allocations"] != after["allocations"] {
+                    changes.push((before, after));
+                }
+            }
+            let count = changes.len();
+            for (before, after) in changes {
+                storage::update(db, p, &before, after, "bulk_scope_update").await?;
+            }
+            ok(json!({"updated":count,"scope":scope}))
+        }
         ("GET", ["money-manager", "changes"]) => {
             allowed_query(q, &["include_done", "limit", "cursor"])?;
             let include_done = q.get("include_done").is_some_and(|v| v == "true");
@@ -657,6 +733,10 @@ async fn route(
             if source == "transactions" {
                 validate_transaction_query(q)?;
                 values = filter_transactions(values, q, p)?;
+                if let Some(scope) = q.get("scope") {
+                    validate_report_scope(scope)?;
+                    retain_scope(&mut values, scope, p, q.get("category_id"));
+                }
                 if let Some(account_type) = q.get("account_type") {
                     let matching: std::collections::HashSet<String> =
                         storage::list(db, p, "accounts")
@@ -1009,6 +1089,7 @@ async fn route(
             balances::remove(db, p, &account, &before).await?;
             no_content()
         }
+        ("GET", ["analytics", "household"]) => household_report(db, p, q).await,
         ("GET", ["analytics", report])
             if [
                 "summary",
@@ -1285,6 +1366,7 @@ fn validate_transaction_query(q: &Query) -> Result<()> {
             "cursor",
             "limit",
             "sort",
+            "scope",
         ],
     )?;
     if let Some(sort) = q.get("sort")
@@ -1371,6 +1453,36 @@ fn filter_transactions(mut values: Vec<Value>, q: &Query, p: &Principal) -> Resu
     });
     Ok(values)
 }
+fn validate_report_scope(scope: &str) -> Result<()> {
+    if ["personal", "family", "combined"].contains(&scope) {
+        Ok(())
+    } else {
+        Err(ApiError::invalid("Invalid report scope."))
+    }
+}
+fn retain_scope(values: &mut Vec<Value>, scope: &str, p: &Principal, category: Option<&String>) {
+    for v in values.iter_mut() {
+        let entered_by = v["entered_by"].as_str().unwrap_or_default().to_owned();
+        if let Some(allocations) = v["allocations"].as_array_mut() {
+            allocations.retain(|a| {
+                let personal = a["scope"] == "personal" && entered_by == p.user_id;
+                let family = a["scope"] == "family";
+                (match scope {
+                    "personal" => personal,
+                    "family" => family,
+                    "combined" => personal || family,
+                    _ => false,
+                }) && category.is_none_or(|c| a["category_id"] == c.as_str())
+            });
+        }
+    }
+    values.retain(|v| {
+        v["allocations"].as_array().is_some_and(|a| !a.is_empty())
+            || (v["event_type"] == "transfer"
+                && category.is_none()
+                && (scope != "personal" || v["entered_by"] == p.user_id))
+    });
+}
 pub(crate) fn paginate(values: Vec<Value>, q: &Query) -> Result<Value> {
     let limit = q
         .get("limit")
@@ -1455,6 +1567,9 @@ async fn validate_budget(
     if money(text(v, "expected_income")?, currency)? < 0 {
         return Err(ApiError::invalid("Expected income cannot be negative."));
     }
+    if v.get("savings_goal").is_some() && money(text(v, "savings_goal")?, currency)? < 0 {
+        return Err(ApiError::invalid("Savings goal cannot be negative."));
+    }
     let lines = v["lines"]
         .as_array()
         .ok_or_else(|| ApiError::invalid("lines must be an array."))?;
@@ -1528,9 +1643,7 @@ async fn report_inputs(
         ));
     }
     let scope = q.get("scope").map(String::as_str).unwrap_or("personal");
-    if !["personal", "family"].contains(&scope) {
-        return Err(ApiError::invalid("Invalid report scope."));
-    }
+    validate_report_scope(scope)?;
     let household = auth::me(db, p).await?["household"].clone();
     let currency = q.get("currency").cloned().unwrap_or_else(|| {
         household["base_currency"]
@@ -1551,23 +1664,7 @@ async fn report_inputs(
         p,
     )?;
     values.retain(|v| v["currency"] == currency);
-    for v in &mut values {
-        let entered_by = v["entered_by"].as_str().unwrap_or_default().to_owned();
-        if let Some(allocations) = v["allocations"].as_array_mut() {
-            allocations.retain(|a| {
-                a["scope"] == scope
-                    && (scope == "family" || entered_by == p.user_id)
-                    && q.get("category_id")
-                        .is_none_or(|c| a["category_id"] == c.as_str())
-            });
-        }
-    }
-    values.retain(|v| {
-        v["allocations"].as_array().is_some_and(|a| !a.is_empty())
-            || (v["event_type"] == "transfer"
-                && q.get("category_id").is_none()
-                && ((scope == "personal" && v["entered_by"] == p.user_id) || scope == "family"))
-    });
+    retain_scope(&mut values, scope, p, q.get("category_id"));
     let ledger_revision: i64 =
         sqlx::query_scalar("SELECT coalesce(max(id),0) FROM audit_events WHERE household_id=?")
             .bind(&p.household_id)
@@ -1604,6 +1701,128 @@ fn totals(values: &[Value], currency: &str) -> Result<Value> {
         .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
     Ok(
         json!({"income":format_money(income,currency)?,"net_spending":format_money(spending,currency)?,"recorded_surplus":format_money(surplus,currency)?,"transfer_volume":format_money(transfers,currency)?}),
+    )
+}
+
+async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -> Result<Reply> {
+    allowed_query(q, &["from", "to", "currency"])?;
+    let from = q
+        .get("from")
+        .ok_or_else(|| ApiError::invalid("Reports require from and to."))?;
+    let to = q
+        .get("to")
+        .ok_or_else(|| ApiError::invalid("Reports require from and to."))?;
+    let start = domain::date(from)?;
+    let end = domain::date(to)?;
+    if end <= start || (end - start).num_days() > 3660 {
+        return Err(ApiError::invalid(
+            "Report period must be positive and at most 3660 days.",
+        ));
+    }
+    let household = auth::me(db, p).await?["household"].clone();
+    let currency = q
+        .get("currency")
+        .map(String::as_str)
+        .unwrap_or_else(|| household["base_currency"].as_str().unwrap_or("INR"));
+    domain::exponent(currency)?;
+    struct MemberReport {
+        id: String,
+        name: String,
+        income: i64,
+        spending: i64,
+        invested: i64,
+        categories: std::collections::BTreeMap<String, i64>,
+    }
+    let rows = sqlx::query("SELECT m.user_id,u.name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.household_id=? AND m.active=1 ORDER BY u.name,m.id")
+        .bind(&p.household_id).fetch_all(&mut *db).await?;
+    let mut members: Vec<MemberReport> = rows
+        .into_iter()
+        .map(|r| MemberReport {
+            id: r.get::<String, _>(0),
+            name: r.get::<String, _>(1),
+            income: 0,
+            spending: 0,
+            invested: 0,
+            categories: std::collections::BTreeMap::new(),
+        })
+        .collect();
+    let transactions = storage::transactions_in_period(db, p, from, to, false).await?;
+    for transaction in transactions {
+        if transaction["voided"] == true
+            || transaction["currency"] != currency
+            || transaction["event_type"] == "transfer"
+        {
+            continue;
+        }
+        let Some(member) = members
+            .iter_mut()
+            .find(|m| transaction["entered_by"] == m.id)
+        else {
+            continue;
+        };
+        for allocation in transaction["allocations"].as_array().into_iter().flatten() {
+            // A member's personal allocations are visible only to that member.
+            if allocation["scope"] != "family"
+                && !(member.id == p.user_id && allocation["scope"] == "personal")
+            {
+                continue;
+            }
+            let value = money(text(allocation, "amount")?, currency)?;
+            if transaction["event_type"] == "income" {
+                member.income = add(member.income, value)?;
+            } else {
+                let signed = if transaction["event_type"] == "refund" {
+                    -value
+                } else {
+                    value
+                };
+                member.spending = add(member.spending, signed)?;
+                let category = allocation["category_id"]
+                    .as_str()
+                    .unwrap_or("uncategorized")
+                    .to_owned();
+                let current = *member.categories.get(&category).unwrap_or(&0);
+                member.categories.insert(category, add(current, signed)?);
+            }
+        }
+    }
+    let investments =
+        sqlx::query("SELECT document FROM resources WHERE household_id=? AND kind='investments'")
+            .bind(&p.household_id)
+            .fetch_all(&mut *db)
+            .await?;
+    for row in investments {
+        let value: Value = serde_json::from_str(row.get::<&str, _>(0))
+            .map_err(|_| ApiError::invalid("Invalid stored investment."))?;
+        if value["deleted"] == true || value["currency"] != currency {
+            continue;
+        }
+        let Some(member) = members.iter_mut().find(|m| value["owner_id"] == m.id) else {
+            continue;
+        };
+        if member.id != p.user_id && value["visibility"] != "shared" {
+            continue;
+        }
+        for record in value["records"].as_array().into_iter().flatten() {
+            if record["month"].as_str() != Some(&from[..7]) {
+                continue;
+            }
+            let contribution = money(text(record, "contribution")?, currency)?;
+            let withdrawal = money(text(record, "withdrawal")?, currency)?;
+            member.invested = add(
+                member.invested,
+                contribution
+                    .checked_sub(withdrawal)
+                    .ok_or_else(|| ApiError::invalid("Money total is out of range."))?,
+            )?;
+        }
+    }
+    let data = members.into_iter().map(|m| -> Result<Value> {
+        let categories = m.categories.into_iter().map(|(category_id,value)| Ok(json!({"category_id":category_id,"amount":format_money(value,currency)?}))).collect::<Result<Vec<_>>>()?;
+        Ok(json!({"id":m.id,"name":m.name,"income":format_money(m.income,currency)?,"net_spending":format_money(m.spending,currency)?,"net_invested":format_money(m.invested,currency)?,"categories":categories,"investment_visibility":if m.id == p.user_id {"own"} else {"shared_only"}}))
+    }).collect::<Result<Vec<_>>>()?;
+    ok(
+        json!({"data":data,"currency":currency,"from":from,"to":to,"coverage":"visible_records_only"}),
     )
 }
 async fn analytics(
@@ -1668,7 +1887,18 @@ async fn analytics(
                 std::collections::BTreeMap::new();
             for v in &values {
                 let entry = groups.entry(text(v, "event_type")?.to_owned()).or_default();
-                entry.0 = add(entry.0, money(text(v, "amount")?, &currency)?)?;
+                let scoped_amount = if v["event_type"] == "transfer" {
+                    money(text(v, "amount")?, &currency)?
+                } else {
+                    v["allocations"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .try_fold(0_i64, |sum, a| {
+                            add(sum, money(text(a, "amount")?, &currency)?)
+                        })?
+                };
+                entry.0 = add(entry.0, scoped_amount)?;
                 entry.1 += 1;
             }
             let data = groups.into_iter().map(|(event_type,(total,count))| Ok(json!({"event_type":event_type,"amount":format_money(total,&currency)?,"currency":currency,"count":count}))).collect::<Result<Vec<_>>>()?;
@@ -1800,9 +2030,17 @@ async fn budget_tracking(
         lines.push(json!({"category_id":category,"planned":format_money(planned,&currency)?,"actual":format_money(actual,&currency)?,"remaining":format_money(remaining,&currency)?,"utilization":if planned==0{None}else{Some(actual as f64/planned as f64)},"coverage":"unknown","transactions_url":format!("/api/v1/analytics/transactions?scope={}&from={from}&to={to}&currency={currency}&category_id={category}",text(&budget,"scope")?)}));
     }
     let unbudgeted = actuals.values().try_fold(0, |a, b| add(a, *b))?;
+    let mut unbudgeted_lines = vec![];
+    for (category_id, amount) in actuals {
+        unbudgeted_lines
+            .push(json!({"category_id":category_id,"actual":format_money(amount,&currency)?}));
+    }
+    unbudgeted_lines.sort_by(|a, b| a["category_id"].as_str().cmp(&b["category_id"].as_str()));
     meta["plan_revision"] = budget["revision"].clone();
     meta["full_plan_period"] = json!(from == &start && to == &end);
-    ok(json!({"data":lines,"unbudgeted":format_money(unbudgeted,&currency)?,"meta":meta}))
+    ok(
+        json!({"data":lines,"unbudgeted":format_money(unbudgeted,&currency)?,"unbudgeted_lines":unbudgeted_lines,"meta":meta}),
+    )
 }
 
 async fn create_invite(db: &mut SqliteConnection, p: &Principal, body: &Value) -> Result<Reply> {

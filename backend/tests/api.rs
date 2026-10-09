@@ -10,6 +10,596 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn household_report_groups_visible_activity_and_opted_in_investments() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let food = client.category("Food", "expense").await;
+    let salary = client.category("Salary", "income").await;
+    for (kind, amount, category, scope) in [
+        ("expense", "120.00", &food, "personal"),
+        ("expense", "80.00", &food, "family"),
+        ("income", "500.00", &salary, "family"),
+    ] {
+        let mut entry = transaction(kind, amount, &account, category, scope);
+        entry["effective_date"] = json!("2026-10-08");
+        client.create("transactions", entry).await;
+    }
+    let private = client
+        .create(
+            "investments",
+            json!({"name":"Private fund","type":"investment","currency":"INR"}),
+        )
+        .await;
+    let shared = client.create("investments",json!({"name":"Shared fund","type":"investment","currency":"INR","visibility":"shared"})).await;
+    for (i, holding) in [private, shared].iter().enumerate() {
+        let path = format!(
+            "investments/{}/months/2026-10",
+            holding["id"].as_str().unwrap()
+        );
+        let record = json!({"contribution":if i==0 {"20.00"} else {"30.00"},"withdrawal":"0.00","value":"50.00"});
+        assert_eq!(
+            client
+                .call(
+                    "PUT",
+                    &path,
+                    record,
+                    Some(&format!("household-holding-{i}")),
+                    Some(1)
+                )
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+    let response = client
+        .call(
+            "GET",
+            "analytics/household?from=2026-10-01&to=2026-11-01&currency=INR",
+            json!({}),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    let member = &response.1["data"][0];
+    assert_eq!(member["income"], "500.00");
+    assert_eq!(member["net_spending"], "200.00");
+    assert_eq!(member["net_invested"], "50.00");
+    assert_eq!(member["categories"][0]["amount"], "200.00");
+}
+
+#[tokio::test]
+async fn household_report_respects_other_members_private_records() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let account = owner
+        .create(
+            "accounts",
+            json!({"name":"Shared cash","subtype":"cash","currency":"INR","visibility":"shared"}),
+        )
+        .await;
+    let food = owner.category("Food", "expense").await;
+    for (client, amount, scope) in [
+        (&owner, "60.00", "family"),
+        (&member, "20.00", "personal"),
+        (&member, "30.00", "family"),
+    ] {
+        let mut entry = transaction("expense", amount, &account, &food, scope);
+        entry["effective_date"] = json!("2026-10-08");
+        client.create("transactions", entry).await;
+    }
+    let private = member
+        .create(
+            "investments",
+            json!({"name":"Private","type":"investment","currency":"INR"}),
+        )
+        .await;
+    let shared = member
+        .create(
+            "investments",
+            json!({"name":"Shared","type":"investment","currency":"INR","visibility":"shared"}),
+        )
+        .await;
+    for (holding, amount) in [(&private, "40.00"), (&shared, "50.00")] {
+        let path = format!(
+            "investments/{}/months/2026-10",
+            holding["id"].as_str().unwrap()
+        );
+        let response = member
+            .call(
+                "PUT",
+                &path,
+                json!({"contribution":amount,"withdrawal":"0","value":amount}),
+                None,
+                Some(1),
+            )
+            .await;
+        assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    }
+    let path = "analytics/household?from=2026-10-01&to=2026-11-01&currency=INR";
+    let owner_report = owner.call("GET", path, json!({}), None, None).await.1;
+    let member_report = member.call("GET", path, json!({}), None, None).await.1;
+    let owner_id = owner.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    let member_id = member.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    let row = |report: &Value, id: &Value| {
+        report["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == *id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row(&owner_report, &member_id)["net_spending"], "30.00");
+    assert_eq!(row(&owner_report, &member_id)["net_invested"], "50.00");
+    assert_eq!(row(&member_report, &member_id)["net_spending"], "50.00");
+    assert_eq!(row(&member_report, &member_id)["net_invested"], "90.00");
+    assert_eq!(row(&member_report, &owner_id)["net_spending"], "60.00");
+}
+
+#[tokio::test]
+async fn recurring_payments_combine_ledger_and_bank_evidence_and_keep_subscription_tag() {
+    let (client, pool) = setup().await;
+    let account = client.account("Card", "credit_card").await;
+    let category = client.category("Entertainment", "expense").await;
+    for date in ["2026-01-05", "2026-02-05"] {
+        let mut value = transaction("expense", "499.00", &account, &category, "personal");
+        value["effective_date"] = json!(date);
+        value["description"] = json!("Netflix");
+        client.create("transactions", value).await;
+    }
+    let me = client.call("GET", "me", json!({}), None, None).await.1;
+    let household = me["household"]["id"].as_str().unwrap();
+    let account_id = account["id"].as_str().unwrap();
+    for (index, date) in ["2026-01-05", "2026-03-05"].iter().enumerate() {
+        let occurrence = format!("recurring-observation-{index}");
+        sqlx::query("INSERT INTO import_occurrences(id,household_id,account_id,fingerprint,occurrence,source_refs_json) VALUES(?,?,?,?,?,?)")
+            .bind(&occurrence).bind(household).bind(account_id).bind(&occurrence).bind(1_i64).bind("[]").execute(&pool).await.unwrap();
+        let document = json!({"id":occurrence,"account_id":account_id,"effective_date":date,"currency":"INR","amount":"-499.00","description":"UPI/NETFLIX 12345/Payment"});
+        sqlx::query("INSERT INTO bank_observations(id,household_id,account_id,effective_date,currency,amount_minor,document) VALUES(?,?,?,?,?,?,?)")
+            .bind(&occurrence).bind(household).bind(account_id).bind(date).bind("INR").bind(-49900_i64).bind(document.to_string()).execute(&pool).await.unwrap();
+    }
+    let listed = client
+        .call("GET", "recurring-transactions", json!({}), None, None)
+        .await;
+    assert_eq!(listed.0, StatusCode::OK, "{}", listed.1);
+    let rows = listed.1["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["count"], 3);
+    assert_eq!(rows[0]["frequency"], "monthly");
+    let path = format!(
+        "recurring-transactions/{}",
+        rows[0]["key"].as_str().unwrap()
+    );
+    let tagged = client
+        .call("PUT", &path, json!({"subscription":true}), None, None)
+        .await;
+    assert_eq!(tagged.0, StatusCode::OK, "{}", tagged.1);
+    assert_eq!(tagged.1["ignored"], false);
+    assert_eq!(
+        client
+            .call("GET", "recurring-transactions", json!({}), None, None)
+            .await
+            .1["data"][0]["subscription"],
+        true
+    );
+    let ignored = client.call("PUT", &path, json!({"ignored":true}), None, None).await;
+    assert_eq!(ignored.0, StatusCode::OK, "{}", ignored.1);
+    assert_eq!(ignored.1["ignored"], true);
+    assert_eq!(ignored.1["subscription"], false);
+    let retained = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    assert_eq!(retained["data"][0]["ignored"], true);
+    let restored = client.call("PUT", &path, json!({"ignored":false}), None, None).await;
+    assert_eq!(restored.0, StatusCode::OK, "{}", restored.1);
+    assert_eq!(restored.1["ignored"], false);
+    assert_eq!(restored.1["subscription"], false);
+}
+
+#[tokio::test]
+async fn bulk_scope_moves_selected_allocations_and_preserves_ledger() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let category = client.category("Food", "expense").await;
+    let first = client
+        .transaction("expense", "120.00", &account, &category, "personal")
+        .await;
+    let second = client
+        .transaction("expense", "75.00", &account, &category, "personal")
+        .await;
+    let bad = client
+        .call(
+            "POST",
+            "transactions/bulk-scope",
+            json!({"ids":[first["id"],"missing"],"scope":"family"}),
+            Some("bad-bulk-scope"),
+            None,
+        )
+        .await;
+    assert_eq!(bad.0, StatusCode::NOT_FOUND);
+    let path = format!("transactions/{}", first["id"].as_str().unwrap());
+    assert_eq!(
+        client.call("GET", &path, json!({}), None, None).await.1["allocations"][0]["scope"],
+        "personal"
+    );
+    let moved = client
+        .call(
+            "POST",
+            "transactions/bulk-scope",
+            json!({"ids":[first["id"]],"scope":"family"}),
+            Some("bulk-scope"),
+            None,
+        )
+        .await;
+    assert_eq!(moved.0, StatusCode::OK, "{}", moved.1);
+    assert_eq!(moved.1["updated"], 1);
+    let after = client.call("GET", &path, json!({}), None, None).await.1;
+    assert_eq!(after["allocations"][0]["scope"], "family");
+    assert_eq!(after["movements"], first["movements"]);
+    assert_eq!(after["reconciliation_state"], first["reconciliation_state"]);
+    assert_eq!(after["revision"], 2);
+    let untouched = client
+        .call(
+            "GET",
+            &format!("transactions/{}", second["id"].as_str().unwrap()),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert_eq!(untouched["allocations"][0]["scope"], "personal");
+}
+
+#[tokio::test]
+async fn money_manager_import_applies_family_scope_to_all_new_allocations() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let cash = client.account("Cash", "cash").await;
+    let food = client.category("Food", "expense").await;
+    let salary = client.category("Salary", "income").await;
+    let mapping = json!({"allocation_scope":"family","account_aliases":{"Bank":bank["id"],"Cash":cash["id"]},"category_mappings":[{"source_label":"Food","event_kind":"expense","category_id":food["id"]},{"source_label":"Salary","event_kind":"income","category_id":salary["id"]}]});
+    let (status, uploaded) = upload_file(
+        &client,
+        json!({"files":[{"source_kind":"money_manager","mapping":mapping}]}),
+        "month.xlsx",
+        include_bytes!("fixtures/money-manager-synthetic.xlsx"),
+        "family-import",
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let batch = uploaded["id"].as_str().unwrap();
+    let file = uploaded["files"][0]["id"].as_str().unwrap();
+    wait_for_file(&client, batch, file).await;
+    let revision = client
+        .call("GET", &format!("imports/{batch}"), json!({}), None, None)
+        .await
+        .1["revision"]
+        .as_i64()
+        .unwrap();
+    let committed = client
+        .call(
+            "POST",
+            &format!("imports/{batch}/commit"),
+            json!({"expected_revision":revision}),
+            Some("family-commit"),
+            None,
+        )
+        .await;
+    assert_eq!(committed.0, StatusCode::OK, "{}", committed.1);
+    let transactions = client
+        .call("GET", "transactions", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(transactions["data"].as_array().unwrap().len(), 4);
+    assert!(
+        transactions["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| t["event_type"] != "transfer")
+            .all(|t| t["allocations"][0]["scope"] == "family")
+    );
+}
+
+#[tokio::test]
+async fn settlement_splits_and_repayments_preserve_each_persons_balance() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let category = client.category("Meals", "expense").await;
+    let expense = client
+        .transaction("expense", "900.00", &account, &category, "personal")
+        .await;
+    let bad=client.call("POST","settle-ups/splits",json!({"description":"Dinner","date":"2026-10-08","currency":"INR","total":"900.00","my_share":"300.00","shares":[{"person":"Alex","amount":"200.00"}]}),Some("bad-split"),None).await;
+    assert_eq!(bad.0, StatusCode::BAD_REQUEST);
+    let split=client.create("settle-ups/splits",json!({"description":"Dinner","date":"2026-10-08","currency":"INR","total":"900.00","my_share":"300.00","transaction_id":expense["id"],"shares":[{"person":"Alex","amount":"250.00"},{"person":"Sam","amount":"350.00"}]})).await;
+    let duplicate=client.call("POST","settle-ups/splits",json!({"description":"Dinner","date":"2026-10-08","currency":"INR","total":"900.00","my_share":"300.00","transaction_id":expense["id"],"shares":[{"person":"Alex","amount":"600.00"}]}),Some("duplicate-split"),None).await;
+    assert_eq!(duplicate.0, StatusCode::CONFLICT);
+    let ledger = client
+        .call("GET", "transactions", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(ledger["data"].as_array().unwrap().len(), 1);
+    let alex = &split["obligations"][0];
+    assert_eq!(alex["remaining"], "250.00");
+    let path = format!("settle-ups/{}/repayments", alex["id"].as_str().unwrap());
+    let paid = client
+        .call(
+            "POST",
+            &path,
+            json!({"amount":"100.00","date":"2026-10-09"}),
+            Some("alex-paid"),
+            Some(1),
+        )
+        .await;
+    assert_eq!(paid.0, StatusCode::OK, "{}", paid.1);
+    assert_eq!(paid.1["remaining"], "150.00");
+    let too_small = client
+        .call(
+            "PATCH",
+            &format!("settle-ups/{}", alex["id"].as_str().unwrap()),
+            json!({"amount":"50.00"}),
+            None,
+            Some(2),
+        )
+        .await;
+    assert_eq!(too_small.0, StatusCode::BAD_REQUEST);
+    let remove_path = format!(
+        "settle-ups/{}/repayments/{}",
+        alex["id"].as_str().unwrap(),
+        paid.1["repayments"][0]["id"].as_str().unwrap()
+    );
+    let removed = client
+        .call("DELETE", &remove_path, json!({}), None, Some(2))
+        .await;
+    assert_eq!(removed.0, StatusCode::NO_CONTENT, "{}", removed.1);
+    let reopened = client
+        .call(
+            "GET",
+            &format!("settle-ups/{}", alex["id"].as_str().unwrap()),
+            json!({}),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(reopened.1["remaining"], "250.00");
+    let excessive = client
+        .call(
+            "POST",
+            &path,
+            json!({"amount":"251.00","date":"2026-10-10"}),
+            Some("too-much"),
+            Some(3),
+        )
+        .await;
+    assert_eq!(excessive.0, StatusCode::BAD_REQUEST);
+    let listed = client
+        .call("GET", "settle-ups", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(listed["data"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        listed["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["person"] == "Sam")
+            .unwrap()["remaining"],
+        "350.00"
+    );
+}
+
+#[tokio::test]
+async fn investment_months_calculate_net_additions_and_value_change() {
+    let (client, _) = setup().await;
+    let fund=client.create("investments",json!({"name":"Emergency fund","type":"emergency_fund","currency":"INR","target":"10000.00"})).await;
+    let path = format!(
+        "investments/{}/months/2026-09",
+        fund["id"].as_str().unwrap()
+    );
+    let first = client
+        .call(
+            "PUT",
+            &path,
+            json!({"contribution":"1000.00","withdrawal":"0","value":"1010.00"}),
+            None,
+            Some(1),
+        )
+        .await;
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(first.1["gain_loss"], "10.00");
+    let path2 = format!(
+        "investments/{}/months/2026-10",
+        fund["id"].as_str().unwrap()
+    );
+    let second = client
+        .call(
+            "PUT",
+            &path2,
+            json!({"contribution":"200.00","withdrawal":"100.00","value":"1140.00"}),
+            None,
+            Some(2),
+        )
+        .await;
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(second.1["net_contributions"], "1100.00");
+    assert_eq!(second.1["gain_loss"], "40.00");
+    let invalid = client
+        .call(
+            "PUT",
+            &path2,
+            json!({"contribution":"0","withdrawal":"2000.00","value":"0"}),
+            None,
+            Some(3),
+        )
+        .await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+    let corrected = client
+        .call(
+            "PUT",
+            &path2,
+            json!({"contribution":"200.00","withdrawal":"100.00","value":"1150.00"}),
+            None,
+            Some(3),
+        )
+        .await;
+    assert_eq!(corrected.0, StatusCode::OK, "{}", corrected.1);
+    assert_eq!(corrected.1["gain_loss"], "50.00");
+    assert_eq!(corrected.1["records"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn split_paid_by_another_person_records_only_my_payable() {
+    let (client, _) = setup().await;
+    let split=client.create("settle-ups/splits",json!({"description":"Trip","date":"2026-10-08","currency":"INR","total":"1200.00","my_share":"400.00","paid_by":"Alex","shares":[{"person":"Alex","amount":"500.00"},{"person":"Sam","amount":"300.00"}]})).await;
+    assert_eq!(split["obligations"].as_array().unwrap().len(), 1);
+    assert_eq!(split["obligations"][0]["person"], "Alex");
+    assert_eq!(split["obligations"][0]["direction"], "i_owe");
+    assert_eq!(split["obligations"][0]["remaining"], "400.00");
+}
+
+#[tokio::test]
+async fn deleting_a_split_hides_every_obligation_and_keeps_the_expense() {
+    let (client, pool) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let category = client.category("Meals", "expense").await;
+    let expense = client
+        .transaction("expense", "90.00", &account, &category, "personal")
+        .await;
+    let body = json!({"description":"Dinner","date":"2026-10-08","currency":"INR","total":"90.00","my_share":"30.00","transaction_id":expense["id"],"shares":[{"person":"Alex","amount":"25.00"},{"person":"Sam","amount":"35.00"}]});
+    let split = client.create("settle-ups/splits", body.clone()).await;
+    let anchor = split["obligations"][0]["id"].as_str().unwrap();
+    let stale = client
+        .call(
+            "DELETE",
+            &format!("settle-ups/{anchor}"),
+            json!({}),
+            None,
+            Some(99),
+        )
+        .await;
+    assert_eq!(stale.0, StatusCode::CONFLICT);
+    let removed = client
+        .call(
+            "DELETE",
+            &format!("settle-ups/{anchor}"),
+            json!({}),
+            None,
+            Some(1),
+        )
+        .await;
+    assert_eq!(removed.0, StatusCode::NO_CONTENT);
+    let list = client
+        .call("GET", "settle-ups", json!({}), None, None)
+        .await
+        .1;
+    assert!(list["data"].as_array().unwrap().is_empty());
+    let missing = client
+        .call(
+            "GET",
+            &format!("settle-ups/{anchor}"),
+            json!({}),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(missing.0, StatusCode::NOT_FOUND);
+    let ledger = client
+        .call("GET", "transactions", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(ledger["data"].as_array().unwrap().len(), 1);
+    client.create("settle-ups/splits", body).await;
+    let audit_count:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE action='delete' AND resource_id IN (SELECT id FROM resources WHERE kind='settlement_obligations')").fetch_one(&pool).await.unwrap();
+    assert_eq!(audit_count, 2);
+}
+
+#[tokio::test]
+async fn investment_month_and_holding_deletion_recalculate_and_hide() {
+    let (client, pool) = setup().await;
+    let investment = client
+        .create(
+            "investments",
+            json!({"name":"Fund","type":"investment","currency":"INR"}),
+        )
+        .await;
+    let key = investment["id"].as_str().unwrap();
+    let september = client
+        .call(
+            "PUT",
+            &format!("investments/{key}/months/2026-09"),
+            json!({"contribution":"1000.00","withdrawal":"0","value":"1010.00"}),
+            None,
+            Some(1),
+        )
+        .await;
+    assert_eq!(september.0, StatusCode::OK);
+    let october = client
+        .call(
+            "PUT",
+            &format!("investments/{key}/months/2026-10"),
+            json!({"contribution":"0","withdrawal":"100.00","value":"920.00"}),
+            None,
+            Some(2),
+        )
+        .await;
+    assert_eq!(october.0, StatusCode::OK);
+    let invalid = client
+        .call(
+            "DELETE",
+            &format!("investments/{key}/months/2026-09"),
+            json!({}),
+            None,
+            Some(3),
+        )
+        .await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+    let removed = client
+        .call(
+            "DELETE",
+            &format!("investments/{key}/months/2026-10"),
+            json!({}),
+            None,
+            Some(3),
+        )
+        .await;
+    assert_eq!(removed.0, StatusCode::NO_CONTENT);
+    let detail = client
+        .call("GET", &format!("investments/{key}"), json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(detail["records"].as_array().unwrap().len(), 1);
+    assert_eq!(detail["gain_loss"], "10.00");
+    let deleted = client
+        .call(
+            "DELETE",
+            &format!("investments/{key}"),
+            json!({}),
+            None,
+            Some(4),
+        )
+        .await;
+    assert_eq!(deleted.0, StatusCode::NO_CONTENT);
+    assert!(
+        client
+            .call("GET", "investments", json!({}), None, None)
+            .await
+            .1["data"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        client
+            .call("GET", &format!("investments/{key}"), json!({}), None, None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let audit_count:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id=? AND action IN ('monthly_valuation_removed','delete')").bind(key).fetch_one(&pool).await.unwrap();
+    assert_eq!(audit_count, 2);
+}
+
+#[tokio::test]
 async fn monthly_reset_clears_selected_activity_and_allows_reimport() {
     let (client, pool) = setup().await;
     let bank = client.account("Reset bank", "bank").await;
@@ -884,6 +1474,99 @@ async fn invited_member_can_record_family_spending() {
         assert_eq!(summary.0, StatusCode::OK, "{}", summary.1);
         assert_eq!(summary.1["net_spending"], "125.00");
     }
+}
+
+#[tokio::test]
+async fn combined_reports_and_transactions_include_own_personal_and_shared_once() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let account = owner
+        .create(
+            "accounts",
+            json!({"name":"Shared cash","subtype":"cash","currency":"INR","visibility":"shared"}),
+        )
+        .await;
+    let category = owner.category("Groceries", "expense").await;
+    let mixed = owner.create("transactions", json!({"event_type":"expense","amount":"100.00","currency":"INR","effective_date":"2026-09-15","description":"Mixed expense","movements":[{"account_id":account["id"],"amount":"-100.00"}],"allocations":[{"category_id":category["id"],"amount":"60.00","scope":"personal"},{"category_id":category["id"],"amount":"40.00","scope":"family"}]})).await;
+    let shared = member
+        .transaction("expense", "25.00", &account, &category, "family")
+        .await;
+    let private = member
+        .transaction("expense", "10.00", &account, &category, "personal")
+        .await;
+    let period = "from=2026-09-01&to=2026-10-01";
+    for (scope, expected) in [
+        ("personal", "60.00"),
+        ("family", "65.00"),
+        ("combined", "125.00"),
+    ] {
+        let summary = owner
+            .call(
+                "GET",
+                &format!("analytics/summary?scope={scope}&{period}"),
+                json!({}),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(summary.0, StatusCode::OK, "{}", summary.1);
+        assert_eq!(summary.1["net_spending"], expected);
+        let categories = owner
+            .call(
+                "GET",
+                &format!("analytics/categories?scope={scope}&{period}"),
+                json!({}),
+                None,
+                None,
+            )
+            .await
+            .1;
+        assert_eq!(categories["data"][0]["amount"], expected);
+        let types = owner
+            .call(
+                "GET",
+                &format!("analytics/types?scope={scope}&{period}"),
+                json!({}),
+                None,
+                None,
+            )
+            .await
+            .1;
+        assert_eq!(types["data"][0]["amount"], expected);
+        let transactions = owner
+            .call(
+                "GET",
+                &format!("transactions?scope={scope}&{period}"),
+                json!({}),
+                None,
+                None,
+            )
+            .await;
+        assert_eq!(transactions.0, StatusCode::OK, "{}", transactions.1);
+        let rows = transactions.1["data"].as_array().unwrap();
+        assert_eq!(rows.iter().filter(|v| v["id"] == mixed["id"]).count(), 1);
+        assert!(!rows.iter().any(|v| v["id"] == private["id"]));
+        assert_eq!(
+            rows.iter().any(|v| v["id"] == shared["id"]),
+            scope != "personal"
+        );
+        let mixed_row = rows.iter().find(|v| v["id"] == mixed["id"]).unwrap();
+        assert_eq!(
+            mixed_row["allocations"].as_array().unwrap().len(),
+            if scope == "combined" { 2 } else { 1 }
+        );
+    }
+    let member_combined = member
+        .call(
+            "GET",
+            &format!("analytics/summary?scope=combined&{period}"),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert_eq!(member_combined["net_spending"], "75.00");
 }
 
 #[tokio::test]

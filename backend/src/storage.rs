@@ -67,6 +67,7 @@ pub async fn visible(
             account_visible(db, p, &account).await
         }
         "budgets" => Ok(v["owner_id"] == p.user_id || v["scope"] == "family"),
+        "settlement_obligations" | "investments" => Ok(v["owner_id"] == p.user_id),
         _ => Ok(true),
     }
 }

@@ -3,6 +3,7 @@ pub mod auth;
 pub mod balances;
 pub mod domain;
 pub mod error;
+pub mod recurring;
 pub mod reset;
 pub mod storage;
 
@@ -61,4 +62,5 @@ pub fn router(state: AppState, web: &Path) -> Router {
 pub mod import_parse;
 pub mod imports;
 
+pub mod planning;
 pub mod reconciliation;

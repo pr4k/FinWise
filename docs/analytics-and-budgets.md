@@ -12,7 +12,10 @@ Services within the modular monolith:
 - `budgets`: plan lifecycle, category limits, actuals, revisions, member contribution targets, and threshold alerts.
 - Shared `reporting_policy`: date boundaries, currency, inclusion rules, visibility, refunds, and ledger revision selection. This prevents dashboards and budget screens from calculating different actuals.
 
-V1 includes monthly budgets, personal/family views, category and merchant analysis, historical comparisons, budget progress, in-app alerts, and coverage-aware pacing. Rollover, recurring-bill commitments, savings goals, predictive models, and envelope budgeting remain later extensions.
+V1 includes monthly budgets, personal/family views, category and merchant analysis, historical comparisons, budget progress, and a monthly savings goal. Rollover, recurring-bill commitments, predictive models, and envelope budgeting remain later extensions.
+
+The Analytics and Transactions screens have Personal, Family, and Combined view tabs. Personal shows the signed-in member's personal allocations and budget, plus private investment valuations, emergency fund targets, and settle-up obligations. Family shows shared allocations and the family budget. Combined sums the signed-in member's personal allocations with shared family allocations, counts each transaction or transfer once, and shows the personal and family budgets separately. Other members' personal allocations are excluded. Account balances are explicitly labeled as authorized account snapshots independent of allocation scope. Investment totals use the latest recorded value on or before the selected month and only combine holdings in the household currency. Settle-up balances use obligations and repayments dated through the selected month; other currencies appear separately. These planning amounts remain distinct from ledger income, spending, transfers, and account balances. Actual budget spending uses the existing allocation-based tracking API.
+Budget category rows open the contributing allocations and transactions. Investment rows open month-by-month contributions, withdrawals, values, and changes since the previous record. Settle-up person rows open obligations and dated payment history. Deleted planning records leave active analytics while their audit snapshots remain available to the backend.
 
 ## 2. Analytics screens
 

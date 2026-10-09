@@ -1,5 +1,17 @@
 # FinWise HTTP API specification
 
+### Settle up, investments, and savings plans
+
+`GET/POST /settle-ups` stores private, per-person obligations with `person`, `direction` (`owed_to_me` or `i_owe`), `kind`, exact decimal `amount`, `currency`, `date`, and `description`. `POST /settle-ups/splits` accepts a purchase `total`, `my_share`, named `shares`, and `paid_by` (`me` or a name among the shares); their exact minor-unit sum must equal the total. If you paid, it creates a receivable for each other person. If another person paid, it creates a payable for your share. An optional `transaction_id` links a purchase you paid to an accessible, active expense with the same total and currency; a transaction can have only one split. Splits do not create expenses. `POST /settle-ups/{id}/repayments` takes `amount` and `date`, requires the current revision, and cannot exceed the remaining balance. `PATCH /settle-ups/{id}` corrects obligation details, while keeping a split share amount locked. `DELETE /settle-ups/{id}/repayments/{payment_id}` removes a mistaken repayment with the current obligation revision. Revisions remain in the audit history.
+
+`DELETE /settle-ups/{id}` requires the current revision and hides the obligation from active lists and analytics. For a split it deletes all obligations in that split as one transaction; the linked expense stays in the ledger. Audit snapshots are retained, and a deleted split no longer blocks a new split for the same expense.
+
+`GET/POST /investments` stores private investments or emergency funds with a currency, optional target, and optional monthly addition goal. `PATCH /investments/{id}` updates the plan. An optional `visibility` of `shared` allows other household members to see that holding's monthly net additions in the household report; holdings are private by default and their details remain owner-only. `PUT /investments/{id}/months/{month}` records that month's `contribution`, `withdrawal`, and closing `value`, all exact decimal strings. Repeating a month with its current revision corrects the record. The API returns cumulative net contributions and `gain_loss = closing value − cumulative net contributions`. Month records are sorted chronologically and cannot withdraw more than total contributions. For holdings that predate FinWise, enter the initial cost basis as the first month's contribution.
+
+`DELETE /investments/{id}/months/{month}` removes one monthly record and recalculates later net additions and value change; it rejects a deletion that would leave withdrawals greater than contributions. `DELETE /investments/{id}` hides the holding and its monthly records from active views and analytics. Both require the current investment revision, retain audit history, and leave ledger transactions unchanged.
+
+Budgets accept an optional `savings_goal` alongside expected income and category limits. The browser compares expected income, limits, savings goal, recorded income, actual category spending, and unbudgeted spending. These planning records do not create bank/cash transactions or automatically move funds.
+
 ### Implemented monthly data reset
 
 `POST /api/v1/data/reset-preview` accepts `{"months":["2026-09","2026-11"]}` and returns normalized months, a `counts` object, scope, and `preview_token`. Counts cover transactions, statement entries, reconciliation sessions, balance checks, budgets, and import rows. Select 1–24 calendar months; duplicate months are deduplicated. Both reset endpoints require an owner/admin session, CSRF token, and idempotency key.
@@ -150,11 +162,14 @@ Candidate ranking can use AI, but all balance arithmetic and authorization are d
 
 ## 6. Analytics, budgets, and exports
 
-All report endpoints use the shared reporting policy and accept `scope=personal|family`, `from`, `to`, optional `compare_from`, `compare_to`, `account_id`, `category_id`, `member_id` (authorized only), currency, and allowlisted dimensions. Require explicit periods or documented defaults. Responses echo canonical period boundaries, scope, filters, policy version, relevant revisions, coverage/completeness, and currency. Unknown coverage is never serialized as zero.
+All report endpoints use the shared reporting policy and accept `scope=personal|family|combined`, `from`, `to`, optional `compare_from`, `compare_to`, `account_id`, `category_id`, `member_id` (authorized only), currency, and allowlisted dimensions. Require explicit periods or documented defaults. Responses echo canonical period boundaries, scope, filters, policy version, relevant revisions, coverage/completeness, and currency. Unknown coverage is never serialized as zero.
+
+`GET /transactions?scope=personal|family|combined` applies the same allocation scope to the ledger list. Combined includes the signed-in member's personal allocations and shared family allocations, excludes other members' personal allocations, and returns each matching transaction once. The unspecialized `GET /transactions` remains available for full authorized ledger workflows.
 
 | Method and path | Response purpose |
 |---|---|
 | `GET /analytics/summary` | Income, net spending, recorded surplus, unique transfer volume, budget status and unresolved counts; separate account-balance availability. |
+| `GET /analytics/household` | Monthly per-member income, net spending, net invested, and expense categories for visible transactions and opted-in shared investment totals. Requires `from` and `to`; accepts `currency`. |
 | `GET /analytics/series?grain=month|day&months=3|6|12` | Income/spending/net cash flow series and coverage per bucket; balance snapshots in a distinct series. |
 | `GET /analytics/categories` | Category totals/share/change and drilldown cursor; refunds and Uncategorized retained. |
 | `GET /analytics/income-categories` | Income totals by canonical category; clients can show parent and subcategory rollups. |

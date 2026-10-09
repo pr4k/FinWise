@@ -18,6 +18,13 @@ test('invalid or missing view preferences use safe defaults',()=>{
   assert.deepEqual({...view.read('','2026-10')},{month:'2026-10',scope:'personal'});
   assert.throws(()=>view.save('2026-00','personal','http://localhost/',()=>{}));
 });
+test('combined scope survives refresh and scopes the transaction list',()=>{
+  const view=state(); let next;
+  view.save('2026-09','combined','http://localhost/#analytics',path=>next=path);
+  assert.equal(view.read(new URL(next,'http://localhost').search,'2026-10').scope,'combined');
+  assert.equal(view.transactionsPath('2026-09',true,{},'combined'),'transactions?scope=combined&from=2026-09-01&to=2026-10-01');
+  assert.throws(()=>view.transactionsPath('2026-09',true,{},'invalid'));
+});
 
 test('transaction history can use the selected month or explicit all dates',()=>{
   const view=state();

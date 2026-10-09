@@ -76,6 +76,47 @@
     const total=values.reduce((sum,value)=>{const part=minor(value);return sum+part.value*10n**BigInt(scale-part.scale);},0n);
     return decimal(total,scale);
   }
+  function subscriptionMonth(items,month) {
+    const subscriptions=items.filter(item=>item.subscription&&!item.ignored);
+    const rows=subscriptions.map(item=>{
+      const occurrences=(item.occurrences||[]).filter(payment=>payment.date.slice(0,7)===month);
+      const scale=new Intl.NumberFormat('en',{style:'currency',currency:item.currency}).resolvedOptions().maximumFractionDigits;
+      return {...item,monthAmount:sumMoney(occurrences.map(payment=>payment.amount),scale),monthCount:occurrences.length,statementCount:occurrences.filter(payment=>payment.source==='bank_statement').length};
+    });
+    const byCurrency=new Map();
+    for(const row of rows.filter(item=>item.monthCount)) {
+      const group=byCurrency.get(row.currency)||{currency:row.currency,amounts:[],count:0,statementCount:0};
+      group.amounts.push(row.monthAmount);
+      group.count+=row.monthCount;
+      group.statementCount+=row.statementCount;
+      byCurrency.set(row.currency,group);
+    }
+    const totals=[...byCurrency.values()].map(group=>({currency:group.currency,amount:sumMoney(group.amounts,new Intl.NumberFormat('en',{style:'currency',currency:group.currency}).resolvedOptions().maximumFractionDigits),count:group.count,statementCount:group.statementCount})).sort((a,b)=>a.currency.localeCompare(b.currency));
+    return {rows,totals};
+  }
+  function planningSummary(investments,obligations,month,currency,scale=2) {
+    const holdings=investments.map(item=>{
+      const records=(item.records||[]).filter(record=>record.month<=month).sort((a,b)=>a.month.localeCompare(b.month));
+      return {...item,snapshot:records.at(-1)||null,monthRecord:records.find(record=>record.month===month)||null};
+    });
+    const valued=holdings.filter(item=>item.currency===currency&&item.snapshot);
+    const selected=holdings.filter(item=>item.currency===currency&&item.monthRecord);
+    const settlementRows=obligations.filter(item=>item.date.slice(0,7)<=month).map(item=>{
+      const paid=sumMoney((item.repayments||[]).filter(payment=>payment.date.slice(0,7)<=month).map(payment=>payment.amount),new Intl.NumberFormat('en',{style:'currency',currency:item.currency}).resolvedOptions().maximumFractionDigits);
+      return {...item,asOfRemaining:difference(item.amount,paid)};
+    }).filter(item=>minor(item.asOfRemaining).value>0n);
+    return {
+      holdings,settlementRows,
+      value:sumMoney(valued.map(item=>item.snapshot.value),scale),
+      invested:sumMoney(valued.map(item=>item.snapshot.net_contributions),scale),
+      gain:sumMoney(valued.map(item=>item.snapshot.gain_loss),scale),
+      added:sumMoney(selected.map(item=>item.monthRecord.contribution),scale),
+      withdrawn:sumMoney(selected.map(item=>item.monthRecord.withdrawal),scale),
+      valuedCount:valued.length,holdingCount:holdings.filter(item=>item.currency===currency).length,
+      owedToMe:sumMoney(settlementRows.filter(item=>item.currency===currency&&item.direction==='owed_to_me').map(item=>item.asOfRemaining),scale),
+      iOwe:sumMoney(settlementRows.filter(item=>item.currency===currency&&item.direction==='i_owe').map(item=>item.asOfRemaining),scale)
+    };
+  }
   function cumulativeMoney(rows,key,scale=2) {
     let total=0n;
     return rows.map(row=>{const part=minor(row[key]);total+=part.value*10n**BigInt(scale-part.scale);return decimal(total,scale);});
@@ -91,5 +132,5 @@
     const details=series.flatMap(item=>item.values.map((value,index)=>value==null?'':`<p>${escape(item.name)} · ${escape(labels[index])}: ${escape(currency)} ${escape(value)}</p>`)).join('');
     return chart({type:'line',labels,currency,datasets},title,details);
   }
-  window.finwiseAnalytics={difference,negate,sankey,groupedBars,categoryAverages,cumulativeSpending,sumMoney,cumulativeMoney,pacedBudget,moneyLines,hydrateCharts};
+  window.finwiseAnalytics={difference,negate,sankey,groupedBars,categoryAverages,cumulativeSpending,sumMoney,subscriptionMonth,planningSummary,cumulativeMoney,pacedBudget,moneyLines,hydrateCharts};
 })();
