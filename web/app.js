@@ -16,7 +16,14 @@ function syncMenuButton() {
   const mobile=window.matchMedia('(max-width:760px)').matches;
   menuButton.setAttribute('aria-label',mobile?'Open navigation':shell.classList.contains('sidebar-collapsed')?'Expand navigation':'Collapse navigation');
   menuButton.setAttribute('aria-expanded',String(!mobile && !shell.classList.contains('sidebar-collapsed')));
-  document.querySelector('.sidebar').inert=mobile || shell.classList.contains('sidebar-collapsed');
+  document.querySelector('.sidebar').inert=mobile;
+}
+function syncScopeControl() {
+  document.querySelectorAll('.scope-segments [data-scope]').forEach(el=>{
+    const active=el.dataset.scope===state.scope;
+    el.classList.toggle('selected',active);
+    el.setAttribute('aria-pressed',String(active));
+  });
 }
 const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', recurring:'Recurring', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Budgets', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
 const previousMonth=new Date(`${savedView.month}-01T00:00:00Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
@@ -64,7 +71,7 @@ function householdDate() { const parts=Object.fromEntries(new Intl.DateTimeForma
 function localDateTime(value) { const date=new Date(value); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}T${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`; }
 function period(month=state.month) { const [y,m]=month.split('-').map(Number); return {from:`${month}-01`,to:`${m===12?y+1:y}-${String(m===12?1:m+1).padStart(2,'0')}-01`}; }
 function reportQuery(month=state.month) { return new URLSearchParams({...period(month),scope:state.scope,currency:state.me.household.base_currency}).toString(); }
-function heading(title,description,actions='') { return `<div class="page-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h1>${h(title)}</h1><p>${h(description)}</p></div><div class="heading-actions">${actions}</div></div>`; }
+function heading(title,description,actions='') { return `<div class="page-heading"><div><span class="eyebrow">${h(state.me?.household?.name||'MY HOUSEHOLD')} / ${h(state.scope.toUpperCase())}</span><h1>${h(title)}</h1><p>${h(description)}</p></div><div class="heading-actions">${actions}</div></div>`; }
 function scopeTabs() { return `<div class="analytics-scope-tabs" role="group" aria-label="View scope">${[['personal','Personal'],['family','Family'],['combined','Combined']].map(([scope,label])=>`<button type="button" data-action="analytics-scope" data-scope="${scope}" aria-pressed="${state.scope===scope}" class="${state.scope===scope?'active':''}">${label}</button>`).join('')}</div>`; }
 function panel(title,body) { return `<section class="panel live-panel"><h2>${h(title)}</h2>${body}</section>`; }
 function table(headers,rows) { return rows.length ? `<div class="table-scroll"><table class="live-table"><thead><tr>${headers.map(v=>`<th>${h(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map((v,i)=>`<td data-label="${h(headers[i])}">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : empty('No records yet.'); }
@@ -95,8 +102,9 @@ async function signedIn() {
   authRoot.hidden=true; shell.hidden=false;
   document.querySelector('#user-name').textContent=state.me.user.name;
   document.querySelector('#household-name').textContent=state.me.household.name;
-  document.querySelector('#household-currency').textContent=state.me.household.base_currency;
-  document.querySelectorAll('.avatar').forEach(el=>el.textContent=state.me.user.name.slice(0,1));
+  document.querySelector('#household-currency').textContent=[state.me.household.base_currency,state.me.household.timezone].filter(Boolean).join(' · ');
+  document.querySelector('.household-icon').textContent=state.me.household.name.split(/\s+/).slice(0,2).map(word=>word[0]||'').join('').toUpperCase();
+  document.querySelectorAll('.avatar').forEach(el=>el.textContent=state.me.user.name.split(/\s+/).slice(0,2).map(word=>word[0]||'').join('').toUpperCase());
   renderRoute();
 }
 async function start() {
@@ -430,38 +438,50 @@ const views = {
   },
   async overview() {
     const query=reportQuery();
-    const [dashboard,transactions]=await Promise.all([api.request(`analytics/dashboard?${query}`),api.request(`analytics/transactions?${query}&limit=10`)]);
+    const [dashboard,transactions,plans]=await Promise.all([api.request(`analytics/dashboard?${query}`),api.request(`analytics/transactions?${query}&limit=10`),api.collection(`budgets?month=${state.month}${state.scope==='combined'?'':`&scope=${state.scope}`}`).catch(()=>({data:[]}))]);
     const {summary,categories,accounts,series:daily}=dashboard;
     const currency=state.me.household.base_currency;
     const monthLabel=new Intl.DateTimeFormat('en',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${state.month}-01T00:00:00Z`));
     const surplus=Number(summary.recorded_surplus);
+    const budgetPlans=plans.data.filter(plan=>plan.currency===currency);
+    const budgetPlan=state.scope==='combined'?null:budgetPlans.find(plan=>plan.state==='active')||budgetPlans[0];
+    const budgetTracking=budgetPlan?await api.request(`budgets/${id(budgetPlan.id)}/tracking`).catch(()=>null):null;
+    const budgetScale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+    const planned=budgetTracking?Number(analyticsView.sumMoney(budgetTracking.data.map(line=>line.planned),budgetScale)):null;
+    const actual=budgetTracking?Number(analyticsView.sumMoney([...budgetTracking.data.map(line=>line.actual),budgetTracking.unbudgeted],budgetScale)):null;
+    const budgetPercent=planned>0?Math.round(actual/planned*100):null;
     const metrics=[
       [surplus<0?'Recorded shortfall':'Recorded surplus',summary.recorded_surplus,moneyTone(summary.recorded_surplus),'Income minus net spending',surplus<0?'↘':'↗','position-card'],
       ['Income',summary.income,moneyTone(summary.income),'Recorded money in','↓',''],
       ['Net spending',summary.net_spending,moneyTone(summary.net_spending,'debt'),'Expenses minus refunds','↑',''],
       ['Transfers',summary.transfer_volume,'neutral','Between accounts · not spending','↔','']
     ];
-    const metricCard=([label,value,tone,description,icon,extra])=>`<article class="overview-metric ${extra} ${tone}"><div class="metric-label">${label}<span class="metric-icon" aria-hidden="true">${icon}</span></div><strong class="metric-number"><span class="metric-currency">${h(currency)}</span> ${displayMoney(value,currency)}</strong><span class="metric-caption">${description}</span></article>`;
+    const overviewAmount=value=>new Intl.NumberFormat('en-IN',{style:'currency',currency}).format(Number(value));
+    const metricCard=([label,value,tone,description,icon,extra])=>`<article class="overview-metric ${extra} ${tone}"><div class="metric-label">${label}<span class="metric-icon" aria-hidden="true">${icon}</span></div><strong class="metric-number">${h(overviewAmount(value))}</strong><span class="metric-caption">${description}</span></article>`;
     const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
     const cashflow=analyticsView.moneyLines(daily.data.map(row=>row.period.slice(-2)),[
-      {name:'Income',color:'#137653',values:analyticsView.cumulativeMoney(daily.data,'income',scale)},
-      {name:'Spending',color:'#ba4250',values:analyticsView.cumulativeMoney(daily.data,'net_spending',scale)}
+      {name:'Income',color:'#197b61',values:analyticsView.cumulativeMoney(daily.data,'income',scale)},
+      {name:'Spending',color:'#b88653',values:analyticsView.cumulativeMoney(daily.data,'net_spending',scale)}
     ],currency,`Cumulative recorded income and spending for ${monthLabel}`);
-    const cards=`<div class="overview-hero"><div class="position-summary"><span class="section-kicker">YOUR MONTH AT A GLANCE</span>${metricCard(metrics[0])}<div class="position-note"><span aria-hidden="true">${surplus<0?'↘':surplus>0?'↗':'−'}</span><p>${surplus<0?'Recorded spending is higher than income.':surplus>0?'Recorded income is ahead of spending.':'Recorded income and spending are equal.'}<small>Based on entries for this month.</small></p></div></div><section class="cashflow-panel"><div class="overview-panel-heading"><div><h2>Money in, money out</h2><p class="helper">Cumulative cash flow · ${h(currency)}</p></div>${navButton('analytics','View analytics ↗')}</div>${cashflow}</section></div><div class="overview-metrics">${metrics.slice(1).map(metricCard).join('')}</div>`;
+    const budgetCard=`<article class="overview-metric overview-budget"><div class="metric-label">Budget pacing<span class="metric-icon" aria-hidden="true">▤</span></div><strong class="metric-number">${budgetPercent==null?(state.scope==='combined'?`${plans.data.length} plans`:'No plan'):`${budgetPercent}<small>% used</small>`}</strong><div class="overview-budget-track" ${budgetPercent==null?'aria-hidden="true"':`role="progressbar" aria-label="Budget used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0,Math.min(100,budgetPercent))}"`}><span style="width:${budgetPercent==null?0:Math.max(0,Math.min(100,budgetPercent))}%"></span></div><div class="overview-budget-foot"><span>${planned>0?`${h(overviewAmount(planned))} planned · ${h(overviewAmount(Math.abs(planned-actual)))} ${actual>planned?'over plan':'remaining'}`:state.scope==='combined'?'Personal and family plans stay separate':'Create a monthly budget'}</span><button type="button" data-view="budgets" aria-label="Review budgets" class="outline-button">›</button></div></article>`;
+    const cards=`<section class="overview-hero" aria-label="Monthly financial summary"><div class="position-summary ${surplus<0?'shortfall':''}"><div class="hero-top"><span class="section-kicker">${h(monthLabel)} <i></i> ${h(state.scope)} scope</span><span class="hero-mark" aria-hidden="true"><svg class="icon"><use href="#i-chart"/></svg></span></div>${metricCard(metrics[0])}<p class="hero-basis">Income minus net spending · Not an account balance</p><div class="position-note"><span aria-hidden="true">✓</span><p>Ledger allocations counted once<small>Recorded data for ${h(monthLabel)}</small></p>${navButton('analytics','Explore analytics →')}</div></div><div class="overview-metrics">${metrics.slice(1).map(metricCard).join('')}${budgetCard}</div></section>`;
     const roots=[...categoryView.rollup(categories.data,state.categories)].filter(([key,row])=>(key==='uncategorized'||state.categories.find(c=>c.id===key)?.parent_id==null) && Number(row.amount)!==0).sort((a,b)=>Number(b[1].amount)-Number(a[1].amount));
     const largest=Math.max(1,...roots.map(([,row])=>Math.abs(Number(row.amount))));
     const spending=roots.slice(0,4).map(([key,row])=>`<li><div><span>${h(key==='uncategorized'?'Uncategorized':state.categories.find(c=>c.id===key)?.name||'Category')}</span><strong class="${moneyTone(row.amount,'debt')}">${amount(row.amount,currency)}</strong></div><div class="overview-track" aria-hidden="true"><span class="${Number(row.amount)<0?'refund':''}" style="width:${Math.abs(Number(row.amount))/largest*100}%"></span></div></li>`).join('');
     const activeAccounts=accounts.data.filter(a=>a.active!==false).sort((a,b)=>Number(b.balance?.amount!=null)-Number(a.balance?.amount!=null));
-    const balances=activeAccounts.slice(0,4).map(a=>`<li><span class="overview-account-icon" aria-hidden="true"><svg class="icon"><use href="#i-wallet"/></svg></span><div><strong>${h(a.name)}</strong><small>${a.subtype==='credit_card'?'Amount owed':a.balance?.source==='balance_check'?'Observed balance':a.balance?.source==='opening_balance'?'Starting balance':'Balance not set'}</small></div>${moneyFigure(a.balance?.amount,a.currency,a.subtype==='credit_card'?'debt':'asset')}</li>`).join('');
-    const snapshot=`<div class="overview-details"><section class="panel overview-panel"><div class="overview-panel-heading"><div><span class="section-kicker">THIS MONTH</span><h2>Where your money goes</h2></div>${navButton('analytics','Explore analytics →')}</div>${spending?`<ul class="overview-spending">${spending}</ul><p class="helper">${roots.length>4?'Top 4 categories. ':''}Net of refunds. Negative amounts are net refunds.</p>`:empty('No spending recorded for this month.')}<div class="overview-panel-footer">${navButton('budgets','Manage monthly budget →')}</div></section><section class="panel overview-panel"><div class="overview-panel-heading"><div><span class="section-kicker">CURRENT SNAPSHOT</span><h2>Your accounts</h2></div>${navButton('accounts','View all →')}</div>${balances?`<ul class="overview-balances">${balances}</ul>`:empty('Add an account or import a statement to get started.')}<p class="helper">${activeAccounts.length>4?`Showing 4 of ${activeAccounts.length} accounts. `:''}${h(currency)} accounts · latest known balances, not month-end totals.</p><div class="overview-panel-footer">${navButton('reconcile','Reconcile balances →')}</div></section></div>`;
+    const balances=activeAccounts.slice(0,4).map(a=>{const due=state.accounts.find(account=>account.id===a.id)?.card_due;return `<li><span class="overview-account-icon" aria-hidden="true"><svg class="icon"><use href="#i-wallet"/></svg></span><div><strong>${h(a.name)}</strong><small>${a.subtype==='credit_card'?'Amount owed':a.balance?.source==='balance_check'?'Observed balance':a.balance?.source==='opening_balance'?'Starting balance':'Balance not set'} · ${h(a.currency)}${a.balance?.as_of?` · ${h(a.balance.as_of)}`:''}</small>${a.subtype==='credit_card'&&due?`<small class="overview-card-due">Payment due ${due.amount==null?'amount not entered':amount(due.amount,a.currency)} · ${h(due.due_date)}</small>`:''}</div>${moneyFigure(a.balance?.amount,a.currency,a.subtype==='credit_card'?'debt':'asset')}</li>`;}).join('');
+    const spendingPanel=`<section class="panel overview-panel"><div class="overview-panel-heading"><div><h2>Where it went</h2><p class="helper">Top expense categories · Refunds deducted</p></div>${navButton('budgets','Budgets →')}</div>${spending?`<ul class="overview-spending">${spending}</ul><p class="helper">${roots.length>4?'Top 4 categories. ':''}Net of refunds. Negative amounts are net refunds.</p>`:empty('No spending recorded for this month.')}</section>`;
+    const accountsPanel=`<section class="panel overview-panel"><div class="overview-panel-heading"><div><h2>Account position</h2><p class="helper">Latest known balances · Not month-end totals</p></div>${navButton('accounts','All accounts →')}</div>${balances?`<ul class="overview-balances">${balances}</ul>`:empty('Add an account or import a statement to get started.')}<p class="helper">${activeAccounts.length>4?`Showing 4 of ${activeAccounts.length} accounts. `:''}Currencies stay separate.</p></section>`;
+    const unknownCount=activeAccounts.filter(a=>a.balance?.amount==null).length;
+    const attention=`<section class="attention-panel" aria-label="Items needing attention"><div class="attention-heading"><span class="attention-dot" aria-hidden="true"></span><h2>Needs your attention</h2><span>Review recorded data</span></div><div class="attention-grid"><button type="button" data-view="budgets" class="attention-item"><span class="attention-icon warm" aria-hidden="true">▤</span><span><strong>${budgetPercent==null?'Review monthly budgets':budgetPercent>100?'Budget over recorded limit':'Budgets within recorded limits'}</strong><small>${budgetPercent==null?'Compare limits with recorded spending':'Based on recorded spending'}</small></span><span aria-hidden="true">›</span></button><button type="button" data-view="reconcile" class="attention-item"><span class="attention-icon violet" aria-hidden="true">⇄</span><span><strong>Review statement evidence</strong><small>Match rows and inspect differences</small></span><span aria-hidden="true">›</span></button><button type="button" data-view="accounts" class="attention-item"><span class="attention-icon neutral" aria-hidden="true">⌁</span><span><strong>${unknownCount} ${unknownCount===1?'balance needs':'balances need'} an anchor</strong><small>Unknown until dated evidence is added</small></span><span aria-hidden="true">›</span></button></div></section>`;
     const recent=transactions.data.map(t=>{
       const incoming=['income','refund'].includes(t.event_type),outgoing=t.event_type==='expense';
       const tone=incoming?'positive':outgoing?'negative':'neutral';
       const scopedAmount=t.event_type==='transfer'?t.amount:analyticsView.sumMoney(t.allocations.map(a=>a.amount),new Intl.NumberFormat('en',{style:'currency',currency:t.currency}).resolvedOptions().maximumFractionDigits);
       return `<li><button type="button" class="recent-item ${tone}" data-action="transaction-detail" data-id="${h(t.id)}"><span class="recent-icon" aria-hidden="true">${incoming?'↙':outgoing?'↗':'⇄'}</span><span class="recent-copy"><strong>${h(t.description||'Untitled')}</strong><small>${h(t.effective_date)} · ${h([...new Set(t.movements.map(m=>accountName(m.account_id)))].join(' → '))}</small></span><span class="recent-value">${incoming?'+ ':outgoing?'− ':''}${amount(scopedAmount,t.currency)}<small>${h(t.event_type)}</small></span></button></li>`;
     }).join('');
-    return heading('Your finances',`${monthLabel} · ${state.scope[0].toUpperCase()+state.scope.slice(1)} overview`,navButton('imports','Import statements')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+
-      cards+coverage()+`<div class="overview-workspace"><section class="panel live-panel overview-activity"><div class="overview-panel-heading"><div><span class="section-kicker">THE LATEST MOVEMENTS</span><h2>Recent activity</h2></div>${navButton('transactions','View all activity →')}</div>${recent?`<ul class="recent-list">${recent}</ul>`:empty('Your activity will appear here when you add a transaction.')}</section>${snapshot}</div>`+
+    return heading('Your month, clearly.','Recorded activity, account position, and the things worth a closer look.',navButton('imports','Import statements')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+
+      cards+attention+`<div class="overview-chart-grid"><section class="panel cashflow-panel"><div class="overview-panel-heading"><div><h2>Recorded money flow</h2><p class="helper">Cumulative income and spending · ${h(monthLabel)} · ${h(currency)}</p></div>${navButton('analytics','Full report →')}</div>${cashflow}</section>${spendingPanel}</div><div class="overview-workspace"><section class="panel live-panel overview-activity"><div class="overview-panel-heading"><div><h2>Latest activity</h2></div>${navButton('transactions','All activity →')}</div>${recent?`<ul class="recent-list">${recent}</ul>`:empty('Your activity will appear here when you add a transaction.')}</section>${accountsPanel}</div>${coverage()}`+
       (!state.accounts.length?panel('Get started',`<p>Import your Money Manager workbook, map the account and category labels, then review before committing.</p>${navButton('imports','Start an import')}`):'');
   },
   async analytics() {
@@ -509,14 +529,14 @@ const views = {
     const currencyScale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
     const dayLabels=series.data.map(row=>row.period.slice(-2));
     const cashflowChart=analyticsView.moneyLines(dayLabels,[
-      {name:'Cumulative income',color:'#137653',values:analyticsView.cumulativeMoney(series.data,'income',currencyScale)},
-      {name:'Cumulative net spending',color:'#b83e4c',values:analyticsView.cumulativeMoney(series.data,'net_spending',currencyScale)},
+      {name:'Cumulative income',color:'#197b61',values:analyticsView.cumulativeMoney(series.data,'income',currencyScale)},
+      {name:'Cumulative net spending',color:'#b88653',values:analyticsView.cumulativeMoney(series.data,'net_spending',currencyScale)},
       {name:'Recorded surplus',values:analyticsView.cumulativeMoney(series.data,'recorded_surplus',currencyScale),dashed:true}
     ],currency,`Income, spending and surplus through ${state.month}`);
     const trendMonths=trend.data.map(row=>row.period);
     const monthlyCashflowChart=analyticsView.moneyLines(trendMonths,[
-      {name:'Income',color:'#137653',values:trend.data.map(row=>row.income)},
-      {name:'Net spending',color:'#b83e4c',values:trend.data.map(row=>row.net_spending)},
+      {name:'Income',color:'#197b61',values:trend.data.map(row=>row.income)},
+      {name:'Net spending',color:'#b88653',values:trend.data.map(row=>row.net_spending)},
       {name:'Recorded surplus',values:trend.data.map(row=>row.recorded_surplus),dashed:true}
     ],currency,'Monthly recorded income, net spending and surplus');
     const categoryMonths=trendMonths.map(month=>month===state.month?categories:trendCategories[categoryTrendMonths.indexOf(month)]);
@@ -645,7 +665,7 @@ const views = {
       const actualLine=analyticsView.cumulativeMoney(daily.data,'net_spending',scale).map((value,day)=>day<cutoff?value:null);
       const priorLine=analyticsView.cumulativeMoney(prior.data,'net_spending',scale);
       const guide=analyticsView.pacedBudget(planned,labels.length,scale);
-      const chart=analyticsView.moneyLines(labels,[{name:'Recorded spending',values:actualLine,color:'#b83e4c'},{name:'Even budget guide',values:guide,dashed:true,color:'#6958d5'},{name:`${previous} recorded`,values:labels.map((_,day)=>priorLine[day]??null),dashed:true,color:'#9fb3cc'}],b.currency,`${b.name||b.month} spending against plan`);
+      const chart=analyticsView.moneyLines(labels,[{name:'Recorded spending',values:actualLine,color:'#b88653'},{name:'Even budget guide',values:guide,dashed:true,color:'#729a58'},{name:`${previous} recorded`,values:labels.map((_,day)=>priorLine[day]??null),dashed:true,color:'#7f82bc'}],b.currency,`${b.name||b.month} spending against plan`);
       const dailyDetails=table(['Day','Net spending','Cumulative spending','Even guide'],daily.data.slice(0,cutoff).map((row,day)=>[h(row.period),amount(row.net_spending,b.currency),amount(actualLine[day],b.currency),amount(guide[day],b.currency)]));
       const canManage=b.owner_id===state.me.user.id||(b.scope==='family'&&['owner','admin'].includes(state.me.membership.role));
       const actions=canManage?`<div class="budget-plan-actions">${b.state==='archived'?'':button('Edit plan','edit-budget',`data-id="${h(b.id)}"`)}${b.state==='draft'?button('Activate','activate-budget',`data-id="${h(b.id)}" data-revision="${b.revision}"`):''}${button('Copy to next month','copy-budget',`data-id="${h(b.id)}" data-revision="${b.revision}"`)}</div>`:'';
@@ -1036,7 +1056,7 @@ const actions = {
   'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:transactionEditor,
   settlement:settlementEditor, split:splitEditor, repayment:el=>repaymentEditor(el.dataset.id), 'settlement-edit':el=>settlementEditEditor(el.dataset.id),
   'settlement-filter':el=>{state.settlementFilter=el.dataset.filter;renderRoute();}, 'investment-filter':el=>{state.investmentFilter=el.dataset.filter;renderRoute();},
-  'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;document.querySelector('#report-scope').value=state.scope;saveView();renderRoute();},
+  'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;syncScopeControl();saveView();renderRoute();},
   'repayment-remove':async el=>{if(!window.confirm('Remove this payment? The obligation balance will increase.'))return;await api.request(`settle-ups/${id(el.dataset.id)}/repayments/${id(el.dataset.payment)}`,{method:'DELETE',revision:Number(el.dataset.revision),body:{}});notify('Payment removed.');await renderRoute();},
   'settlement-delete':async el=>{const item=await api.request(`settle-ups/${id(el.dataset.id)}`);const group=item.split_id?(await api.collection('settle-ups')).data.filter(v=>v.split_id===item.split_id):[item];const message=item.split_id?`Delete this purchase split and all ${group.length} related balances? Recorded payments will be removed from Settle up. The linked expense will remain.`:`Delete the ${item.currency} ${item.amount} obligation for ${item.person} and its payment history?`;if(!window.confirm(message))return;await api.request(`settle-ups/${id(item.id)}`,{method:'DELETE',revision:item.revision,body:{}});notify(item.split_id?'Split deleted.':'Obligation deleted.');await renderRoute();},
   investment:investmentEditor, 'investment-month':el=>investmentMonthEditor(el.dataset.id), 'investment-edit':el=>investmentEditEditor(el.dataset.id),
@@ -1094,7 +1114,6 @@ document.addEventListener('change',async event=>{
     updateMatchComparison();
   }
   if(event.target.id==='report-month' && /^\d{4}-\d{2}$/.test(event.target.value)) { setMonth(event.target.value); if(state.view==='transactions' && location.hash.slice(1)==='transactions/all') navigate('transactions'); else renderRoute(); }
-  if(event.target.id==='report-scope') { state.scope=event.target.value; saveView(); renderRoute(); }
   if(event.target.id==='bulk-scope-all') {
     document.querySelectorAll('#bulk-scope-form [name="transaction_id"]').forEach(box=>{box.checked=event.target.checked;});
   }
@@ -1354,6 +1373,6 @@ window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#join/'))
 document.addEventListener('toggle',event=>{if(event.target.id==='bulk-scope-panel') loadBulkScopePanel(event.target);},true);
 window.addEventListener('resize',syncMenuButton);
 syncMenuButton();
-document.querySelector('#report-scope').value=state.scope;
+syncScopeControl();
 setMonth(state.month);
 start();

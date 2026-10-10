@@ -1,0 +1,335 @@
+/* Live-app adaptation of the finwise/ design reference. */
+:root {
+  --bg:#f4f5f3; --surface:#fff; --ink:#202925; --muted:#707b74;
+  --line:#e7ebe5; --dark:#17241e; --purple:#387554;
+  --purple-soft:#e9f5db; --green:#197b61; --red:#a15440;
+  --card:#fff; --shadow:0 4px 14px #17241e05;
+  --display:Manrope,'Avenir Next',system-ui,sans-serif;
+  --font:'DM Sans','Avenir Next',system-ui,sans-serif;
+  color:var(--ink); background:var(--bg);
+}
+body {background:var(--bg);color:var(--ink);font:14px/1.55 var(--font);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+button,input,select,textarea {font-family:var(--font)}
+button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {outline:3px solid #65a580;outline-offset:3px}
+h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
+.sidebar {width:242px;background:#18221d;color:#bac3b9;border-right:1px solid #26322a;padding:27px 17px 18px;z-index:30}
+.main-area {margin-left:242px}
+.brand {color:#f1f5ed;font-family:var(--display);font-size:25px;font-weight:750;letter-spacing:-1px;padding:0 12px 25px}
+.brand-mark {width:33px;height:33px;background:#d5f5a5;border-radius:11px;color:#233526;font:800 25px var(--display)}
+.brand-dot {color:#d5f5a5}
+.household-card {background:#253027;border:1px solid #344236;border-radius:11px;margin:0 5px 15px;padding:13px 10px}
+.household-icon {background:#374637;color:#d8e9c2;border-radius:9px}
+.household-card strong,.profile strong {color:#e7ece3;font-size:12px}
+.household-card span,.profile span {color:#9cac9e;font-size:10px}
+.nav-list {display:block;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:#465247 transparent}
+.workspace-label {color:#7a8b7c;font-size:9px;letter-spacing:1.6px;margin:18px 0 8px;padding:0 12px;font-weight:650}
+.workspace-label:first-child {margin-top:5px}
+.nav-group-label {margin-top:18px}
+.nav-item {min-height:37px;margin:2px 0;padding:8px 12px;border-radius:8px;color:#bac3b9;font-size:12px;font-weight:500}
+.nav-item svg {width:17px;height:17px;color:#8d9e8f}
+.nav-item:hover {background:#27372c;color:#eef4e9}
+.nav-item.active {background:#d5f5a5;color:#243d25;font-weight:700}
+.nav-item.active svg {color:#284b2d}
+.settings-link {border-top:1px solid #344034;padding-top:16px;margin:14px 0 0;border-radius:0}
+.settings-link:hover {border-radius:8px}
+.profile {border-color:#344034;color:#e7ede3;padding:10px 5px 0}
+.avatar-violet {background:#e1ebcf;color:#46563d}
+.profile button {color:#9eae9e}
+.topbar {position:sticky;top:0;z-index:20;min-height:80px;background:#f9faf7f5;border-color:var(--line);backdrop-filter:blur(14px);padding:14px 36px}
+.breadcrumb {color:#7a857c;font-size:12px}
+.breadcrumb strong {color:#2b372c}
+.crumb-divider {color:#b0b8ab}
+.mobile-menu {width:29px;height:29px;border:1px solid #e0e6dd;border-radius:7px;color:#707b6e;margin-right:3px}
+.mobile-menu:hover {background:#edf3e6}
+.topbar-actions {gap:13px}
+.topbar .scope-picker {height:40px;background:#ebeee7;border:1px solid #e3e7df;border-radius:8px;padding:3px 20px 3px 10px;min-width:0}
+.scope-avatar {color:#568149}
+.topbar .scope-picker select {color:#314532;font-size:12px;font-weight:650}
+.topbar .month-filter {height:40px;background:white;border:1px solid #dfe5da;border-radius:8px;color:#7d8b75;padding-left:10px;font-weight:500}
+.topbar .month-filter input {color:#485b3d;font-size:12px;font-weight:500}
+.content {max-width:1600px;padding:34px 36px 32px}
+.page-heading {align-items:center;gap:24px;margin-bottom:27px}
+.page-heading .eyebrow {display:block;color:#758377;font-size:10px;letter-spacing:1.6px;font-weight:700;margin:0 0 10px}
+.page-heading h1 {font:750 32px/1.2 var(--display);letter-spacing:-1.25px;margin:0 0 10px}
+.page-heading p {color:var(--muted);font-size:13px;line-height:1.7}
+.heading-actions {gap:8px}
+.primary-button,.outline-button,.select-button {min-height:41px;padding:10px 15px;border-radius:8px;font-size:12px;font-weight:650}
+.primary-button {background:#17241e;border-color:#17241e;color:#f5f8ed}
+.primary-button:hover {background:#304735;border-color:#304735}
+.outline-button,.select-button {background:white;border:1px solid #dce3d7;color:#52624c}
+.outline-button:hover,.select-button:hover {background:#f2f6ed;border-color:#bdcbb1;color:#3f6940}
+.danger-button {color:#a94b3e;border-color:#e8c9c2}
+.card,.panel,.completed-changes {background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow)}
+.live-panel {padding:23px 24px;margin-bottom:20px}
+.live-panel h2,.section-heading h2,.overview-panel-heading h2 {font:700 16px/1.4 var(--display);letter-spacing:-.25px;color:#27352a}
+.live-panel h3 {color:#344734}
+.helper,.empty-state,.coverage-note {color:#7c8976;font-size:11px;line-height:1.7}
+.coverage-note {border-top:1px solid var(--line);padding-top:14px;margin-top:15px}
+.coverage-note::before {border-color:#98a78e;color:#7c926d}
+.field {color:#657856;font-size:12px;font-weight:550}
+.field input,.field select,.field textarea,.live-table select {border:1px solid #dce4d5;border-radius:8px;color:#485b3d;background:white}
+.live-table {font-size:12px}
+.live-table th {background:#f8faf4;color:#8a977c;font-size:10px;font-weight:550;padding:11px 14px}
+.live-table td {border-color:#edf0e9;padding:14px}
+.live-table tbody tr:hover {background:#fbfcf8}
+.live-table td small {color:var(--muted)}
+.stat-card {padding:19px 20px;min-height:144px}
+.stat-top {color:#74816c;font-size:11px}
+.stat-value {font-size:clamp(23px,2.15vw,32px);letter-spacing:-1px}
+.stat-icon,.metric-icon {background:#f0f4ea;color:#7c9863}
+.stat-icon.green {background:#e9f2df;color:#739457}
+.stat-icon.orange {background:#f8efdc;color:#9b7734}
+.stat-icon.blue {background:#efedf6;color:#887faa}
+.money-figure.positive,.stat-value.positive,.analytics-insights .positive,.glance-figure.positive {color:#197b61}
+.money-figure.negative,.money-figure.debt,.stat-value.negative,.stat-value.debt,.analytics-insights .debt,.glance-figure.negative {color:#a15440}
+.metric-value.good,.metric-change.good {color:#587d3f;background:#edf4e5}
+.metric-value.bad,.metric-change.bad,.metric-value.spend {color:#ad6147;background:#f9e9e1}
+.activity-table .activity-income .activity-amount,.activity-table .activity-refund .activity-amount {color:#197b61}
+.activity-table .activity-expense .activity-amount {color:#a15440}
+.activity-table .activity-transfer .activity-amount {color:#887faa}
+.account-card,.account-card.credit_card,.account-card.settle_up {border-color:var(--line);border-radius:13px;background:#fff}
+.account-card {padding:22px}
+.credit_card .account-symbol {color:#9a8eb4;background:#efedf5}
+.account-card .due-line {color:#9b774c!important}
+.budget-summary-grid article,.analytics-insights article {background:#f8faf4;border:1px solid var(--line);border-radius:11px}
+.budget-fill.green,.monthly-chart-bar.income,.key-income {background:#729a58}
+.budget-fill.red,.monthly-chart-bar.spending,.key-spending {background:#b88653}
+.analytics-bar-track {background:#eef2e8}
+.analytics-bar-track>span,.overview-track>span {background:#78a15b}
+.glance-story,.quick-chip,.budget-suggestion,.reconcile-attachment {background:#eff4e8;border-color:#dfe8d3;color:#5d784b}
+.glance-equation span {background:#f8faf4;border-color:var(--line)}
+.auth-root {background:#f4f5f3}
+.auth-card {background:#fff;border:1px solid var(--line);border-radius:17px;padding:30px;box-shadow:0 28px 90px #17241e12}
+.auth-card .brand {color:#17241e}
+.live-dialog {background:#fefefb;border:1px solid #dce4d3;border-radius:17px;padding:27px;box-shadow:0 28px 100px #15291b35}
+.live-dialog::backdrop {background:#15211b75;backdrop-filter:blur(6px)}
+.dialog-head h2 {font:700 21px var(--display);letter-spacing:-.5px}
+.transaction-indicator.matched {background:#edf4e5;color:#587d3f}
+.transaction-indicator.partial {background:#f8efdc;color:#9b7734}
+.transaction-indicator.amended,.transaction-indicator.created {background:#efedf6;color:#887faa}
+.recon-pick:has(input:checked) {background:#f2f8e9}
+.reconcile-attachment {background:#f4f9ed}
+.bottom-add {background:#d5f5a5;color:#233526;border-radius:50%}
+.bottom-item.active {color:#387554}
+/* Overview follows the reference's lead, attention, charts, and record hierarchy. */
+.overview-hero {display:grid;grid-template-columns:1.06fr 1.25fr;gap:18px;margin-bottom:22px}
+.position-summary {position:relative;overflow:hidden;background:linear-gradient(115deg,#192f22,#263c28);border:1px solid #334c32;color:#f7faee;border-radius:15px;padding:25px 27px 19px;min-height:272px}
+.position-summary::after {content:'';position:absolute;right:-35px;top:15px;height:220px;width:220px;border-radius:50%;border:1px solid #bfd79b14;box-shadow:0 0 0 22px #c9e2ac07,0 0 0 45px #c9e2ac05;pointer-events:none}
+.position-summary.shortfall {background:linear-gradient(115deg,#382b23,#443228);border-color:#745642}
+.hero-top {display:flex;align-items:center;justify-content:space-between;position:relative;z-index:1}
+.position-summary .section-kicker {margin:0;color:#c2d6b0;font-size:10px;letter-spacing:.4px;text-transform:capitalize}
+.position-summary .section-kicker i {display:inline-block;width:3px;height:3px;margin:0 7px 3px;background:#a3bf88;border-radius:50%}
+.hero-mark {width:31px;height:31px;border:1px solid #91ae7050;background:#516b3a24;display:grid;place-items:center;border-radius:9px;color:#d1edae}
+.hero-mark .icon {width:16px;height:16px}
+.position-card {padding:0;background:transparent;border:0}
+.position-card .metric-label {font-size:12px;color:#d2e0c5;margin-top:22px}
+.position-card .metric-number {display:block;margin:10px 0 9px;font:700 clamp(34px,3.55vw,54px)/1.2 var(--display);letter-spacing:-1.5px;color:#e4fac1;position:relative;z-index:1}
+.position-summary.shortfall .metric-number {color:#ffd1b0}
+.position-card .metric-currency {font-size:.46em;vertical-align:.2em}
+.position-card .metric-caption {display:none}
+.hero-basis {font-size:10px;color:#b4c5a7;position:relative;z-index:1}
+.position-note {border-top:1px solid #a4c38729;margin-top:26px;padding-top:13px;position:relative;z-index:1;gap:8px}
+.position-note>span {width:auto;height:auto;background:none;color:#d1edae;font-size:12px}
+.position-note p {font-size:10px;color:#c4d5b6}
+.position-note small {display:none}
+.position-note .outline-button {margin-left:auto;background:none;border:0;color:#e1f2c9;font-size:10px;min-height:26px;padding:2px 0;white-space:nowrap}
+.overview-metrics {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.overview-metric {background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 18px;min-height:126px}
+.overview-metric .metric-label {color:#74816c;font-size:11px;font-weight:550}
+.overview-metric .metric-icon {width:24px;height:24px;border-radius:6px;font-size:15px}
+.overview-metric .metric-number {display:block;font:700 26px/1.3 var(--display);letter-spacing:-1px;margin:6px 0;color:var(--ink)}
+.overview-metric .metric-currency {font-size:.46em;vertical-align:.2em}
+.overview-metric .metric-caption {color:#7c8976;font-size:10px}
+/* The lead figure is part of the dark hero, not one of the white metric tiles. */
+.position-summary .position-card {min-height:0;padding:0;margin:0;background:transparent;border:0;border-radius:0;box-shadow:none;color:inherit}
+.position-summary .position-card .metric-label {margin-top:22px;color:#d2e0c5;font-size:12px;font-weight:500}
+.position-summary .position-card .metric-number {margin:10px 0 9px;color:#e4fac1;font:700 clamp(34px,3.55vw,54px)/1.2 var(--display);letter-spacing:-1.5px}
+.position-summary.shortfall .position-card .metric-number {color:#ffd1b0}
+.position-summary.shortfall .section-kicker,
+.position-summary.shortfall .position-card .metric-label,
+.position-summary.shortfall .hero-basis,
+.position-summary.shortfall .position-note p {color:#e5d4c4}
+.position-summary.shortfall .section-kicker i {background:#d6aa8d}
+.position-summary.shortfall .hero-mark {background:#fff0df12;border-color:#ffd1b044;color:#ffd1b0}
+.position-summary.shortfall .position-note {border-top-color:#ffd1b02b}
+.position-summary.shortfall .position-note>span,
+.position-summary.shortfall .position-note .outline-button {color:#ffddc5}
+.overview-budget .metric-number {font-size:22px}
+.overview-budget .outline-button {display:block;min-height:20px;margin:4px 0 0;padding:0;border:0;color:#4b7547;background:none;font-size:10px;text-align:left}
+.attention-panel {border:1px solid #e0e5d9;border-radius:12px;background:#f9faf4;margin:0 0 24px;padding:16px 20px 13px}
+.attention-heading {display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.attention-heading h2 {font:700 11px var(--display);color:#4d6042}
+.attention-heading>span:last-child {margin-left:auto;color:#91a080;font-size:9px}
+.attention-dot {width:6px;height:6px;border-radius:50%;background:#bf8a41;box-shadow:0 0 0 3px #ba8e4510}
+.attention-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.attention-item {display:flex;align-items:center;gap:10px;min-width:0;padding:7px 16px 7px 0;border:0;border-right:1px solid #e3e8d9;background:none;text-align:left;cursor:pointer}
+.attention-item+.attention-item {padding-left:18px}
+.attention-item:last-child {border:0;padding-right:0}
+.attention-item>span:nth-child(2) {display:block;min-width:0;flex:1}
+.attention-item strong {display:block;color:#3b4c34;font-size:11px;font-weight:650}
+.attention-item small {display:block;color:#879276;font-size:9px;margin-top:3px}
+.attention-item>span:last-child {color:#98a58c}
+.attention-item:hover strong {text-decoration:underline;text-underline-offset:3px}
+.attention-icon {display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:9px;font-size:17px}
+.attention-icon.warm {background:#f3e9d6;color:#a28242}
+.attention-icon.violet {background:#eeebf7;color:#887bab}
+.attention-icon.neutral {background:#e8efe0;color:#83936c}
+.overview-chart-grid,.overview-workspace {display:grid;grid-template-columns:1.55fr 1fr;gap:20px;margin-bottom:22px;align-items:start}
+.cashflow-panel,.overview-panel,.overview-activity {min-width:0;padding:23px 24px;background:#fff;border:1px solid var(--line);border-radius:13px}
+.cashflow-panel {min-height:330px}
+.overview-panel-heading {margin-bottom:18px}
+.overview-panel-heading .helper {margin:3px 0 0;color:#8b967f;font-size:10px}
+.overview-panel-heading .outline-button,.overview-panel-footer .outline-button {color:#4b7547;background:none;border:0;padding:0;font-size:11px;min-height:30px}
+.overview-panel-heading .outline-button:hover,.overview-panel-footer .outline-button:hover {text-decoration:underline}
+.cashflow-panel .finwise-chart-canvas {height:220px}
+.overview-spending li {margin-bottom:21px}
+.overview-track {height:5px;background:#eef2e8}
+.overview-track>span.refund {background:#9dbca0}
+.overview-activity {margin:0}
+.recent-item {padding:14px 0}
+.recent-icon {width:31px;height:31px;border-radius:9px;background:#f1f1e8;color:#909372;font-size:16px}
+.recent-item.positive .recent-icon {background:#e9f2df;color:#81a55c}
+.recent-item.negative .recent-icon {background:#f9e9e1;color:#ad6147}
+.recent-copy strong {font-size:12px;color:#344332}
+.recent-copy small,.recent-value small {color:#8b967f;font-size:10px}
+.recent-value {font-size:12px}
+.recent-item.positive .recent-value {color:#197b61}
+.recent-item.negative .recent-value {color:#a15440}
+.overview-account-icon {border-radius:9px;background:#eaf0e4;color:#889b72}
+.overview-balances li {padding:14px 0}
+.overview-balances small {color:#8b967f}
+.overview-balances .money-figure {font-size:14px}
+@media (min-width:761px) {
+  .app-shell.sidebar-collapsed .sidebar {display:flex;width:78px;padding-inline:12px}
+  .app-shell.sidebar-collapsed .main-area {margin-left:78px}
+  .app-shell.sidebar-collapsed .brand {padding:0;margin:0 auto 25px}
+  .app-shell.sidebar-collapsed .brand>span:last-child,.app-shell.sidebar-collapsed .household-card,.app-shell.sidebar-collapsed .workspace-label,.app-shell.sidebar-collapsed .settings-link span,.app-shell.sidebar-collapsed .profile {display:none}
+  .app-shell.sidebar-collapsed .nav-item {justify-content:center;padding:8px}
+  .app-shell.sidebar-collapsed .nav-item span {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+}
+@media (max-width:1200px) and (min-width:761px) {
+  .sidebar {width:212px;padding-inline:12px}
+  .main-area {margin-left:212px}
+  .overview-hero {grid-template-columns:1fr}
+  .overview-metrics {grid-template-columns:repeat(4,minmax(0,1fr))}
+  .overview-metric .metric-number {font-size:22px}
+}
+@media (max-width:950px) and (min-width:761px) {
+  .overview-metrics {grid-template-columns:repeat(2,minmax(0,1fr))}
+  .overview-chart-grid,.overview-workspace {grid-template-columns:1fr}
+}
+@media (max-width:760px) {
+  .sidebar {display:none}
+  .main-area {margin-left:0}
+  .topbar {min-height:60px;padding:9px 14px}
+  .content {padding:24px 18px 90px}
+  .page-heading {align-items:flex-start;gap:14px;margin-bottom:22px}
+  .page-heading h1 {font-size:28px}
+  .page-heading .eyebrow {font-size:9px}
+  .heading-actions {width:100%}
+  .overview-hero {grid-template-columns:1fr;gap:14px}
+  .position-summary {min-height:0;padding:23px}
+  .position-card .metric-number {font-size:clamp(34px,8vw,48px)}
+  .overview-metrics {grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .overview-metric {padding:14px;min-height:112px}
+  .overview-metric .metric-number {font-size:clamp(19px,5vw,26px)}
+  .overview-budget .metric-number {font-size:20px}
+  .attention-grid {grid-template-columns:1fr}
+  .attention-item,.attention-item+.attention-item {border-right:0;border-bottom:1px solid #e3e8d9;padding:10px 0}
+  .attention-item:last-child {border-bottom:0}
+  .overview-chart-grid,.overview-workspace {grid-template-columns:1fr;gap:15px}
+  .cashflow-panel,.overview-panel,.overview-activity {padding:18px}
+  .cashflow-panel {min-height:0}
+  .cashflow-panel .finwise-chart-canvas {height:200px}
+  .bottom-nav {background:#18221d;border-color:#344034}
+  .bottom-item {color:#bac3b9}
+  .bottom-item.active {color:#d5f5a5}
+  .bottom-add {background:#d5f5a5;color:#233526}
+  .live-dialog {border-radius:0;padding:20px 16px}
+}
+@media (max-width:430px) {
+  .position-note .outline-button {font-size:9px}
+  .overview-metric .metric-caption {font-size:9px}
+  .overview-panel-heading {align-items:flex-start}
+}
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after {transition:none!important;animation:none!important;scroll-behavior:auto!important}
+}
+/* Segmented report scope mirrors the reference's persistent top control. */
+.scope-segments {display:flex;gap:3px;padding:3px;background:#ebeee7;border:1px solid #e3e7df;border-radius:8px;max-width:100%}
+.scope-segments button {min-height:32px;padding:5px 14px;border:0;border-radius:5px;background:transparent;color:#7b8676;font-size:12px;cursor:pointer}
+.scope-segments button.selected {background:#fff;color:#314532;box-shadow:0 1px 4px #2639230c;font-weight:650}
+.scope-segments button:hover:not(.selected) {background:#f4f7f0;color:#405840}
+.page-heading .eyebrow {text-transform:uppercase}
+/* The same surfaces and state colors carry through secondary workspaces. */
+.household-person,.finance-card,.recurring-card,.statement-month-card {border-color:var(--line);border-radius:13px;background:#fff;box-shadow:var(--shadow)}
+.household-person:hover,.household-person.selected {border-color:#a8c789;box-shadow:0 8px 28px #17241e0d}
+.household-amount,.finance-inline-metrics>div {background:#f8faf4}
+.household-category-track,.finance-progress {background:#eef2e8}
+.finance-progress>span,.household-category-track i {background:#78a15b}
+.finance-hero {background:linear-gradient(125deg,#eff4e8,#fff 70%);border-color:#dfe8d3;border-radius:13px}
+.finance-hero-intro h2 {color:#263c28;font-family:var(--display)}
+.finance-hero-intro p,.finance-section-head p,.finance-section-head small,.finance-metrics span,.finance-card-amount>span,.finance-inline-metrics span,.finance-goal span {color:#71816b}
+.finance-metrics article {border-color:var(--line);border-radius:11px}
+.finance-metrics strong,.finance-card-amount strong {font-family:var(--display)}
+.finance-tabs {background:#ebeee7;border-color:#e3e7df;border-radius:8px}
+.finance-tabs button {color:#7b8676;border-radius:5px}
+.finance-tabs button:hover {background:#f4f7f0;color:#405840}
+.finance-tabs button.active {background:#fff;color:#314532}
+.finance-badge {background:#f8faf4;border-color:#e2e9dc;color:#687b5e}
+.finance-badge.incoming {background:#edf4e5;border-color:#dce9d2;color:#587d3f}
+.finance-badge.outgoing {background:#f9e9e1;border-color:#edd7c9;color:#ad6147}
+.finance-card-actions button:first-child,.finance-history summary span {background:#eff4e8;border-color:#dfe8d3;color:#4b7547}
+.finance-history summary {color:#4b7547}
+.finance-empty {background:#fafdf5;border-color:#d8e4ca}
+.recurring-summary>div {border-color:var(--line)}
+.recurring-summary strong {color:var(--ink);font-family:var(--display)}
+.recurring-tabs button {color:#71816b}
+.recurring-tabs button.active {background:#e9f5db;border-color:#d4e5c1;color:#477330}
+.recurring-tabs button.active span {background:#d4e5c1;color:#477330}
+.recurring-card {border-left-color:#a8c789}
+.recurring-card.is-subscription {border-left-color:#78a15b}
+.recurring-card.is-ignored {border-left-color:#b7c1b1;background:#fbfcf8}
+.recurring-status {background:#edf4e5;color:#587d3f}
+.recurring-card-actions button:first-child {border-color:#d4e5c1;color:#477330}
+.analytics-tab {color:#71816b}
+.analytics-tab.active {color:#477330;border-bottom-color:#78a15b}
+.analytics-scope-tabs button.active {color:#477330;background:#e9f5db;border-color:#d4e5c1}
+.compare-row:hover {background:#fbfcf8}
+.compare-row.selected,.recon-pick:has(input:checked) {background:#f2f8e9;box-shadow:inset 2px 0 #78a15b}
+.compare-side,.compare-side.bank-side {background:#f8faf4;border-color:#e2e9dc}
+.compare-side small,.bank-side small {color:#729453}
+.reconcile-choice #transfer-option {background:#f1f3ed;border-color:#dce3d7;color:#6d718f}
+.reconcile-choice #transfer-option:hover {background:#eaece5}
+.ledger-filters,.ledger-workspace .activity-table th {background:#f8faf4}
+.activity-table .activity-title strong,.activity-table .activity-account-name {color:#344332}
+.activity-table .transaction-indicator.amended,.activity-table .transaction-indicator.created {color:#887faa}
+.activity-table .activity-marker-row,.activity-table .activity-marker-row:hover {background:#f5f8ed}
+.activity-table .activity-marker-row td {border-color:#e6eddd}
+.activity-table .activity-marker-row .activity-type {color:#607b4c;background:#e8f0dd}
+@media (max-width:1250px) {
+  .scope-segments button {padding-inline:10px}
+}
+@media (max-width:760px) {
+  .topbar {flex-wrap:wrap;gap:8px;padding:10px 16px}
+  .topbar .breadcrumb {display:flex;width:100%;font-size:11px}
+  .topbar .mobile-menu {display:none}
+  .topbar-actions {width:100%;margin:0;display:flex;justify-content:space-between;gap:8px}
+  .scope-segments {flex:1;justify-content:space-around}
+  .scope-segments button {font-size:11px;padding:6px 9px}
+  .topbar .month-filter {flex:none;padding-left:7px}
+  .topbar .month-filter>span {display:none}
+  .topbar .month-filter input {width:125px;min-width:0;max-width:125px}
+}
+@media (max-width:360px) {
+  .topbar {padding-inline:12px}
+  .scope-segments button {font-size:10px;padding-inline:6px}
+  .topbar .month-filter input {width:112px;max-width:112px}
+}
+.overview-budget .metric-number small {font:500 10px var(--font);letter-spacing:0;color:#839276;margin-left:6px}
+.overview-budget-track {height:5px;margin:2px 0 8px;background:#eef2e8;border-radius:12px;overflow:hidden}
+.overview-budget-track span {display:block;height:100%;background:#78a15b;border-radius:12px}
+.overview-budget-foot {display:flex;align-items:center;justify-content:space-between;gap:8px;color:#86927c;font-size:10px;line-height:1.4}
+.overview-budget-foot .outline-button {flex:none;margin:0;min-height:20px;font-size:16px;line-height:1}
+.household-icon {font-size:11px;font-weight:700;border-radius:50%}
+.overview-balances .overview-card-due {display:block;width:max-content;max-width:100%;margin-top:7px;padding:5px 7px;border-radius:5px;background:#faf4e7;color:#9b774c;font-size:9px;overflow-wrap:anywhere}

@@ -3,11 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#18221d" />
     <meta name="description" content="A private household finance planner." />
     <title>FinWise — Household finance</title>
     <link rel="stylesheet" href="/styles.css?v=20261009h" />
     <link rel="stylesheet" href="/design.css?v=20261006a" />
+    <link rel="stylesheet" href="/reference-theme.css?v=20261010b" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
     <script src="/api.js?v=20261006b" defer></script>
     <script src="/view-state.js?v=20261009c" defer></script>
@@ -16,7 +17,7 @@
     <script src="/activity.js?v=20261002e" defer></script>
     <script src="/time.js?v=20261002e" defer></script>
     <script src="/reconciliation.js?v=20261002e" defer></script>
-    <script src="/app.js?v=20261009h" defer></script>
+    <script src="/app.js?v=20261010a" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -65,20 +66,21 @@
     <section id="auth-root" class="auth-root" aria-live="polite"><p>Connecting to FinWise…</p></section>
     <div class="app-shell" hidden>
       <aside class="sidebar" aria-label="Main navigation">
-        <a class="brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>finwise<span class="brand-dot">.</span></span></a>
-        <div class="household-card"><div class="household-icon">⌂</div><div><strong id="household-name"></strong><span id="household-currency"></span></div></div>
+        <a class="brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>FinWise<span class="brand-dot">.</span></span></a>
+        <div class="household-card"><div class="household-icon" aria-hidden="true">FW</div><div><strong id="household-name"></strong><span id="household-currency"></span></div></div>
         <nav class="nav-list" id="desktop-nav">
-          <div class="workspace-label">YOUR MONEY</div>
+          <div class="workspace-label">INSIGHTS</div>
           <button class="nav-item active" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
           <button class="nav-item" data-view="household"><svg><use href="#i-grid"/></svg><span>Household</span></button>
           <button class="nav-item" data-view="analytics"><svg><use href="#i-chart"/></svg><span>Analytics</span></button>
+          <div class="workspace-label nav-group-label">YOUR MONEY</div>
           <button class="nav-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Transactions</span></button>
           <button class="nav-item" data-view="recurring"><svg><use href="#i-receipt"/></svg><span>Recurring</span></button>
           <button class="nav-item" data-view="accounts"><svg><use href="#i-wallet"/></svg><span>Accounts</span></button>
           <button class="nav-item" data-view="budgets"><svg><use href="#i-wallet"/></svg><span>Budgets</span></button>
           <button class="nav-item" data-view="settlements"><svg><use href="#i-check"/></svg><span>Settle up</span></button>
           <button class="nav-item" data-view="investments"><svg><use href="#i-chart"/></svg><span>Investments</span></button>
-          <div class="workspace-label nav-group-label">ORGANIZE</div>
+          <div class="workspace-label nav-group-label">WORKSPACE</div>
           <button class="nav-item" data-view="categories"><svg><use href="#i-grid"/></svg><span>Categories</span></button>
           <button class="nav-item" data-view="statements"><svg><use href="#i-receipt"/></svg><span>Statements</span></button>
           <button class="nav-item" data-view="reconcile"><svg><use href="#i-check"/></svg><span>Reconcile</span></button>
@@ -94,7 +96,7 @@
           <button class="mobile-menu icon-button" id="menu-button" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="desktop-nav"><svg><use href="#i-menu"/></svg></button>
           <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Overview</strong></div>
           <div class="topbar-actions">
-            <label class="scope-picker"><span class="scope-avatar">⌂</span><select id="report-scope" aria-label="View scope"><option value="personal">My personal view</option><option value="family">Family view</option><option value="combined">Combined view</option></select><span class="chevron">⌄</span></label>
+            <div class="scope-segments" role="group" aria-label="Report scope"><button type="button" data-action="analytics-scope" data-scope="personal">Personal</button><button type="button" data-action="analytics-scope" data-scope="family">Family</button><button type="button" data-action="analytics-scope" data-scope="combined">Combined</button></div>
             <label class="month-filter"><span>Month</span><input id="report-month" type="month" aria-label="Report month" required></label>
           </div>
         </header>
