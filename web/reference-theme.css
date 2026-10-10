@@ -333,3 +333,39 @@ h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
 .overview-budget-foot .outline-button {flex:none;margin:0;min-height:20px;font-size:16px;line-height:1}
 .household-icon {font-size:11px;font-weight:700;border-radius:50%}
 .overview-balances .overview-card-due {display:block;width:max-content;max-width:100%;margin-top:7px;padding:5px 7px;border-radius:5px;background:#faf4e7;color:#9b774c;font-size:9px;overflow-wrap:anywhere}
+/* Exact amounts remain in the accessibility tree; phone summary cards use rounded labels. */
+.adaptive-money {font-variant-numeric:tabular-nums;white-space:nowrap}
+.adaptive-money .amount-short {display:none}
+@media (max-width:760px) {
+  .adaptive-money .amount-full {display:none}
+  .adaptive-money .amount-short {display:inline}
+  .live-table .adaptive-money .amount-full {display:inline}
+  .live-table .adaptive-money .amount-short {display:none}
+  .live-table .adaptive-money {white-space:normal;overflow-wrap:anywhere}
+  .position-summary .position-card .metric-number {font-size:clamp(31px,9vw,48px);white-space:nowrap}
+  .overview-metrics .overview-metric {min-width:0;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:3px}
+  .overview-metrics .metric-number {display:block;grid-row:auto;max-width:none;margin:4px 0;font-size:clamp(18px,5vw,24px);white-space:nowrap}
+  .overview-metrics .metric-caption {grid-column:auto;max-width:none}
+  .overview-budget .metric-number {font-size:clamp(18px,5vw,24px)}
+  .overview-budget-foot {min-width:0}
+  .overview-budget-foot>span {min-width:0;font-size:9px}
+  .household-amount,.finance-inline-metrics>div,.budget-summary-grid article {min-width:0}
+  .household-amount strong,.finance-metrics strong,.finance-card-amount strong,.finance-inline-metrics strong,.budget-summary-grid strong,.person-chip b {white-space:nowrap;overflow-wrap:normal}
+  .finance-metrics strong,.budget-summary-grid strong {font-size:clamp(15px,4.4vw,20px)}
+  .finance-card-amount strong {font-size:clamp(22px,7vw,30px)}
+  .glance-figure {font-size:clamp(28px,8vw,42px);white-space:nowrap}
+  .overview-balances .money-figure {white-space:nowrap;overflow-wrap:normal}
+  .overview-spending li>div:first-child {min-width:0;gap:8px}
+  .overview-spending li>div:first-child>span {min-width:0;overflow-wrap:anywhere}
+  .recent-value {white-space:nowrap}
+  .recurring-card-price strong {overflow-wrap:anywhere}
+}
+@media (max-width:360px) {
+  .topbar-actions {display:grid;grid-template-columns:minmax(0,1fr);gap:7px}
+  .scope-segments {width:100%}
+  .topbar .month-filter {justify-self:start}
+  .overview-metrics .overview-metric {padding:11px;min-height:106px}
+  .overview-metrics .metric-number {font-size:18px}
+  .finance-metrics {gap:7px}
+  .finance-metrics article {padding:10px}
+}
