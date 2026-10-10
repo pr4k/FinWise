@@ -10,6 +10,31 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn family_only_mode_converts_history_and_forces_new_records() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let account = owner.create("accounts", json!({"name":"Private bank","subtype":"bank","currency":"INR","visibility":"private"})).await;
+    let category = owner.create("categories", json!({"name":"Food","kind":"expense","visibility":"private"})).await;
+    let entry = owner.transaction("expense", "42.00", &account, &category, "personal").await;
+    let settings = owner.call("GET", "settings/household", json!({}), None, None).await.1;
+    let enabled = owner.call("PATCH", "settings/household", json!({"family_only":true}), None, Some(settings["revision"].as_i64().unwrap())).await;
+    assert_eq!(enabled.0, StatusCode::OK, "{}", enabled.1);
+    assert_eq!(enabled.1["family_only"], true);
+    assert_eq!(member.call("GET", &format!("accounts/{}", account["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(member.call("GET", &format!("categories/{}", category["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::OK);
+    let migrated = member.call("GET", &format!("transactions/{}", entry["id"].as_str().unwrap()), json!({}), None, None).await;
+    assert_eq!(migrated.0, StatusCode::OK);
+    assert_eq!(migrated.1["allocations"][0]["scope"], "family");
+    let fresh = owner.transaction("expense", "15.00", &account, &category, "personal").await;
+    assert_eq!(fresh["allocations"][0]["scope"], "family");
+    let new_category = owner.create("categories", json!({"name":"Fuel","kind":"expense","visibility":"private"})).await;
+    assert_eq!(new_category["visibility"], "shared");
+    let report = owner.call("GET", "analytics/summary?from=2026-09-01&to=2026-10-01&scope=family&currency=INR", json!({}), None, None).await;
+    assert_eq!(report.0, StatusCode::OK, "{}", report.1);
+    assert_eq!(report.1["net_spending"], "57.00");
+}
+
+#[tokio::test]
 async fn household_promotion_unlocks_shared_review_without_leaking_private_categories() {
     let (owner, _) = setup().await;
     let (member, _) = partner(&owner).await;

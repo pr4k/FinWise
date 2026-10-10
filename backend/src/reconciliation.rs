@@ -1481,7 +1481,11 @@ async fn create_from_observations(
         .ok_or_else(|| ApiError::invalid("Amount is out of range."))?;
     let ids: Vec<_> = selected.iter().map(|v| v["id"].clone()).collect();
     let refs: Vec<_> = selected.iter().map(|v| v["raw_row_ref"].clone()).collect();
-    let transaction = json!({"event_type":if total<0 {"expense"} else {"income"},"amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(total,currency)?}],"allocations":[{"category_id":body["category_id"],"amount":format_money(magnitude,currency)?,"scope":body["scope"]}],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transaction"}});
+    let household: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id).fetch_one(&mut *db).await?;
+    let family_only = serde_json::from_str::<Value>(&household)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?["family_only"] == true;
+    let transaction = json!({"event_type":if total<0 {"expense"} else {"income"},"amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(total,currency)?}],"allocations":[{"category_id":body["category_id"],"amount":format_money(magnitude,currency)?,"scope":if family_only { "family" } else { text(body,"scope")? }}],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transaction"}});
     api::validate_ledger(db, p, &transaction).await?;
     let created = storage::create(db, p, "transactions", transaction).await?;
     let allocations:Vec<_>=selected.iter().map(|row|json!({"ledger_id":created["id"],"ledger_revision":created["revision"],"observation_id":row["id"],"amount":row["remaining"]})).collect();
@@ -1530,6 +1534,17 @@ async fn missing_entry(
             "allocations",
         ],
     )?;
+    let household: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id).fetch_one(&mut *db).await?;
+    if serde_json::from_str::<Value>(&household)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?["family_only"] == true {
+        if let Some(allocations) = t["allocations"].as_array_mut() {
+            for allocation in allocations {
+                allocation["scope"] = json!("family");
+                allocation.as_object_mut().map(|a| a.remove("beneficiary_id"));
+            }
+        }
+    }
     api::validate_ledger(db, p, &t).await?;
     if t["currency"] != s["currency"]
         || text(&t, "effective_date")? < text(s, "from")?

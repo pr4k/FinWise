@@ -4312,9 +4312,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {},
-                  "required": []
+                  "$ref": "#/components/schemas/HouseholdSettings"
                 }
               }
             }
@@ -4363,10 +4361,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {},
-                  "required": []
+                  "$ref": "#/components/schemas/HouseholdSettings"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HouseholdSettingsPatch"
               }
             }
           }
@@ -9892,6 +9898,57 @@
           "timezone",
           "base_currency"
         ]
+      },
+      "HouseholdSettings": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "base_currency": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "family_only": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": []
+      },
+      "HouseholdSettingsPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "base_currency": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "family_only": {
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": []
       },
       "AccountInput": {
         "type": "object",

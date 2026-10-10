@@ -537,8 +537,10 @@ async fn route(
         }
         ("POST", ["planned-items"]) => {
             allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility"])?;
-            validate_planned_item(db,p,body).await?;
-            let mut value = body.clone(); value["status"] = json!("planned"); value["deleted"] = json!(false);
+            let mut value = body.clone();
+            if family_only(db,p).await? { value["visibility"] = json!("shared"); }
+            validate_planned_item(db,p,&value).await?;
+            value["status"] = json!("planned"); value["deleted"] = json!(false);
             created(storage::create(db,p,"planned_items",value).await?)
         }
         ("PATCH", ["planned-items", id]) => {
@@ -546,7 +548,8 @@ async fn route(
             let before = storage::get(db,p,"planned_items",id).await?;
             if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
             revision(headers,body,&before)?;
-            let after = patch(&before,body,&["title","due_date","amount","currency","category_id","account_id","visibility","status"]);
+            let mut after = patch(&before,body,&["title","due_date","amount","currency","category_id","account_id","visibility","status"]);
+            if family_only(db,p).await? { after["visibility"] = json!("shared"); }
             validate_planned_item(db,p,&after).await?;
             domain::choice(&after,"status",&["planned","done","skipped"])?;
             ok(storage::update(db,p,&before,after,"update").await?)
@@ -569,6 +572,9 @@ async fn route(
             let scope = text(body, "scope")?;
             if !["personal", "family"].contains(&scope) {
                 return Err(ApiError::invalid("Invalid allocation scope."));
+            }
+            if family_only(db, p).await? && scope != "family" {
+                return Err(ApiError::invalid("Family only mode requires family scope."));
             }
             let ids = body["ids"]
                 .as_array()
@@ -707,12 +713,15 @@ async fn route(
             auth::admin(p)?;
             let before = auth::me(db, p).await?["household"].clone();
             revision(headers, body, &before)?;
-            allowed_body(body, &["name", "timezone", "base_currency", "locale"])?;
+            allowed_body(body, &["name", "timezone", "base_currency", "locale", "family_only"])?;
             let mut after = patch(
                 &before,
                 body,
-                &["name", "timezone", "base_currency", "locale"],
+                &["name", "timezone", "base_currency", "locale", "family_only"],
             );
+            if !after["family_only"].is_null() && !after["family_only"].is_boolean() {
+                return Err(ApiError::invalid("family_only must be a boolean."));
+            }
             text(&after, "name")?;
             domain::exponent(text(&after, "base_currency")?)?;
             text(&after, "timezone")?
@@ -730,6 +739,9 @@ async fn route(
                         "Currency changes with ledger activity require migration.",
                     ));
                 }
+            }
+            if before["family_only"] != true && after["family_only"] == true {
+                enable_family_only(db, p).await?;
             }
             after["revision"] = json!(before["revision"].as_i64().unwrap_or(1) + 1);
             sqlx::query("UPDATE households SET document=? WHERE id=?")
@@ -834,6 +846,7 @@ async fn route(
             };
             allowed_body(body, fields)?;
             let mut value = project(body, fields);
+            if family_only(db, p).await? { force_family(kind, &mut value); }
             match *kind {
                 "accounts" => {
                     value["active"] = json!(true);
@@ -844,7 +857,7 @@ async fn route(
                 }
                 "categories" => {
                     if value.get("visibility").is_none() { value["visibility"] = json!("shared"); }
-                    if value["visibility"] == "shared" { auth::admin(p)?; }
+                    if value["visibility"] == "shared" && !family_only(db,p).await? { auth::admin(p)?; }
                     value["archived"] = json!(false);
                     validate_category(db, p, &value, None).await?;
                 }
@@ -892,6 +905,7 @@ async fn route(
             };
             allowed_body(body, fields)?;
             let mut after = patch(&before, body, fields);
+            if family_only(db, p).await? { force_family(kind, &mut after); }
             match *kind {
                 "accounts" => {
                     if before["owner_id"] != p.user_id {
@@ -1259,6 +1273,70 @@ async fn route(
         ) => Err(unsupported()),
         _ => Err(ApiError::missing()),
     }
+}
+
+async fn family_only(db: &mut SqliteConnection, p: &Principal) -> Result<bool> {
+    Ok(auth::me(db, p).await?["household"]["family_only"] == true)
+}
+
+fn force_family(kind: &str, value: &mut Value) {
+    match kind {
+        "accounts" | "categories" => value["visibility"] = json!("shared"),
+        "budgets" => value["scope"] = json!("family"),
+        "transactions" => {
+            if let Some(allocations) = value["allocations"].as_array_mut() {
+                for allocation in allocations {
+                    allocation["scope"] = json!("family");
+                    allocation.as_object_mut().map(|a| a.remove("beneficiary_id"));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn enable_family_only(db: &mut SqliteConnection, p: &Principal) -> Result<()> {
+    // The caller is a household admin. This runs in the request transaction.
+    for kind in ["categories", "accounts", "planned_items", "transactions", "budgets"] {
+        let rows: Vec<String> = sqlx::query_scalar(
+            "SELECT document FROM resources WHERE household_id=? AND kind=? ORDER BY id",
+        )
+        .bind(&p.household_id)
+        .bind(kind)
+        .fetch_all(&mut *db)
+        .await?;
+        for row in rows {
+            let before: Value = serde_json::from_str(&row)
+                .map_err(|_| ApiError::invalid("Invalid stored resource."))?;
+            let mut after = before.clone();
+            match kind {
+                "categories" | "accounts" | "planned_items" => {
+                    if after["visibility"] == "private" { after["visibility"] = json!("shared"); }
+                }
+                "transactions" => {
+                    if let Some(allocations) = after["allocations"].as_array_mut() {
+                        for allocation in allocations {
+                            allocation["scope"] = json!("family");
+                            allocation.as_object_mut().map(|a| a.remove("beneficiary_id"));
+                        }
+                    }
+                }
+                "budgets" => {
+                    if after["scope"] == "personal" {
+                        let conflict: i64 = sqlx::query_scalar("SELECT count(*) FROM resources WHERE household_id=? AND kind='budgets' AND id<>? AND json_extract(document,'$.scope')='family' AND json_extract(document,'$.month')=? AND json_extract(document,'$.currency')=? AND json_extract(document,'$.state')<>'archived'")
+                            .bind(&p.household_id).bind(text(&before,"id")?).bind(text(&before,"month")?).bind(text(&before,"currency")?).fetch_one(&mut *db).await?;
+                        after["scope"] = json!("family");
+                        if conflict > 0 { after["state"] = json!("archived"); }
+                    }
+                }
+                _ => {}
+            }
+            if after != before {
+                storage::update(db, p, &before, after, "family_only_conversion").await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_account(v: &Value) -> Result<()> {
@@ -1707,6 +1785,8 @@ async fn validate_budget(
     }
     for plan in storage::list(db, p, "budgets").await? {
         if plan["id"].as_str() != current
+            && plan["state"] != "archived"
+            && v["state"] != "archived"
             && plan["month"] == v["month"]
             && plan["scope"] == v["scope"]
             && plan["currency"] == v["currency"]

@@ -1667,14 +1667,19 @@ async fn commit(
             file_counts.entry(file_id.clone()).or_default().1 += 1;
             continue;
         }
-        let scope = files
+        let requested_scope = files
             .iter()
             .find(|f| f["id"] == file_id)
             .and_then(|f| f["mapping"]["allocation_scope"].as_str())
             .unwrap_or("personal");
-        if !["personal", "family"].contains(&scope) {
+        if !["personal", "family"].contains(&requested_scope) {
             return Err(ApiError::invalid("Invalid allocation scope."));
         }
+        let household: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+            .bind(&p.household_id).fetch_one(&mut *db).await?;
+        let family_only = serde_json::from_str::<Value>(&household)
+            .map_err(|_| ApiError::invalid("Invalid household settings."))?["family_only"] == true;
+        let scope = if family_only { "family" } else { requested_scope };
         let value = json!({"event_type":kind,"amount":row["amount"],"currency":row["currency"],"effective_date":row["effective_date"],"description":row["description"],"movements":[{"account_id":row["account_id"],"amount":row["signed_movement"]}],"allocations":[{"category_id":row["category_id"],"amount":row["amount"],"scope":scope}],"voided":false,"entered_by":p.user_id,"source_refs":[row_ref(row)],"reconciliation_state":"unmatched"});
         domain::validate_transaction(&value)?;
         let created = storage::create(db, p, "transactions", value).await?;

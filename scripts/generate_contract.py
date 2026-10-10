@@ -29,6 +29,8 @@ schemas = {
     "LoginInput": obj({"email": S, "password": {"type":"string","writeOnly":True}}, ("email","password")),
     "Owner": obj({"name": S, "email": {"type": "string", "format": "email"}, "password": {"type": "string", "minLength": 12, "maxLength": 1024, "writeOnly": True}}, ("name", "email", "password")),
     "HouseholdInput": obj({"name": S, "timezone": S, "base_currency": S}, ("name", "timezone", "base_currency")),
+    "HouseholdSettings": obj({"id": S, "name": S, "timezone": S, "base_currency": S, "locale": S, "family_only": B, "revision": I}),
+    "HouseholdSettingsPatch": obj({"name": S, "timezone": S, "base_currency": S, "locale": S, "family_only": B, "expected_revision": I}),
     "AccountInput": obj({"name": S, "subtype": enum("bank", "credit_card", "cash", "settle_up"), "currency": S, "timezone": S, "aliases": arr(S), "visibility": enum("private", "shared"), "active": B, "opening_balance": obj({"amount": M, "as_of": {"type":"string","format":"date-time"}}, ("amount","as_of")), "card_due": obj({"amount": M, "due_date": D}, ("due_date",))}, ("name", "subtype", "currency")),
     "CategoryInput": obj({"name": S, "kind": enum("expense", "income"), "parent_id": {"type": ["string", "null"]}, "visibility": enum("private", "shared")}, ("name", "kind")),
     "Movement": obj({"account_id": S, "amount": M}, ("account_id", "amount")),
@@ -144,8 +146,8 @@ route("/analytics/household", "get", "HouseholdReport", parameters=["from","to",
 for action in ["activate", "archive", "copy"]:
     route(f"/budgets/{{id}}/{action}", "post", "Budget", revision=True)
 route("/budgets/{id}/tracking", "get", parameters=["from", "to"])
-route("/settings/household", "get")
-route("/settings/household", "patch", revision=True)
+route("/settings/household", "get", "HouseholdSettings")
+route("/settings/household", "patch", "HouseholdSettings", "HouseholdSettingsPatch", revision=True)
 route("/households/{household_id}/members", "get")
 route("/households/{household_id}/invites", "post", request="InviteInput")
 route("/invites/{token}/accept", "post", public=True)
