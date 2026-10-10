@@ -1384,6 +1384,226 @@
         }
       }
     },
+    "/planned-items": {
+      "get": {
+        "operationId": "get_planned_items",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlannedItemCollection"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_planned_items",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlannedItem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlannedItemInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/planned-items/{id}": {
+      "patch": {
+        "operationId": "patch_planned_items_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlannedItem"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlannedItemPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_planned_items_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/transactions/{id}/revisions": {
       "get": {
         "operationId": "get_transactions_id_revisions",
@@ -9770,6 +9990,13 @@
               "string",
               "null"
             ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
+            ]
           }
         },
         "required": [
@@ -9869,6 +10096,9 @@
             "items": {
               "$ref": "#/components/schemas/Allocation"
             }
+          },
+          "paid_by_user_id": {
+            "type": "string"
           }
         },
         "required": [
@@ -9999,6 +10229,200 @@
           "role",
           "token"
         ]
+      },
+      "PlannedItemInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "due_date",
+          "amount",
+          "currency",
+          "visibility"
+        ]
+      },
+      "PlannedItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "done",
+              "skipped"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "due_date",
+          "amount",
+          "currency",
+          "visibility",
+          "id",
+          "revision",
+          "owner_id",
+          "status",
+          "created_at"
+        ]
+      },
+      "PlannedItemCollection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlannedItem"
+            }
+          },
+          "page": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          },
+          "meta": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        "required": [
+          "data",
+          "page",
+          "meta"
+        ]
+      },
+      "PlannedItemPatch": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "done",
+              "skipped"
+            ]
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": []
       },
       "BootstrapInput": {
         "type": "object",
@@ -10281,6 +10705,13 @@
               "null"
             ]
           },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -10323,6 +10754,13 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "shared"
             ]
           },
           "expected_revision": {
@@ -10406,6 +10844,9 @@
             "items": {
               "$ref": "#/components/schemas/Allocation"
             }
+          },
+          "paid_by_user_id": {
+            "type": "string"
           },
           "id": {
             "type": "string"
@@ -10551,6 +10992,9 @@
             "items": {
               "$ref": "#/components/schemas/Allocation"
             }
+          },
+          "paid_by_user_id": {
+            "type": "string"
           },
           "expected_revision": {
             "type": "integer"

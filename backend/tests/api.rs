@@ -10,6 +10,51 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn household_promotion_unlocks_shared_review_without_leaking_private_categories() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let account = owner.create("accounts", json!({"name":"Owner bank","subtype":"bank","currency":"INR","visibility":"private"})).await;
+    let category = owner.create("categories", json!({"name":"Groceries","kind":"expense","visibility":"private"})).await;
+    let account_id = account["id"].as_str().unwrap();
+    let category_id = category["id"].as_str().unwrap();
+    let member_id = member.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    let mut purchase = transaction("expense","75.00",&account,&category,"personal");
+    purchase["paid_by_user_id"] = member_id.clone();
+    let entry = owner.create("transactions", purchase).await;
+    assert_eq!(entry["paid_by_user_id"], member_id);
+    assert_eq!(member.call("GET", &format!("accounts/{account_id}"), json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(member.call("GET", &format!("categories/{category_id}"), json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    let account_path = format!("accounts/{account_id}");
+    assert_eq!(owner.call("PATCH", &account_path, json!({"visibility":"shared"}), None, Some(1)).await.0, StatusCode::CONFLICT);
+    assert_eq!(owner.call("PATCH", &format!("categories/{category_id}"), json!({"visibility":"shared"}), None, Some(1)).await.0, StatusCode::OK);
+    assert_eq!(owner.call("PATCH", &account_path, json!({"visibility":"shared"}), None, Some(1)).await.0, StatusCode::OK);
+    assert_eq!(member.call("GET", &account_path, json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(member.call("GET", &format!("transactions/{}", entry["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(member.call("POST", "reconciliation/sessions", json!({"account_id":account_id,"month":"2026-10"}), Some("shared-review"), None).await.0, StatusCode::CREATED);
+    let plan = owner.create("planned-items", json!({"title":"Electricity","due_date":"2026-10-20","amount":"100.00","currency":"INR","visibility":"shared"})).await;
+    let listed = member.call("GET", "planned-items?month=2026-10", json!({}), None, None).await;
+    assert_eq!(listed.0, StatusCode::OK, "{}", listed.1);
+    assert_eq!(listed.1["data"][0]["id"], plan["id"]);
+}
+
+#[tokio::test]
+async fn household_spending_uses_payer_instead_of_transaction_author() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let member_id = member.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    let account = owner.create("accounts",json!({"name":"Shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let category = owner.category("Groceries","expense").await;
+    let mut purchase = transaction("expense","42.00",&account,&category,"family");
+    purchase["paid_by_user_id"] = member_id.clone();
+    purchase["effective_date"] = json!("2026-10-08");
+    owner.create("transactions",purchase).await;
+    let report = owner.call("GET","analytics/household?from=2026-10-01&to=2026-11-01&currency=INR",json!({}),None,None).await;
+    assert_eq!(report.0,StatusCode::OK,"{}",report.1);
+    let payer = report.1["data"].as_array().unwrap().iter().find(|v| v["id"] == member_id).unwrap();
+    assert_eq!(payer["net_spending"],"42.00");
+}
+
+#[tokio::test]
 async fn analytics_dashboard_matches_individual_reports() {
     let (client, _) = setup().await;
     let account = client.account("Checking", "bank").await;

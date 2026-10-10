@@ -25,10 +25,10 @@ function syncScopeControl() {
     el.setAttribute('aria-pressed',String(active));
   });
 }
-const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', recurring:'Recurring', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Budgets', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
+const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', recurring:'Recurring', planner:'Planner', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Budgets', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
 const previousMonth=new Date(`${savedView.month}-01T00:00:00Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
 const compareParam=new URLSearchParams(location.search).get('compare');
-const state = { me:null, accounts:[], categories:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), recurringFilter:'review', settlementFilter:'open', investmentFilter:'all', compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
+const state = { me:null, accounts:[], categories:[], members:[], plannedItems:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), recurringFilter:'review', settlementFilter:'open', investmentFilter:'all', compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
 let toastTimer;
 const h = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const id = value => encodeURIComponent(value);
@@ -60,6 +60,8 @@ function defaultTransactionScope() {
   return saved==='family'?'family':'personal';
 }
 const accountOptions = selected => state.accounts.filter(a=>a.active!==false).map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===selected)).join('');
+const payerId = t => t.paid_by_user_id || (t.source_refs?.length?state.accounts.find(a=>a.id===t.movements[0]?.account_id)?.owner_id:t.entered_by);
+const payerName = t => state.members.find(m=>m.user_id===payerId(t))?.name||'Unknown';
 const categoryName = key => categoryView.path(state.categories,key);
 const categoryOptions = (kind,selected='',exclude='') => {
   const byId=new Map(state.categories.map(c=>[c.id,c]));
@@ -79,7 +81,7 @@ function table(headers,rows) { return rows.length ? `<div class="table-scroll"><
 function notify(message) { const toast=document.querySelector('#toast'); toast.textContent=message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.classList.remove('show'),6000); }
 function failure(error,target=root) { const p=document.createElement('p'); p.className='live-error'; p.setAttribute('role','alert'); p.textContent=error.message || 'Could not reach the server. Please retry.'; target.querySelector('.live-error')?.remove(); target.prepend(p); }
 function coverage() { return '<p class="helper coverage-note">Recorded data only. Source coverage is unconfirmed; transfers do not count as spending.</p>'; }
-async function catalogs() { const [accounts,categories]=await Promise.all([api.collection('accounts?include_archived=true'),api.collection('categories?include_archived=true')]); state.accounts=accounts.data; state.categories=categories.data; }
+async function catalogs() { const [accounts,categories,members]=await Promise.all([api.collection('accounts?include_archived=true'),api.collection('categories?include_archived=true'),api.collection(`households/${id(state.me.household.id)}/members`)]); state.accounts=accounts.data; state.categories=categories.data; state.members=members.data; }
 function saveView() { viewState.save(state.month,state.scope,location.href,path=>history.replaceState(null,'',path),state.transactionFilters); }
 function setMonth(value) { state.month=value; if(state.compareMonth===value) { const previous=new Date(`${value}-01T00:00:00Z`);previous.setUTCMonth(previous.getUTCMonth()-1);state.compareMonth=previous.toISOString().slice(0,7);const url=new URL(location.href);url.searchParams.set('compare',state.compareMonth);history.replaceState(null,'',url.pathname+url.search+url.hash); } document.querySelector('#report-month').value=value; saveView(); }
 function authForm(bootstrap=false) {
@@ -179,7 +181,7 @@ function transactionTable(values,balanceEvents=[],accountFilter='') {
     }).join('');
     return [
       '<time datetime="'+h(t.effective_date)+'">'+h(t.effective_date)+'</time><small>'+when+'</small>',
-      '<div class="activity-title"><strong>'+h(t.description || 'Untitled')+'</strong><span class="activity-type">'+h(t.event_type)+'</span></div><div class="activity-meta"><small>'+(category||'Uncategorized')+' · '+(t.allocations?.length?([...new Set(t.allocations.map(a=>a.scope))].map(scope=>scope==='family'?'Family':'Personal').join(' / ')+' · '):'')+(t.entered_by===state.me.user.id?'You':'Household member')+'</small>'+transactionIndicators(t)+'</div>',
+      '<div class="activity-title"><strong>'+h(t.description || 'Untitled')+'</strong><span class="activity-type">'+h(t.event_type)+'</span></div><div class="activity-meta"><small>'+(category||'Uncategorized')+' · '+(t.allocations?.length?([...new Set(t.allocations.map(a=>a.scope))].map(scope=>scope==='family'?'Family':'Personal').join(' / ')+' · '):'')+(['expense','refund'].includes(t.event_type)?('Paid by '+h(payerName(t))+' · '):'')+'Entered by '+(t.entered_by===state.me.user.id?'you':'household member')+'</small>'+transactionIndicators(t)+'</div>',
       accounts,
       '<span class="activity-amount">'+(t.event_type==='income'||t.event_type==='refund'?'+ ':t.event_type==='expense'?'− ':t.event_type==='transfer'?'↔ ':'')+amount(scopedAmount,t.currency)+'</span>',
       button('Details','transaction-detail','data-id="'+h(t.id)+'"')
@@ -416,7 +418,7 @@ const views = {
       const rows=roots.map(([key,row])=>`<li><span><strong>${h(key==='uncategorized'?'Uncategorized':state.categories.find(category=>category.id===key)?.name||'Category')}</strong><small>${amount(row.amount,currency)}</small></span><span class="household-category-track" aria-hidden="true"><i style="width:${Math.abs(Number(row.amount))/max*100}%"></i></span></li>`).join('');
       detail=`<section class="panel household-detail"><div class="overview-panel-heading"><div><span class="section-kicker">CATEGORY DETAIL</span><h2>${h(selected.name)} · Expenses</h2></div>${navButton('household','All members')}</div>${rows?`<ul class="household-categories">${rows}</ul>`:empty('No visible expenses recorded for this month.')}<p class="helper">Amounts are net of refunds. Open a category in Analytics for the full household category breakdown.</p></section>`;
     }
-    return heading('Household 360',`${monthLabel} · ${members.length} household member${members.length===1?'':'s'}`)+`<div class="household-grid">${cards||empty('No household members yet.')}</div>${detail}<p class="helper household-note">Members are credited for transactions they entered. Your personal allocations and accessible family allocations are included. Other members’ private accounts and investments remain private; their invested amount covers holdings they chose to share. All amounts use ${h(currency)} and recorded data only.</p>`;
+    return heading('Household 360',`${monthLabel} · ${members.length} household member${members.length===1?'':'s'}`)+`<div class="household-grid">${cards||empty('No household members yet.')}</div>${detail}<p class="helper household-note">Spending and refunds are attributed to Paid by; income to the person who entered it. Your personal allocations and accessible family allocations are included. Other members’ private accounts and investments remain private; their invested amount covers holdings they chose to share. All amounts use ${h(currency)} and recorded data only.</p>`;
   },
   async recurring() {
     const {data}=await api.request('recurring-transactions');
@@ -607,6 +609,17 @@ const views = {
     return heading('Transactions',allDates?'Your transaction history':`${monthLabel} · Your money in and out`,button('Move to Family','show-bulk-scope')+button('Add balance check','transaction-balance')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')+scopeTabs()+`<p class="analytics-scope-note">${state.scope==='combined'?'Your personal and shared family transactions together.':state.scope==='family'?'Shared family transactions.':'Your personal transactions.'} Each transaction appears once. Amounts show allocations in this view.</p>`+movePanel+
       `<section class="panel ledger-workspace" aria-label="Transaction ledger"><div class="ledger-heading"><div><h2>Recorded activity <span class="record-count">${values.data.length}</span></h2><p>${balanceEvents.length} balance ${balanceEvents.length===1?'marker':'markers'}${filters.account||filters.accountType||filters.eventType?' · Filters applied':''}</p></div><div class="ledger-view-actions">${button(allDates?`Show ${state.month}`:'Show all dates','transaction-period')}${navButton('changes','Money Manager changes ↗')}</div></div>${picker}<div class="ledger-caption"><span>Latest first</span>${legend}</div>${transactionTable(values.data,balanceEvents,filters.account)}<div class="ledger-footer"><span>${values.data.length} transactions shown</span><span>Transfers match either participating account.</span></div></section>`+coverage();
   },
+  async planner() {
+    const response=await api.request(`planned-items?month=${id(state.month)}`);
+    state.plannedItems=response.data;
+    const items=response.data.map(item=>`<li class="compact-item plan-item">
+      <div class="compact-item-main"><time class="date-chip" datetime="${h(item.due_date)}">${h(item.due_date.slice(-2))}<small>${h(item.due_date.slice(0,7))}</small></time><div class="compact-item-copy"><strong>${h(item.title)}</strong><span>${h(categoryName(item.category_id))} · ${h(item.account_id?accountName(item.account_id):'No account chosen')}</span></div></div>
+      <div class="compact-item-end"><strong class="compact-amount">${amount(item.amount,item.currency)}</strong><span class="quiet-tag ${h(item.status)}">${h(item.status==='done'?'Done':item.status==='skipped'?'Skipped':'Planned')}</span><span class="quiet-tag">${h(item.visibility==='shared'?'Household':'Personal')}</span></div>
+      ${item.owner_id===state.me.user.id?`<div class="compact-item-actions">${button('Edit','edit-plan',`data-id="${h(item.id)}"`)}${button(item.status==='planned'?'Mark done':'Mark planned','toggle-plan',`data-id="${h(item.id)}"`)}${button('Remove','delete-plan',`data-id="${h(item.id)}"`)}</div>`:''}
+    </li>`).join('');
+    return heading('Planner',`${h(state.month)} · Expected expenses and bills`,'<button type="button" class="primary-button" data-action="add-plan">Add planned expense</button>')+
+      panel('Planned expenses',`<p class="helper">Plans are reminders. Record or import the actual payment separately; marking a plan done does not change balances or spending.</p>${items?`<ul class="compact-list" aria-label="Planned expenses for ${h(state.month)}">${items}</ul>`:empty('No expenses planned for this month.')}`);
+  },
   async accounts(parts) {
     const selected=state.accounts.find(a=>a.id===parts[0]);
     const accountCard=a=>`<article class="account-card ${h(a.subtype)} ${selected?.id===a.id?'selected':''}"><div class="account-card-top"><span class="account-symbol" aria-hidden="true">${a.subtype==='credit_card'?'▤':a.subtype==='cash'?'¤':a.subtype==='settle_up'?'↔':'⌂'}</span><span class="account-visibility">${h(a.visibility)}</span></div><div class="account-card-name"><h3>${h(a.name)}</h3><small>${h(a.subtype.replace('_',' '))} · ${h(a.currency)}</small></div><div class="account-card-balance">${accountBalance(a)}</div><div class="account-card-actions">${button('View ledger','account-ledger',`data-id="${h(a.id)}"`)}${a.owner_id===state.me.user.id?button('Edit','edit-account',`data-id="${h(a.id)}"`)+button(a.opening_balance?'Edit balance':'Set balance','opening-balance',`data-id="${h(a.id)}"`):''}${a.subtype==='settle_up'?'':button('Check balance','balance',`data-id="${h(a.id)}"`)}</div></article>`;
@@ -633,7 +646,7 @@ const views = {
   },
   async categories() {
     const section=kind=>panel(kind==='expense'?'Expense categories':'Income categories',
-      `<div class="category-tree">${categoryView.ordered(state.categories,kind).map(({category,depth})=>`<div class="category-tree-row" style="--depth:${depth}"><div class="category-tree-name"><span class="category-branch">${depth?'↳':'●'}</span><strong>${h(category.name)}</strong><small>${h(categoryName(category.id))}${category.archived?' · archived':''}</small></div><div>${category.archived?'':button('Add subcategory','add-subcategory',`data-parent="${h(category.id)}"`)}${category.archived?'':button('Edit','edit-category',`data-id="${h(category.id)}"`)}</div></div>`).join('') || empty('No categories yet.')}</div>`);
+      `<div class="category-tree">${categoryView.ordered(state.categories,kind).map(({category,depth})=>`<div class="category-tree-row" style="--depth:${depth}"><div class="category-tree-name"><span class="category-branch">${depth?'↳':'●'}</span><strong>${h(category.name)}</strong><small>${h(categoryName(category.id))} · ${category.visibility==='private'?'personal':'household'}${category.archived?' · archived':''}</small></div><div>${category.archived?'':button('Add subcategory','add-subcategory',`data-parent="${h(category.id)}"`)}${category.archived?'':button('Edit','edit-category',`data-id="${h(category.id)}"`)}</div></div>`).join('') || empty('No categories yet.')}</div>`);
     return heading('Categories','Categories and subcategories are grouped by their parent.',button('Add category','category'))+section('expense')+section('income');
   },
   async statements(parts) {
@@ -723,9 +736,13 @@ const views = {
     const selected=sessions.data.find(s=>s.id===parts[0]); state.session=selected || null;
     const checks=checkLists.flatMap(({account,checks})=>checks.filter(c=>!c.voided).map(c=>({account,check:c}))).sort((a,b)=>b.check.as_of.localeCompare(a.check.as_of));
     const differences=checks.filter(({check})=>check.current_variance==null || Number(check.current_variance)!==0);
-    let content=heading('Reconciliation','Review bank evidence and dated balance differences.',button('Start account review','start-session'));
+    const reviewAccounts=state.accounts.filter(a=>['bank','credit_card'].includes(a.subtype));
+    const inboxItems=reviewAccounts.map(a=>{const s=sessions.data.find(v=>v.account_id===a.id);const owner=state.members.find(m=>m.user_id===a.owner_id);return `<li class="compact-item review-inbox-item"><div class="compact-item-main"><span class="account-glyph" aria-hidden="true">${a.subtype==='credit_card'?'▤':'⌂'}</span><div class="compact-item-copy"><strong>${h(a.name)}</strong><span>${h(a.subtype==='credit_card'?'Credit card':'Bank account')} · ${h(owner?.name||'Household member')}</span></div></div><div class="compact-item-end"><span class="quiet-tag ${s?.stale?'stale':s?.state==='closed'?'done':''}">${h(s?.stale?'Stale review':s?.state==='closed'?'Closed':s?'Open':'Not started')}</span>${s?.current?.unresolved_count==null?'':`<small>${h(s.current.unresolved_count)} unresolved</small>`}</div><div class="compact-item-actions">${s?button('Open review','open-session',`data-id="${h(s.id)}"`):button('Start review','review-account',`data-id="${h(a.id)}"`)}</div></li>`;}).join('');
+    const inbox=panel('Shared review inbox',`<p class="helper">Everyone with account access can review it, including accounts another member shared. Each decision records who made it.</p>${inboxItems?`<ul class="compact-list" aria-label="Account reviews for ${h(state.month)}">${inboxItems}</ul>`:empty('No bank or card accounts available. Share an account in Settings to make it available here.')}`);
+    let content=heading('Reconciliation','Review bank evidence and dated balance differences.',selected||parts[0]==='balance'?navButton('reconcile','All reviews'):'');
+    if(!selected && parts[0]!=='balance') content+=inbox;
     if(selected) content+=`<div id="reconcile-comparison">${await reconciliationComparison(selected)}</div>`;
-    content+=panel('Balance differences',`<p>${differences.length} checks need review in ${h(state.month)}. Difference = entered balance minus the balance computed from the starting balance and transactions.</p>`+table(['Account','As of','Entered','Computed','Difference',''],differences.map(({account,check})=>[h(account.name),h(check.as_of),amount(check.amount,account.currency),amount(check.current_calculated,account.currency),check.current_variance==null?'Starting balance needed':amount(check.current_variance,account.currency),button('Compare balances','review-balance',`data-account="${h(account.id)}" data-check="${h(check.id)}"`)]))+`<p class="helper">Correct a mistaken check in Accounts. If the check is right, review missing or incorrect transactions; changing a check does not create a transaction.</p>`)+panel('Sessions',table(['Account','Month','State','Unresolved','Balance checks',''],sessions.data.map(s=>[h(accountName(s.account_id)),h(s.month),h(s.state)+(s.stale?' · stale':''),h(s.current?.unresolved_count),h(s.current?.balance_check_unresolved_count),button('Open','open-session',`data-id="${h(s.id)}"`)])));
+    content+=panel('Balance differences',`<p>${differences.length} checks need review in ${h(state.month)}. Difference = entered balance minus the balance computed from the starting balance and transactions.</p>`+table(['Account','As of','Entered','Computed','Difference',''],differences.map(({account,check})=>[h(account.name),h(check.as_of),amount(check.amount,account.currency),amount(check.current_calculated,account.currency),check.current_variance==null?'Starting balance needed':amount(check.current_variance,account.currency),button('Compare balances','review-balance',`data-account="${h(account.id)}" data-check="${h(check.id)}"`)]))+`<p class="helper">Correct a mistaken check in Accounts. If the check is right, review missing or incorrect transactions; changing a check does not create a transaction.</p>`);
     if(parts[0]==='balance') {
       const account=state.accounts.find(a=>a.id===parts[1]);
       const check=checks.find(v=>v.account.id===parts[1] && v.check.id===parts[2])?.check;
@@ -745,8 +762,14 @@ const views = {
   async settings() {
     const members=await api.request(`households/${id(state.me.household.id)}/members`);
     const canInvite=['owner','admin'].includes(state.me.membership.role);
+    const privateAccounts=state.accounts.filter(a=>a.owner_id===state.me.user.id&&a.visibility==='private');
+    const privateCategories=state.categories.filter(c=>c.owner_id===state.me.user.id&&c.visibility==='private');
+    const accessList=(items,label)=>items.length?`<ul class="compact-list" aria-label="${h(label)}">${items.join('')}</ul>`:empty(`No ${label.toLowerCase()} to move.`);
+    const accountRows=privateAccounts.map(a=>`<li class="compact-item access-item"><div class="compact-item-main"><span class="account-glyph" aria-hidden="true">${a.subtype==='credit_card'?'▤':a.subtype==='cash'?'¤':'⌂'}</span><div class="compact-item-copy"><strong>${h(a.name)}</strong><span>${h(a.subtype.replace('_',' '))} · ${h(a.currency)}</span></div></div><div class="compact-item-actions">${button('Move to household','share-account',`data-id="${h(a.id)}"`)}</div></li>`);
+    const categoryRows=privateCategories.map(c=>`<li class="compact-item access-item"><div class="compact-item-main"><span class="account-glyph" aria-hidden="true">●</span><div class="compact-item-copy"><strong>${h(categoryName(c.id))}</strong><span>${h(c.kind)} category</span></div></div><div class="compact-item-actions">${button('Move to household','share-category',`data-id="${h(c.id)}"`)}</div></li>`);
+    const householdAccess=panel('Move to household access',`<p class="helper access-intro">Sharing an account gives every member access to its full history. Share any personal categories it uses first.</p><div class="access-groups"><section><h3>Your personal accounts</h3>${accessList(accountRows,'Personal accounts')}</section><section><h3>Your personal categories</h3>${accessList(categoryRows,'Personal categories')}</section></div>`);
     const invite=canInvite?panel('Add a member',`<form id="invite-form">${field('Email address',input('email','type="email" required autocomplete="email"'))}${field('Role',`<select name="role">${option('member','Member')}${state.me.membership.role==='owner'?option('admin','Admin'):''}</select>`)}<p class="helper">Create a one-day invitation link and share it with the intended person. FinWise does not send email. Private accounts stay private unless you grant access.</p><button type="submit" class="primary-button">Create invitation link</button></form>${state.inviteLink?`<div class="invite-link">${field('Share this link now',input('link',`readonly value="${h(state.inviteLink)}"`))}${button('Copy link','copy-invite-link')}</div>`:''}`):'';
-    return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+panel('Default transaction scope',`<form id="default-scope-form">${field('Scope for new transactions and imports',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<p class="helper">Saved in this browser for your account. You can choose a different scope during import review or when adding a transaction.</p><button type="submit" class="primary-button">Save default</button></form>`)+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
+    return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+panel('Default transaction scope',`<form id="default-scope-form">${field('Scope for new transactions and imports',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<p class="helper">Saved in this browser for your account. You can choose a different scope during import review or when adding a transaction.</p><button type="submit" class="primary-button">Save default</button></form>`)+householdAccess+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
   },
   async more() { return heading('Workspace','Choose a view.')+`<div class="mobile-more">${Object.entries(labels).filter(([v])=>v!=='more').map(([v,name])=>navButton(v,name)).join('')}${button('Sign out','logout')}</div>`; }
 };
@@ -830,27 +853,47 @@ function categoryEditor(key=null,parentKey=null) {
   const parent=state.categories.find(c=>c.id===parentKey);
   const kind=current?.kind || parent?.kind || 'expense';
   const parentId=current?.parent_id || parentKey || '';
+  const access=current?(current.visibility||'shared'):parent?(parent.visibility||'shared'):state.me.membership.role==='member'?'private':'shared';
   const kindField=current || parent
     ?input('kind',`type="hidden" value="${h(kind)}"`)+`<p class="helper">Type: ${h(kind)}</p>`
     :field('Type',`<select name="kind" id="category-kind">${option('expense','Expense',kind==='expense')}${option('income','Income',kind==='income')}</select>`);
   editor(current?'Edit category':parent?'Add subcategory':'Add category',
     input('category_id',`type="hidden" value="${h(key||'')}"`)+input('revision',`type="hidden" value="${current?.revision||''}"`)+
     field('Name',input('name',`required maxlength="100" value="${h(current?.name||'')}"`))+kindField+
-    field('Parent category',`<select name="parent_id" id="category-parent">${option('','Top level',!parentId)}${categoryOptions(kind,parentId,key||'')}</select>`),
+    field('Parent category',`<select name="parent_id" id="category-parent">${option('','Top level',!parentId)}${categoryOptions(kind,parentId,key||'')}</select>`)+
+    field('Access',`<select name="visibility" ${current&&access==='shared'?'disabled':''}>${option('private','Personal',access==='private')}${option('shared','Household',access==='shared')}</select>`)+
+    (current&&access==='shared'?input('visibility','type="hidden" value="shared"'):'')+
+    `<p class="helper">Personal categories work with your private accounts. Move a personal category to household access in Settings.</p>`,
     'category-form',current?'Save category':'Create category');
 }
 function transactionEditor() {
   if(!state.accounts.some(a=>a.active!==false)) { notify('Add an active account first.'); return; }
-  editor('Add transaction',field('Description',input('description','required maxlength="240"'))+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Amount',moneyInput('amount'))+field('Date',input('effective_date',`type="date" required value="${localDate()}"`))+field('Account / transfer source',`<select name="account_id" required>${accountOptions()}</select>`)+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}</div><div id="allocation-fields">${field('Category','<select name="category_id" id="transaction-category"></select>')}${field('Scope',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}</div>`,'transaction-form');
+  editor('Add transaction',field('Description',input('description','required maxlength="240"'))+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Amount',moneyInput('amount'))+field('Date',input('effective_date',`type="date" required value="${localDate()}"`))+field('Account / transfer source',`<select name="account_id" required>${accountOptions()}</select>`)+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}</div><div id="allocation-fields">${field('Category','<select name="category_id" id="transaction-category"></select>')}${field('Scope',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div>`,'transaction-form');
   updateCategories();
 }
-function updateCategories() { const kind=document.querySelector('#event-type').value; const transfer=kind==='transfer'; document.querySelector('#transfer-target').hidden=!transfer; document.querySelector('#allocation-fields').hidden=transfer; document.querySelector('#transaction-category').innerHTML=option('','Uncategorized')+categoryOptions(kind==='income'?'income':'expense'); }
+function planEditor(key=null) {
+  const item=state.plannedItems.find(v=>v.id===key);
+  const currency=item?.currency||state.me.household.base_currency;
+  const defaultDueDate=localDate().startsWith(`${state.month}-`)?localDate():`${state.month}-01`;
+  const accountChoices=state.accounts.filter(a=>a.currency===currency && a.active!==false && (item?.visibility!=='shared'||a.visibility==='shared'));
+  editor(item?'Edit planned expense':'Add planned expense',
+    input('plan_id',`type="hidden" value="${h(item?.id||'')}"`)+input('revision',`type="hidden" value="${item?.revision||''}"`)+
+    field('Title',input('title',`required maxlength="200" value="${h(item?.title||'')}"`))+
+    field('Due date',input('due_date',`type="date" required value="${h(item?.due_date||defaultDueDate)}"`))+
+    field(`Expected amount (${currency})`,input('amount',`required inputmode="decimal" value="${h(item?.amount||'')}"`))+
+    field('Visibility',`<select name="visibility">${option('private','Personal',item?.visibility!=='shared')}${option('shared','Household',item?.visibility==='shared')}</select>`)+
+    field('Category',`<select name="category_id">${option('','Uncategorized',!item?.category_id)}${categoryOptions('expense',item?.category_id)}</select>`)+
+    field('Expected account',`<select name="account_id">${option('','No account',!item?.account_id)}${accountChoices.map(a=>option(a.id,a.name,a.id===item?.account_id)).join('')}</select>`)+
+    `<p class="helper">Household plans can use only household accounts. A plan does not post money movement.</p>`,
+    'plan-form',item?'Save plan':'Add plan');
+}
+function updateCategories() { const kind=document.querySelector('#event-type').value; const transfer=kind==='transfer'; document.querySelector('#transfer-target').hidden=!transfer; document.querySelector('#allocation-fields').hidden=transfer;document.querySelector('#paid-by-field').hidden=kind==='income'||transfer; document.querySelector('#transaction-category').innerHTML=option('','Uncategorized')+categoryOptions(kind==='income'?'income':'expense'); }
 async function transactionDetail(key) {
   const t=await api.request(`transactions/${id(key)}`);
   await loadLedgerBalances([t],true);
   const amendment=t.amendment?`<p class="amendment-note"><strong>Amended in FinWise</strong><br>Money Manager original: ${amount(t.amendment.original_amount,t.currency)} on ${h(t.amendment.original_date)}.<br>Current amount: ${amount(t.amount,t.currency)} on ${h(t.effective_date)}.<br>${h(t.amendment.reason)} · Update the source app using the amendment export.</p>`:t.reconciliation_created?`<p class="amendment-note"><strong>${t.reconciliation_created.action==='update_transfer'?'Converted to an internal transfer':'Created from a bank statement'}</strong><br>${h(t.reconciliation_created.observation_ids?.length||0)} source statement row(s) attached. ${t.reconciliation_created.action==='update_transfer'?'Update':'Add'} this transaction in Money Manager using the changes export in Reconcile.<br>${h(t.reconciliation_created.reason||'')}</p>`:'';
   const evidence=t.reconciliation_evidence||[];
-  editor('Transaction details',`<p>${h(t.effective_date)} · ${h(t.event_type)} · ${amount(t.amount,t.currency)}</p>${transactionIndicators(t)}`+amendment+table(['Account','Movement','Balance after'],t.movements.map(m=>{const row=state.ledgerBalances.get(`${m.account_id}:${t.id}`);return [h(accountName(m.account_id)),amount(m.amount,t.currency),row?`${amount(row.balance_after,row.currency)}<small>${h(balanceLabel(row))}${groupBalanceLabel(row,m.account_id)}</small>`:'Unknown'];}))+table(['Category','Scope','Amount'],t.allocations.map(a=>[h(categoryName(a.category_id)),h(a.scope),amount(a.amount,t.currency)]))+`<h3>Reconciliation evidence</h3>`+(evidence.length?table(['Account','Statement date','Statement row','Attached amount'],evidence.map(v=>[h(accountName(v.account_id)),h(v.statement_date),`${h(v.statement_description)}${v.statement_reference?`<small>Ref ${h(v.statement_reference)}</small>`:''}`,amount(v.matched_amount,t.currency)])):empty('No statement rows attached yet.'))+`<p>Entered by: ${t.entered_by===state.me.user.id?'You':'Household member'} · Revision ${t.revision}</p><p>${t.source_refs.length} source references preserved.</p>${button('Edit transaction','edit-transaction',`data-id="${h(t.id)}"`)}${button('Delete transaction','delete-transaction',`data-id="${h(t.id)}"`)}`,'transaction-detail-form','Close');
+  editor('Transaction details',`<p>${h(t.effective_date)} · ${h(t.event_type)} · ${amount(t.amount,t.currency)}</p>${transactionIndicators(t)}`+amendment+table(['Account','Movement','Balance after'],t.movements.map(m=>{const row=state.ledgerBalances.get(`${m.account_id}:${t.id}`);return [h(accountName(m.account_id)),amount(m.amount,t.currency),row?`${amount(row.balance_after,row.currency)}<small>${h(balanceLabel(row))}${groupBalanceLabel(row,m.account_id)}</small>`:'Unknown'];}))+table(['Category','Scope','Amount'],t.allocations.map(a=>[h(categoryName(a.category_id)),h(a.scope),amount(a.amount,t.currency)]))+`<h3>Reconciliation evidence</h3>`+(evidence.length?table(['Account','Statement date','Statement row','Attached amount'],evidence.map(v=>[h(accountName(v.account_id)),h(v.statement_date),`${h(v.statement_description)}${v.statement_reference?`<small>Ref ${h(v.statement_reference)}</small>`:''}`,amount(v.matched_amount,t.currency)])):empty('No statement rows attached yet.'))+`<p>${['expense','refund'].includes(t.event_type)?`Paid by: ${h(payerName(t))} · `:''}Entered by: ${t.entered_by===state.me.user.id?'You':'Household member'} · Revision ${t.revision}</p><p>${t.source_refs.length} source references preserved.</p>${button('Edit transaction','edit-transaction',`data-id="${h(t.id)}"`)}${button('Delete transaction','delete-transaction',`data-id="${h(t.id)}"`)}`,'transaction-detail-form','Close');
 }
 async function transactionEditEditor(key) {
   const t=await api.request(`transactions/${id(key)}`);
@@ -862,7 +905,7 @@ async function transactionEditEditor(key) {
   const sourceLeg=transfer?t.movements.find(m=>m.amount.startsWith('-')):t.movements[0];
   const destinationLeg=transfer?t.movements.find(m=>!m.amount.startsWith('-')):null;
   const allocations=transfer?'':t.allocations.map((a,i)=>`<div class="form-grid">${field(`Category ${i+1}`,`<select name="category-${i}">${option('','Uncategorized',!a.category_id)}${a.category_id && state.categories.find(c=>c.id===a.category_id)?.archived?option(a.category_id,`${categoryName(a.category_id)} (archived)`,true):''}${categoryOptions(t.event_type==='income'?'income':'expense',a.category_id)}</select>`)}${field(`Allocation ${i+1} (${t.currency})`,input(`allocation-${i}`,`required inputmode="decimal" value="${h(a.amount)}"`))}${field('Scope',`<select name="scope-${i}">${option('personal','Personal',a.scope==='personal')}${option('family','Family',a.scope==='family')}</select>`)}</div>`).join('');
-  editor('Edit transaction',input('transaction_id',`type="hidden" value="${h(t.id)}"`)+input('revision',`type="hidden" value="${t.revision}"`)+input('original_date',`type="hidden" value="${h(t.effective_date)}"`)+input('event_type',`type="hidden" value="${h(t.event_type)}"`)+input('currency',`type="hidden" value="${h(t.currency)}"`)+input('allocation_count',`type="hidden" value="${t.allocations.length}"`)+`<p>${h(t.event_type)} · ${h(t.currency)}. Source references and prior revisions are retained.</p>`+field('Description',input('description',`value="${h(t.description||'')}"`))+field('Date',input('effective_date',`type="date" required value="${h(t.effective_date)}"`))+field('Amount',input('amount',`required inputmode="decimal" value="${h(t.amount)}"`))+field(transfer?'From account':'Account',`<select name="source_account" required>${accounts(sourceLeg?.account_id)}</select>`)+(transfer?field('To account',`<select name="destination_account" required>${accounts(destinationLeg?.account_id)}</select>`):allocations),'transaction-full-edit-form','Save transaction');
+  editor('Edit transaction',input('transaction_id',`type="hidden" value="${h(t.id)}"`)+input('revision',`type="hidden" value="${t.revision}"`)+input('original_date',`type="hidden" value="${h(t.effective_date)}"`)+input('event_type',`type="hidden" value="${h(t.event_type)}"`)+input('currency',`type="hidden" value="${h(t.currency)}"`)+input('allocation_count',`type="hidden" value="${t.allocations.length}"`)+`<p>${h(t.event_type)} · ${h(t.currency)}. Source references and prior revisions are retained.</p>`+field('Description',input('description',`value="${h(t.description||'')}"`))+field('Date',input('effective_date',`type="date" required value="${h(t.effective_date)}"`))+field('Amount',input('amount',`required inputmode="decimal" value="${h(t.amount)}"`))+field(transfer?'From account':'Account',`<select name="source_account" required>${accounts(sourceLeg?.account_id)}</select>`)+(transfer?field('To account',`<select name="destination_account" required>${accounts(destinationLeg?.account_id)}</select>`):allocations+(['expense','refund'].includes(t.event_type)?field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===payerId(t))).join('')}</select>`):'')),'transaction-full-edit-form','Save transaction');
 }
 function transactionBalanceEditor() {
   const eligible=state.accounts.filter(a=>a.subtype!=='settle_up');
@@ -1039,6 +1082,12 @@ async function saveMapping(form) {
 }
 
 const actions = {
+  'share-account':async el=>{const account=state.accounts.find(a=>a.id===el.dataset.id);if(!account)return;if(!window.confirm(`Share ${account.name} and its full account history with every household member?`))return;await api.request(`accounts/${id(account.id)}`,{method:'PATCH',revision:account.revision,body:{visibility:'shared'}});await catalogs();notify('Account moved to household access.');await renderRoute();},
+  'share-category':async el=>{const category=state.categories.find(c=>c.id===el.dataset.id);if(!category)return;if(!window.confirm(`Share ${category.name} with every household member?`))return;await api.request(`categories/${id(category.id)}`,{method:'PATCH',revision:category.revision,body:{visibility:'shared'}});await catalogs();notify('Category moved to household access.');await renderRoute();},
+  'add-plan':()=>planEditor(),
+  'edit-plan':el=>planEditor(el.dataset.id),
+  'toggle-plan':async el=>{const item=state.plannedItems.find(v=>v.id===el.dataset.id);if(!item)return;await api.request(`planned-items/${id(item.id)}`,{method:'PATCH',revision:item.revision,body:{status:item.status==='planned'?'done':'planned'}});notify('Plan status updated.');await renderRoute();},
+  'delete-plan':async el=>{const item=state.plannedItems.find(v=>v.id===el.dataset.id);if(!item||!window.confirm(`Remove the plan for ${item.title}?`))return;await api.request(`planned-items/${id(item.id)}`,{method:'DELETE',revision:item.revision,body:{}});notify('Plan removed.');await renderRoute();},
   'recurring-filter':el=>{state.recurringFilter=el.dataset.filter;renderRoute();},
   'recurring-status':async el=>{const field=el.dataset.field,value=el.dataset.value==='true';if(!['subscription','ignored'].includes(field))return;await api.request(`recurring-transactions/${id(el.dataset.key)}`,{method:'PUT',body:{[field]:value}});notify(field==='ignored'?(value?'Pattern ignored.':'Pattern restored to review.'):(value?'Marked as subscription.':'Subscription tag removed.'));await renderRoute();},
   'show-bulk-scope':()=>{const panel=document.querySelector('#bulk-scope-panel');if(panel){panel.open=true;loadBulkScopePanel(panel);panel.scrollIntoView({behavior:'smooth',block:'start'});}},
@@ -1073,6 +1122,7 @@ const actions = {
   'open-import':el=>navigate('imports',[el.dataset.batch,el.dataset.file]),
   'retry-file':async()=>{await api.request(`imports/${id(state.batch)}/files/${id(state.file)}/retry`,{method:'POST',revision:state.fileInfo.revision,body:{}});await renderRoute();},
   'open-session':el=>navigate('reconcile',[el.dataset.id]),
+  'review-account':el=>editor('Start account review',field('Bank or card account',`<select name="account_id" required>${state.accounts.filter(a=>['bank','credit_card'].includes(a.subtype)).map(a=>option(a.id,a.name,a.id===el.dataset.id)).join('')}</select>`)+`<p>${h(state.month)}</p>`,'session-form','Start review'),
   'review-balance':el=>navigate('reconcile',['balance',el.dataset.account,el.dataset.check]),
   'add-reconcile-transaction':el=>{transactionEditor();const select=dialog.querySelector('[name="account_id"]');if(select)select.value=el.dataset.account;},
   'auto-match':async el=>{const label=el.textContent;el.textContent='Matching…';el.setAttribute('aria-busy','true');try {const result=await api.request(`reconciliation/sessions/${id(el.dataset.id)}/auto-match`,{method:'POST',revision:state.session.revision,body:{}});notify(`${result.matched_count} exact transaction pairs matched.`);await refreshReconciliationComparison();} finally {el.textContent=label;el.removeAttribute('aria-busy');}},
@@ -1209,6 +1259,13 @@ document.addEventListener('submit',async event=>{
       notify('Default transaction scope saved in this browser.');
       await renderRoute();return;
     }
+    if(form.id==='plan-form') {
+      const existing=state.plannedItems.find(v=>v.id===data.plan_id);
+      const body={title:data.title,due_date:data.due_date,amount:data.amount,currency:existing?.currency||state.me.household.base_currency,visibility:data.visibility,category_id:data.category_id||null,account_id:data.account_id||null};
+      if(existing) await api.request(`planned-items/${id(existing.id)}`,{method:'PATCH',revision:existing.revision,body});
+      else await api.request('planned-items',{method:'POST',body});
+      dialog.close();notify('Plan saved.');await renderRoute();return;
+    }
     if(form.id==='bulk-scope-form') {
       const ids=formData.getAll('transaction_id');
       if(!ids.length) throw new Error('Select at least one transaction.');
@@ -1268,7 +1325,7 @@ document.addEventListener('submit',async event=>{
       await api.request(`accounts/${id(data.account_id)}/balance-checks/${id(data.check_id)}`,{method:'PATCH',revision:data.revision,body:{amount:data.amount,basis:data.basis,as_of:localTimestamp(data.as_of),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone}});
       notify('Balance check corrected.');
     } else if(form.id==='category-form') {
-      const body={name:data.name,kind:data.kind,parent_id:data.parent_id || null};
+      const body={name:data.name,kind:data.kind,parent_id:data.parent_id || null,visibility:data.visibility||'shared'};
       if(data.category_id) await api.request(`categories/${id(data.category_id)}`,{method:'PATCH',revision:data.revision,body});
       else await api.request('categories',{method:'POST',body});
     }
@@ -1277,6 +1334,7 @@ document.addEventListener('submit',async event=>{
       const movements=[{account_id:data.account_id,amount:['expense','transfer'].includes(data.event_type)?`-${data.amount}`:data.amount}];
       if(transfer) movements.push({account_id:data.destination,amount:data.amount});
       const body={event_type:data.event_type,amount:data.amount,currency:account.currency,effective_date:data.effective_date,description:data.description,movements,allocations:transfer?[]:[{category_id:data.category_id || null,amount:data.amount,scope:data.scope}]};
+      if(['expense','refund'].includes(data.event_type)) body.paid_by_user_id=data.paid_by_user_id;
       await api.request('transactions',{method:'POST',body});
     } else if(form.id==='transaction-full-edit-form') {
       const transfer=data.event_type==='transfer';
@@ -1287,6 +1345,7 @@ document.addEventListener('submit',async event=>{
       if(!original || original.id!==data.transaction_id || original.revision!==Number(data.revision)) throw new Error('Reload the transaction before editing.');
       const allocations=transfer?[]:original.allocations.map((allocation,i)=>({...allocation,category_id:data[`category-${i}`]||null,amount:data[`allocation-${i}`],scope:data[`scope-${i}`]}));
       const body={description:data.description,effective_date:data.effective_date,amount:data.amount,movements,allocations};
+      if(['expense','refund'].includes(data.event_type)) body.paid_by_user_id=data.paid_by_user_id;
       if(data.effective_date!==data.original_date) body.effective_at=null;
       await api.request(`transactions/${id(data.transaction_id)}`,{method:'PATCH',revision:data.revision,body});
       notify('Transaction updated. Balance and reconciliation results have been recalculated.');

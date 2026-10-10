@@ -30,16 +30,20 @@ schemas = {
     "Owner": obj({"name": S, "email": {"type": "string", "format": "email"}, "password": {"type": "string", "minLength": 12, "maxLength": 1024, "writeOnly": True}}, ("name", "email", "password")),
     "HouseholdInput": obj({"name": S, "timezone": S, "base_currency": S}, ("name", "timezone", "base_currency")),
     "AccountInput": obj({"name": S, "subtype": enum("bank", "credit_card", "cash", "settle_up"), "currency": S, "timezone": S, "aliases": arr(S), "visibility": enum("private", "shared"), "active": B, "opening_balance": obj({"amount": M, "as_of": {"type":"string","format":"date-time"}}, ("amount","as_of")), "card_due": obj({"amount": M, "due_date": D}, ("due_date",))}, ("name", "subtype", "currency")),
-    "CategoryInput": obj({"name": S, "kind": enum("expense", "income"), "parent_id": {"type": ["string", "null"]}}, ("name", "kind")),
+    "CategoryInput": obj({"name": S, "kind": enum("expense", "income"), "parent_id": {"type": ["string", "null"]}, "visibility": enum("private", "shared")}, ("name", "kind")),
     "Movement": obj({"account_id": S, "amount": M}, ("account_id", "amount")),
     "Allocation": obj({"category_id": {"type": ["string", "null"]}, "amount": M, "scope": enum("personal", "family"), "beneficiary_id": S}, ("amount", "scope")),
-    "TransactionInput": obj({"event_type": enum("expense", "income", "refund", "transfer"), "amount": M, "currency": S, "effective_date": D, "effective_at": {"type":"string","format":"date-time"}, "description": S, "merchant": S, "movements": arr(ref("Movement")), "allocations": arr(ref("Allocation"))}, ("event_type", "amount", "currency", "effective_date", "movements", "allocations")),
+    "TransactionInput": obj({"event_type": enum("expense", "income", "refund", "transfer"), "amount": M, "currency": S, "effective_date": D, "effective_at": {"type":"string","format":"date-time"}, "description": S, "merchant": S, "movements": arr(ref("Movement")), "allocations": arr(ref("Allocation")), "paid_by_user_id": S}, ("event_type", "amount", "currency", "effective_date", "movements", "allocations")),
     "BudgetLine": obj({"category_id": S, "amount": M}, ("category_id", "amount")),
     "BudgetInput": obj({"name": S, "month": {"type": "string", "pattern": r"^\d{4}-\d{2}$"}, "scope": enum("personal", "family"), "currency": S, "expected_income": M, "savings_goal": M, "lines": arr(ref("BudgetLine")), "targets": obj({})}, ("month", "scope", "currency", "expected_income", "lines")),
     "Revision": obj({"expected_revision": I}),
     "Reason": obj({"expected_revision": I, "reason": S}, ("reason",)),
     "InviteInput": obj({"email": S, "role": enum("admin", "member"), "token": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$", "writeOnly": True, "description": "Generate 32 random bytes in the client; transmit the token to the invitee privately. Server persists only its hash."}, "expires_at": {"type": "string", "format": "date-time"}}, ("email", "role", "token")),
 }
+schemas["PlannedItemInput"] = obj({"title": S, "due_date": D, "amount": M, "currency": S, "category_id": {"type":["string","null"]}, "account_id": {"type":["string","null"]}, "visibility": enum("private","shared")}, ("title","due_date","amount","currency","visibility"))
+schemas["PlannedItem"] = obj(dict(schemas["PlannedItemInput"]["properties"], id=S, revision=I, owner_id=S, status=enum("planned","done","skipped"), created_at=S), list(schemas["PlannedItemInput"]["required"])+["id","revision","owner_id","status","created_at"])
+schemas["PlannedItemCollection"] = obj({"data":arr(ref("PlannedItem")),"page":obj({}),"meta":obj({})}, ("data","page","meta"))
+schemas["PlannedItemPatch"] = obj(dict(schemas["PlannedItemInput"]["properties"], status=enum("planned","done","skipped"), expected_revision=I))
 schemas["BootstrapInput"] = obj({"owner": ref("Owner"), "household": ref("HouseholdInput")}, ("owner", "household"))
 for name in ["Account", "Category", "Transaction", "Budget"]:
     source = schemas[name + "Input"]
@@ -59,7 +63,7 @@ for name in ["Account", "Category", "Transaction", "Budget"]:
 paths = {}
 
 def route(path, method, response=None, request=None, public=False, revision=False, implemented=True, parameters=()):
-    status = "201" if method == "post" and path in ["/auth/bootstrap", "/accounts", "/categories", "/transactions", "/budgets"] or method == "post" and path.endswith(("/balance-checks", "/copy")) or method == "post" and path.endswith("/invites") else "200"
+    status = "201" if method == "post" and path in ["/auth/bootstrap", "/accounts", "/categories", "/transactions", "/budgets", "/planned-items"] or method == "post" and path.endswith(("/balance-checks", "/copy")) or method == "post" and path.endswith("/invites") else "200"
     if method == "delete" or path == "/auth/logout":
         status = "204"
     params = [{"name": part[1:-1], "in": "path", "required": True, "schema": S} for part in path.split("/") if part.startswith("{")]
@@ -97,6 +101,10 @@ for plural, name in [("accounts", "Account"), ("categories", "Category"), ("tran
     route(f"/{plural}", "post", name, name + "Input")
     route(f"/{plural}/{{id}}", "get", name)
     route(f"/{plural}/{{id}}", "patch", name, name + "Patch", revision=True)
+route("/planned-items", "get", "PlannedItemCollection", parameters=["month"])
+route("/planned-items", "post", "PlannedItem", "PlannedItemInput")
+route("/planned-items/{id}", "patch", "PlannedItem", "PlannedItemPatch", revision=True)
+route("/planned-items/{id}", "delete", revision=True)
 for kind in ["transactions", "budgets"]:
     route(f"/{kind}/{{id}}/revisions", "get")
 route("/transactions/{id}/void", "post", "Transaction", "Reason", revision=True)

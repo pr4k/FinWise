@@ -479,7 +479,7 @@ const ACCOUNT_FIELDS: &[&str] = &[
     "opening_balance",
     "card_due",
 ];
-const CATEGORY_FIELDS: &[&str] = &["name", "kind", "parent_id"];
+const CATEGORY_FIELDS: &[&str] = &["name", "kind", "parent_id", "visibility"];
 const TRANSACTION_FIELDS: &[&str] = &[
     "event_type",
     "amount",
@@ -490,6 +490,7 @@ const TRANSACTION_FIELDS: &[&str] = &[
     "merchant",
     "movements",
     "allocations",
+    "paid_by_user_id",
 ];
 const BUDGET_FIELDS: &[&str] = &[
     "name",
@@ -525,6 +526,39 @@ async fn route(
     }
     let segments: Vec<&str> = path.split('/').collect();
     match (method, segments.as_slice()) {
+        ("GET", ["planned-items"]) => {
+            allowed_query(q, &["month"])?;
+            let month = q.get("month").ok_or_else(|| ApiError::invalid("month is required."))?;
+            let (from, to) = month_bounds(month)?;
+            let mut values = storage::list(db, p, "planned_items").await?;
+            values.retain(|v| v["due_date"].as_str().is_some_and(|d| d >= from.as_str() && d < to.as_str()) && v["deleted"] != true);
+            values.sort_by(|a,b| a["due_date"].as_str().cmp(&b["due_date"].as_str()));
+            ok(collection(values))
+        }
+        ("POST", ["planned-items"]) => {
+            allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility"])?;
+            validate_planned_item(db,p,body).await?;
+            let mut value = body.clone(); value["status"] = json!("planned"); value["deleted"] = json!(false);
+            created(storage::create(db,p,"planned_items",value).await?)
+        }
+        ("PATCH", ["planned-items", id]) => {
+            allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility","status"])?;
+            let before = storage::get(db,p,"planned_items",id).await?;
+            if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
+            revision(headers,body,&before)?;
+            let after = patch(&before,body,&["title","due_date","amount","currency","category_id","account_id","visibility","status"]);
+            validate_planned_item(db,p,&after).await?;
+            domain::choice(&after,"status",&["planned","done","skipped"])?;
+            ok(storage::update(db,p,&before,after,"update").await?)
+        }
+        ("DELETE", ["planned-items", id]) => {
+            let before = storage::get(db,p,"planned_items",id).await?;
+            if before["owner_id"] != p.user_id { return Err(ApiError::forbidden()); }
+            revision(headers,body,&before)?;
+            let mut after = before.clone(); after["deleted"] = json!(true);
+            storage::update(db,p,&before,after,"delete").await?;
+            no_content()
+        }
         ("GET", ["recurring-transactions"]) => {
             allowed_query(q, &[])?;
             ok(recurring::list(db, p).await?)
@@ -809,13 +843,17 @@ async fn route(
                     validate_account(&value)?;
                 }
                 "categories" => {
-                    auth::admin(p)?;
+                    if value.get("visibility").is_none() { value["visibility"] = json!("shared"); }
+                    if value["visibility"] == "shared" { auth::admin(p)?; }
                     value["archived"] = json!(false);
                     validate_category(db, p, &value, None).await?;
                 }
                 "transactions" => {
                     value["voided"] = json!(false);
                     value["entered_by"] = json!(p.user_id);
+                    if value.get("paid_by_user_id").is_none() && (value["event_type"] == "expense" || value["event_type"] == "refund") {
+                        value["paid_by_user_id"] = json!(p.user_id);
+                    }
                     value["source_refs"] = json!([]);
                     value["reconciliation_state"] = json!("unmatched");
                     validate_ledger(db, p, &value).await?;
@@ -859,6 +897,21 @@ async fn route(
                     if before["owner_id"] != p.user_id {
                         return Err(ApiError::forbidden());
                     }
+                    if before["visibility"] == "private" && after["visibility"] == "shared" {
+                        let rows: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='transactions' AND EXISTS (SELECT 1 FROM json_each(resources.document,'$.movements') m WHERE json_extract(m.value,'$.account_id')=?)")
+                            .bind(&p.household_id).bind(id).fetch_all(&mut *db).await?;
+                        for row in rows {
+                            let transaction: Value = serde_json::from_str(&row).map_err(|_| ApiError::invalid("Invalid stored transaction."))?;
+                            for allocation in transaction["allocations"].as_array().into_iter().flatten() {
+                                if let Some(category_id) = allocation["category_id"].as_str() {
+                                    let category = storage::raw(db,p,"categories",category_id).await?;
+                                    if category["visibility"] == "private" {
+                                        return Err(ApiError::conflict("Move categories used by this account to household access first."));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if after["subtype"] != "credit_card" {
                         after.as_object_mut().unwrap().remove("card_due");
                     }
@@ -876,7 +929,11 @@ async fn route(
                     }
                 }
                 "categories" => {
-                    auth::admin(p)?;
+                    if before["owner_id"] != p.user_id { auth::admin(p)?; }
+                    if after.get("visibility").is_none() { after["visibility"] = json!("shared"); }
+                    if before["visibility"] != "private" && after["visibility"] == "private" {
+                        return Err(ApiError::conflict("Household categories cannot be made personal after sharing."));
+                    }
                     validate_category(db, p, &after, Some(id)).await?;
                 }
                 "transactions" => {
@@ -944,8 +1001,8 @@ async fn route(
             }
         }
         ("POST", ["categories", id, action]) if ["archive", "restore"].contains(action) => {
-            auth::admin(p)?;
             let before = storage::get(db, p, "categories", id).await?;
+            if before["owner_id"] != p.user_id { auth::admin(p)?; }
             revision(headers, body, &before)?;
             let mut after = before.clone();
             after["archived"] = json!(*action == "archive");
@@ -971,6 +1028,17 @@ async fn route(
                 .as_bool()
                 .ok_or_else(|| ApiError::invalid("granted must be boolean."))?;
             if grant {
+                let rows: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='transactions' AND EXISTS (SELECT 1 FROM json_each(resources.document,'$.movements') m WHERE json_extract(m.value,'$.account_id')=?)")
+                    .bind(&p.household_id).bind(id).fetch_all(&mut *db).await?;
+                for row in rows {
+                    let transaction: Value = serde_json::from_str(&row).map_err(|_| ApiError::invalid("Invalid stored transaction."))?;
+                    for allocation in transaction["allocations"].as_array().into_iter().flatten() {
+                        if let Some(category_id) = allocation["category_id"].as_str() {
+                            let category = storage::raw(db,p,"categories",category_id).await?;
+                            if category["visibility"] == "private" { return Err(ApiError::conflict("Move categories used by this account to household access first.")); }
+                        }
+                    }
+                }
                 sqlx::query(
                     "INSERT OR IGNORE INTO account_access(account_id,member_id) VALUES(?,?)",
                 )
@@ -1154,8 +1222,8 @@ async fn route(
         }
         ("GET", ["budgets", id, "tracking"]) => budget_tracking(db, p, id, q).await,
         ("GET", ["households", household, "members"]) if *household == p.household_id => {
-            let rows=sqlx::query("SELECT m.id,m.role,m.revision,u.name,u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.household_id=? AND m.active=1 ORDER BY m.id").bind(&p.household_id).fetch_all(db).await?;
-            ok(collection(rows.into_iter().map(|r|json!({"id":r.get::<&str,_>(0),"role":r.get::<&str,_>(1),"revision":r.get::<i64,_>(2),"name":r.get::<&str,_>(3),"email":r.get::<&str,_>(4)})).collect()))
+            let rows=sqlx::query("SELECT m.id,m.role,m.revision,u.name,u.email,u.id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.household_id=? AND m.active=1 ORDER BY m.id").bind(&p.household_id).fetch_all(db).await?;
+            ok(collection(rows.into_iter().map(|r|json!({"id":r.get::<&str,_>(0),"role":r.get::<&str,_>(1),"revision":r.get::<i64,_>(2),"name":r.get::<&str,_>(3),"email":r.get::<&str,_>(4),"user_id":r.get::<&str,_>(5)})).collect()))
         }
         ("POST", ["households", household, "invites"]) if *household == p.household_id => {
             create_invite(db, p, body).await
@@ -1237,6 +1305,25 @@ fn validate_account(v: &Value) -> Result<()> {
     }
     Ok(())
 }
+async fn validate_planned_item(db: &mut SqliteConnection, p: &Principal, v: &Value) -> Result<()> {
+    let title = text(v,"title")?;
+    if title.trim().is_empty() || title.len() > 200 { return Err(ApiError::invalid("Title must be 1–200 characters.")); }
+    domain::date(text(v,"due_date")?)?;
+    let currency = text(v,"currency")?;
+    if domain::money(text(v,"amount")?,currency)? <= 0 { return Err(ApiError::invalid("Planned amount must be positive.")); }
+    domain::choice(v,"visibility",&["private","shared"])?;
+    if let Some(account_id) = v["account_id"].as_str() {
+        let account = storage::get(db,p,"accounts",account_id).await?;
+        if account["currency"] != v["currency"] { return Err(ApiError::invalid("Planned account currency differs from amount.")); }
+        if v["visibility"] == "shared" && account["visibility"] != "shared" { return Err(ApiError::invalid("A household plan needs a shared account, or no account.")); }
+    } else if !v["account_id"].is_null() { return Err(ApiError::invalid("Invalid planned account.")); }
+    if let Some(category_id) = v["category_id"].as_str() {
+        let category = storage::get(db,p,"categories",category_id).await?;
+        if category["kind"] != "expense" || category["archived"] == true { return Err(ApiError::invalid("Choose an active expense category.")); }
+        if v["visibility"] == "shared" && category["visibility"] == "private" { return Err(ApiError::invalid("A household plan needs a household category.")); }
+    } else if !v["category_id"].is_null() { return Err(ApiError::invalid("Invalid planned category.")); }
+    Ok(())
+}
 async fn validate_category(
     db: &mut SqliteConnection,
     p: &Principal,
@@ -1245,6 +1332,7 @@ async fn validate_category(
 ) -> Result<()> {
     text(v, "name")?;
     domain::choice(v, "kind", &["expense", "income"])?;
+    domain::choice(v, "visibility", &["private", "shared"])?;
     if v.get("parent_id")
         .is_some_and(|value| !value.is_string() && !value.is_null())
     {
@@ -1263,6 +1351,9 @@ async fn validate_category(
             return Err(ApiError::invalid(
                 "Parent must be an active category of the same kind.",
             ));
+        }
+        if v["visibility"] == "shared" && category["visibility"] == "private" {
+            return Err(ApiError::invalid("A household category needs a household parent."));
         }
         parent = category["parent_id"].as_str().map(str::to_owned);
     }
@@ -1286,6 +1377,12 @@ pub(crate) async fn validate_ledger(
     v: &Value,
 ) -> Result<()> {
     domain::validate_transaction(v)?;
+    if let Some(payer) = v.get("paid_by_user_id") {
+        let payer = payer.as_str().ok_or_else(|| ApiError::invalid("Paid by must be a household member."))?;
+        let active: i64 = sqlx::query_scalar("SELECT count(*) FROM memberships WHERE household_id=? AND user_id=? AND active=1")
+            .bind(&p.household_id).bind(payer).fetch_one(&mut *db).await?;
+        if active == 0 { return Err(ApiError::invalid("Paid by must be an active household member.")); }
+    }
     if let Some(at) = v["effective_at"].as_str() {
         let household = auth::me(db, p).await?["household"].clone();
         let tz = text(&household, "timezone")?
@@ -1330,6 +1427,18 @@ pub(crate) async fn validate_ledger(
                 return Err(ApiError::invalid(
                     "Allocation category must be active and match the event kind.",
                 ));
+            }
+            if c["visibility"] == "private" {
+                if allocation["scope"] != "personal" { return Err(ApiError::invalid("Personal categories require a personal allocation.")); }
+                for movement in v["movements"].as_array().unwrap() {
+                    let account = storage::get(db,p,"accounts",text(movement,"account_id")?).await?;
+                    if account["visibility"] != "private" || account["owner_id"] != p.user_id {
+                        return Err(ApiError::invalid("Personal categories require your private account."));
+                    }
+                    let grants: i64 = sqlx::query_scalar("SELECT count(*) FROM account_access WHERE account_id=?")
+                        .bind(text(&account,"id")?).fetch_one(&mut *db).await?;
+                    if grants > 0 { return Err(ApiError::invalid("Personal categories require an account without member access grants.")); }
+                }
             }
         }
         if allocation
@@ -1587,6 +1696,9 @@ async fn validate_budget(
                 "Budget lines require active expense categories.",
             ));
         }
+        if v["scope"] == "family" && c["visibility"] == "private" {
+            return Err(ApiError::invalid("Family budgets require household categories."));
+        }
         let limit = money(text(line, "amount")?, currency)?;
         if limit < 0 {
             return Err(ApiError::invalid("Budget limits cannot be negative."));
@@ -1755,16 +1867,29 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
         {
             continue;
         }
+        let imported_payer = if transaction["paid_by_user_id"].is_null()
+            && transaction["source_refs"].as_array().is_some_and(|v| !v.is_empty())
+        {
+            let account_id = text(&transaction["movements"][0], "account_id")?;
+            Some(storage::raw(db, p, "accounts", account_id).await?["owner_id"].clone())
+        } else { None };
+        let attribution = if transaction["event_type"] == "income" {
+            transaction["entered_by"].as_str()
+        } else {
+            transaction["paid_by_user_id"].as_str()
+                .or_else(|| imported_payer.as_ref().and_then(Value::as_str))
+                .or_else(|| transaction["entered_by"].as_str())
+        };
         let Some(member) = members
             .iter_mut()
-            .find(|m| transaction["entered_by"] == m.id)
+            .find(|m| attribution == Some(m.id.as_str()))
         else {
             continue;
         };
         for allocation in transaction["allocations"].as_array().into_iter().flatten() {
             // A member's personal allocations are visible only to that member.
             if allocation["scope"] != "family"
-                && !(member.id == p.user_id && allocation["scope"] == "personal")
+                && !(transaction["entered_by"] == p.user_id && allocation["scope"] == "personal")
             {
                 continue;
             }

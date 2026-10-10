@@ -48,6 +48,7 @@ pub async fn visible(
 ) -> Result<bool> {
     match kind {
         "accounts" => account_visible(db, p, v).await,
+        "categories" => Ok(v["owner_id"] == p.user_id || v["visibility"] != "private"),
         "transactions" => {
             if let Some(movements) = v["movements"].as_array() {
                 for movement in movements {
@@ -68,6 +69,19 @@ pub async fn visible(
             account_visible(db, p, &account).await
         }
         "budgets" => Ok(v["owner_id"] == p.user_id || v["scope"] == "family"),
+        "planned_items" => {
+            if v["owner_id"] == p.user_id { return Ok(true); }
+            if v["visibility"] != "shared" { return Ok(false); }
+            if let Some(account_id) = v["account_id"].as_str() {
+                let account = raw(db,p,"accounts",account_id).await?;
+                if !account_visible(db,p,&account).await? { return Ok(false); }
+            }
+            if let Some(category_id) = v["category_id"].as_str() {
+                let category = raw(db,p,"categories",category_id).await?;
+                if category["visibility"] == "private" { return Ok(false); }
+            }
+            Ok(true)
+        },
         "settlement_obligations" | "investments" => Ok(v["owner_id"] == p.user_id),
         _ => Ok(true),
     }

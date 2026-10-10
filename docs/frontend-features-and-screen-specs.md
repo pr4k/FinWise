@@ -1,6 +1,6 @@
 # FinWise frontend features and screen specifications
 
-**Purpose:** UX redesign brief for the currently implemented browser interfaces. This describes the main FinWise interface in `web/` and the separate local statement classifier in `ai-service/`, as inspected on 9 October 2026. It is a product and interaction inventory, not a proposal for new features. The main browser UI is a single page app served by the Rust backend; the Svelte stack mentioned elsewhere in the repo is a direction, not the current UI.
+**Purpose:** UX redesign brief for the currently implemented browser interfaces. This describes the main FinWise interface in `web/` and the separate local statement classifier in `ai-service/`, as inspected on 10 October 2026. It is a product and interaction inventory, not a proposal for new features. The main browser UI is a single page app served by the Rust backend; the Svelte stack mentioned elsewhere in the repo is a direction, not the current UI.
 
 ## Product model and navigation
 
@@ -13,7 +13,7 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 | Routes | URL hash selects the view and some detail states. Query parameters keep month, scope, comparison month, and transaction filters through refresh. | Preserve deep links and reloadable state; do not place financial record data in the URL. |
 | Feedback | Views show loading, empty, and error states; mutations use a toast. Editors use a native modal dialog. | Provide visible progress, field errors, recoverable failures, and clear results for consequential actions. |
 
-**Navigation views:** Overview, Household 360, Analytics, Transactions, Recurring transactions, Accounts, Budgets, Settle up, Investments, Categories, Statements, Reconcile, Money Manager changes, Imports, Settings. Mobile More is a navigation index. Member category detail, account ledger, balance comparison, reconciliation session, and import file review are subviews. The AI statement page is a separate local prototype, described below.
+**Navigation views:** Overview, Household 360, Analytics, Transactions, Recurring transactions, Planner, Accounts, Budgets, Settle up, Investments, Categories, Statements, Reconcile, Money Manager changes, Imports, Settings. Mobile More is a navigation index. Member category detail, account ledger, balance comparison, reconciliation session, and import file review are subviews. The AI statement page is a separate local prototype, described below.
 
 ## Global financial rules for every design
 
@@ -23,7 +23,8 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - A balance needs a dated opening balance or observed balance check. Without an anchor, display **Unknown**, not zero. Show the anchor source and date. A balance check is an observation, not a transaction. Same time transaction groups can share one after group balance.
 - Statement rows are evidence for reconciliation. Importing a bank statement does not create ledger spending. Attaching evidence alone does not change balances; amending or creating a transaction does.
 - Reports use recorded data. Source coverage is unconfirmed unless the backend says otherwise. A flat chart or an empty period must not imply that all activity was imported.
-- Allocation scope answers whose budget/report receives an income or expense. It does not change the underlying account movement. Combined reports must not double count a transaction spanning scopes. Transfers have no allocation scope. Household 360 attributes recorded activity to the person who entered it and shows only data the viewer may access.
+- Allocation scope answers whose budget/report receives an income or expense. It does not change the underlying account movement. Combined reports must not double count a transaction spanning scopes. Transfers have no allocation scope. Household 360 attributes spending and refunds to the recorded payer, income to the entrant, and shows only data the viewer may access.
+- **Paid by** identifies a household member separately from the transaction author and account owner. It does not change the account movement, allocation scope, or settle up obligations.
 - Use labels as well as color for positive, negative, debt, unknown, matched, and unresolved states. Align monetary values and use tabular numerals. See [financial number design policy](frontend-design-policy.md).
 
 ## Entry and household access
@@ -54,7 +55,7 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 
 - One card per active member for the selected month shows **Earned**, **Spent**, and **Invested** in the household base currency. The current user is labeled **You**; cards distinguish own records from shared records the viewer can access.
 - Selecting a member opens their expense category totals with amount bars and an **All members** return action. Empty detail states say that no visible expenses were recorded.
-- Transactions are attributed to the person who entered them. A member's own personal allocations and accessible family allocations are included; other members' private accounts remain excluded. Another member's investment additions appear only for holdings whose owner selected **Share monthly invested totals**. Transfers count as neither spending nor investment additions.
+- Income is attributed to the person who entered it; expenses and refunds use **Paid by**, falling back to the account owner for imported records and the entrant for older manual records. A member's own personal allocations and accessible family allocations are included; other members' private accounts remain excluded. Another member's investment additions appear only for holdings whose owner selected **Share monthly invested totals**. Transfers count as neither spending nor investment additions.
 
 ### 3. Analytics (`#analytics`)
 
@@ -83,12 +84,20 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - Default shows the selected month; **Show all dates** switches to complete history. Filters: account, account type (bank, credit card, cash, settle up), and event type (expense, income, refund, transfer), with clear filters. Filters are retained in the URL.
 - Personal/Family/Combined scope tabs filter visible allocations. A transaction appears once, and its displayed amount reflects allocations in the selected scope. The activity list is latest first, with date, description/type, account, signed amount, allocation scope, and author. Dated opening balances and balance checks appear as distinct markers. Bank/card rows show reconciliation status; amended and statement created rows show Money Manager update status. Balance after and anchor context are shown where available.
 - **Add transaction** dialog: description, type, positive amount, date, source account, and either destination account for a transfer or category plus Personal/Family allocation scope. Category choices change with income versus expense. The scope defaults to the setting saved for this user in this browser, not necessarily the current report scope.
+- Non-transfer transactions include **Paid by**, chosen from active household members. Older manual records without it display the entrant; imported records without it display the source account owner in transaction details. Household 360 uses the same payer fallback for historical spending attribution. The payer appears in activity and details.
 - **Transaction details** dialog: date/type/amount, movements and balances after, allocations, reconciliation evidence, source reference count, author and revision, plus amendment or statement creation history. Edit and delete actions are here.
 - **Edit transaction** dialog: description, date, amount, source/destination accounts, and existing allocation category/amount/scope. Prior revisions and source references persist; balances and reconciliation may recalculate.
 - **Add balance check** starts with account choice when needed, then opens the balance check editor. Money Manager changes is linked from this screen.
 - **Move transactions to Family** opens an all dates selection of eligible personal transactions entered by the current user, with select all and confirmation. It changes their allocation scope, not account balances or source records. Transfers are ineligible.
 
-### 6. Accounts (`#accounts`, `#accounts/{accountId}`)
+### 6. Planner (`#planner`)
+
+**Goal:** Keep expected one-time bills and expenses visible without posting them to the ledger.
+
+- A plan records title, due date, expected amount and currency, optional expense category and account, and Personal or Household visibility.
+- The owner can mark a plan done or planned. Status is a manual reminder state; it never creates a transaction or changes a balance or spending report. Household plans are visible to all members and may reference only household accounts and categories.
+
+### 7. Accounts (`#accounts`, `#accounts/{accountId}`)
 
 **Goal:** Manage account identity, liability context, anchors, and per account balance history.
 
@@ -98,7 +107,7 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - Selected account subview: known balance, selected month's chronological ledger with signed movement, computed balance from start, displayed balance and anchor basis; manual balance checks with observed amount, computed amount, variance, stale/current/removed status. Checks can be corrected or removed while audit history remains.
 - **Balance check** editor: actual amount, basis (cash count for cash; posted/current/statement closing for others), precise browser local date/time. Changing time previews the calculated balance at that instant. The check does not create a transaction.
 
-### 7. Budgets (`#budgets`)
+### 8. Budgets (`#budgets`)
 
 **Goal:** Plan category limits and compare recorded results for the selected month and scope.
 
@@ -107,7 +116,7 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - **Create/edit budget**: name, expected income, monthly savings goal, optional limit per active expense category. Three prior months' average spending can fill an individual limit or all empty limits. Month, Personal or Family scope, and currency are fixed from the selected plan or creation action. New plans are drafts.
 - Managers can edit, activate a draft, or copy a plan to the next month as a draft. Archived plans cannot be edited. The UI explains that averages and flat lines have unconfirmed coverage.
 
-### 8. Settle up (`#settlements`)
+### 9. Settle up (`#settlements`)
 
 **Goal:** Track private person by person obligations without double counting expenses.
 
@@ -116,7 +125,7 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - **Split a purchase**: payer (me/other), optional linked recorded expense if I paid, description, date, purchase total, my share, and one `Name: amount` line for each other share. Shares must sum to the total. A linked expense is reused rather than recreated.
 - **Record repayment**: amount, date, optional note. Edit obligation details; remove a payment after confirmation. Delete an obligation with its payment history, or delete an entire purchase split and its related obligations; the linked ledger expense remains. For split obligations, the share amount is locked. Users must record a separate bank/cash transfer if they want the repayment reflected in account balances.
 
-### 9. Investments (`#investments`)
+### 10. Investments (`#investments`)
 
 **Goal:** Track private holdings and emergency funds as monthly planning records.
 
@@ -125,14 +134,14 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - **Add/correct month**: month, added, withdrawn, month end value. Existing holdings need starting cost basis in the first month's Added field for meaningful value change. Monthly records do not post ledger transactions.
 - Delete a month after confirmation, recalculating later net additions and value change. Delete a holding and its monthly history after confirmation; bank transactions remain.
 
-### 10. Categories (`#categories`)
+### 11. Categories (`#categories`)
 
 **Goal:** Maintain canonical income and expense category trees used by transactions, imports, budgets, and reports.
 
-- Separate income and expense trees show hierarchy, full path, and archived status. Active rows can add a subcategory or edit.
+- Separate income and expense trees show hierarchy, full path, Personal or Household access, and archived status. Active rows can add a subcategory or edit.
 - **Add/edit category**: name, kind for a new root, optional parent. A subcategory inherits its parent's kind. Parent choices prevent cycles. Archived categories remain visible for historical context but are excluded from new choices.
 
-### 11. Statements (`#statements`, `#statements/{accountId}`)
+### 12. Statements (`#statements`, `#statements/{accountId}`)
 
 **Goal:** Compare a selected account's monthly ledger summary with uploaded statement coverage.
 
@@ -140,24 +149,24 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - Uploaded month cards show filename, first/last dates, row count, inferred file opening, and file closing balance. A partial file is explicitly not a complete monthly statement. Card payment due appears when set.
 - This screen summarizes statements; upload happens in Imports and row matching happens in Reconcile.
 
-### 12. Reconcile (`#reconcile`, `#reconcile/{sessionId}`, `#reconcile/balance/{accountId}/{checkId}`)
+### 13. Reconcile (`#reconcile`, `#reconcile/{sessionId}`, `#reconcile/balance/{accountId}/{checkId}`)
 
 **Goal:** Compare ledger transactions with statement evidence and explain balance differences.
 
-- Landing: start a bank/card account review for the selected month; table of balance checks with differences; session list with state, stale indicator, unresolved counts, and open action. Existing open sessions reopen directly; closed sessions require a reason to reopen.
+- Landing: shared review inbox lists every accessible bank/card account for the selected month, including accounts another member has shared. Each row shows its review state and opens or starts the session; any member with account access can reconcile it. A separate table shows balance checks with differences. Existing open sessions reopen directly; closed sessions require a reason to reopen.
 - Session workspace: side by side selectable ledger and statement rows, each with remaining amount, date, description, and state; attachment preview explains totals and proposed links. Exact matching can attach unique same date/amount pairs. Manual selection supports partial and many to many attachments, with a 200 link limit per decision. Matched and ignored rows remain visible below selections.
 - Context actions: attach selected rows; amend amount/date with statement evidence and a reason; create a ledger transaction from selected statement rows; mark or convert an internal transfer and choose a counterpart account; ignore unmatched rows with a reason or restore them. Options appear only when the selection qualifies. Matching alone does not change balances.
 - Below workspace: saved amendment table with original/proposed amounts, difference and status; Money Manager changes created from reconciliation; CSV downloads for pending source updates; eligible amendment cancellation.
 - Balance comparison subview: entered check, computed from starting balance, variance, preceding ledger rows, and links to inspect a transaction, add a missing one, or open the account ledger. Editing the check is handled in Accounts.
 
-### 13. Money Manager changes (`#changes`)
+### 14. Money Manager changes (`#changes`)
 
 **Goal:** Help users manually keep Money Manager aligned with FinWise after edits or reconciliation.
 
 - Pending changes table compares **Initial** and **New** transaction snapshots, with change kind (new, edited, amendment, or statement entry). **Mark updated** moves a row to completed; completed rows can be reopened.
 - This is a review checklist. The app does not write changes into Money Manager automatically.
 
-### 14. Imports (`#imports`, `#imports/{batchId}/{fileId}`)
+### 15. Imports (`#imports`, `#imports/{batchId}/{fileId}`)
 
 **Goal:** Stage, map, review, and commit Money Manager workbooks or bank statement CSV/XLSX files.
 
@@ -168,11 +177,11 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 - Commit: explicit review checkbox, then commit ready rows. Exact repeats reuse existing transactions; ambiguous/changed rows remain for review. Result counts appear after commit. Bank rows become evidence; Money Manager rows become ledger transactions.
 - Reimport cleanup: choose month or year, preview affected imported Money Manager transactions and skipped mixed source entries, then remove those imported transactions for upload again. Manual transactions and bank observations are excluded; balances and reconciliation may change.
 
-### 15. Settings (`#settings`)
+### 16. Settings (`#settings`)
 
 **Goal:** Show household identity and manage invitation and data reset tasks.
 
-- Household table: name, timezone, base currency, signed in email, role. Members table: name, email, role.
+- Household table: name, timezone, base currency, signed in email, role. **Move to household access** lists the current user’s private accounts and personal categories for explicit promotion. Promoting an account shares its full ledger and reconciliation evidence with all members; personal categories referenced by it must be promoted first. Existing categories were household visible by default. Members table: name, email, role.
 - **Default transaction scope** chooses Personal or Family for new transactions, statement-created transactions, and Money Manager imports. It is saved per user in this browser and can be overridden in those flows.
 - Owner/admin invitation form: email, member role or admin when the inviter is an owner; creates a one day link for manual copying. No email is sent by the app. Private accounts do not become shared by invitation alone.
 - Owner/admin reset: choose up to 24 months, preview counts by transactions, statement entries, reconciliation sessions, balance checks, budgets, and imported rows; type `RESET` to apply. Closed reconciliation sessions must be reopened first. Account setup, opening balances, categories, original upload files, and audit history remain. Other members' private records are outside the reset.
