@@ -104,6 +104,16 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.locator('#view-root').getByRole('button',{name:'Add transaction',exact:true}).click();
     const cashAccount=await page.locator('#transaction-form [name="account_id"]').evaluate(select=>[...select.options].find(option=>option.textContent.startsWith('Browser cash ·'))?.value);
     await page.getByLabel('Account / transfer source',{exact:true}).selectOption(cashAccount);
+    const expenseCategory=await page.evaluate(async()=> (await window.finwiseAPI.collection('categories')).data.find(category=>category.kind==='expense' && !category.archived)?.name);
+    if(expenseCategory) {
+      await page.getByLabel('Search categories',{exact:true}).fill(expenseCategory);
+      assert.ok(await page.locator('#transaction-category-results button').count()>0);
+      assert.ok(await page.locator('#transaction-category option').count()<=32);
+      await page.locator('#transaction-category-results button').first().click();
+      assert.ok(await page.locator('#transaction-category').inputValue());
+      await page.getByLabel('Search categories',{exact:true}).fill('');
+      await page.getByLabel('Category',{exact:true}).selectOption('');
+    }
     await page.getByLabel('Description',{exact:true}).fill('Browser smoke entry');
     await page.getByLabel('Amount',{exact:true}).fill('12.34');
     await page.getByLabel('Date',{exact:true}).fill(`${first.month}-05`);

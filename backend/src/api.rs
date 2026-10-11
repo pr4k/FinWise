@@ -4,7 +4,7 @@ use crate::{
     balances,
     domain::{self, add, format_money, money, text},
     error::{ApiError, Result},
-    imports, planning, reconciliation, recurring, storage,
+    imports, planning, quick, reconciliation, recurring, storage,
 };
 use axum::{
     Json,
@@ -112,6 +112,11 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
     let path = path
         .strip_prefix("/api/v1/")
         .ok_or_else(ApiError::missing)?;
+    if (path == "quick-transactions" || path == "quick-transactions/options")
+        && !quick::available(&state.pool).await?
+    {
+        return Err(ApiError::missing());
+    }
     let query: Query = axum::extract::Query::try_from_uri(&parts.uri)
         .map_err(|_| ApiError::invalid("Invalid query string."))?
         .0;
@@ -165,6 +170,9 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
     }
     if method == "GET" && path == "openapi.json" {
         return ok(openapi());
+    }
+    if path == "quick-transactions" || path == "quick-transactions/options" {
+        return quick::route(state, method, path, &query, &parts.headers, &body).await;
     }
     if method == "POST" && ["auth/bootstrap", "auth/login"].contains(&path) {
         // Persist failed attempts outside the domain transaction.
@@ -422,14 +430,14 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
     }
     Ok(reply)
 }
-fn reused() -> ApiError {
+pub(crate) fn reused() -> ApiError {
     ApiError::new(
         StatusCode::CONFLICT,
         "idempotency_key_reused",
         "Idempotency key was already used for another request.",
     )
 }
-fn idempotency_key(headers: &HeaderMap) -> Result<&str> {
+pub(crate) fn idempotency_key(headers: &HeaderMap) -> Result<&str> {
     headers
         .get("idempotency-key")
         .and_then(|h| h.to_str().ok())
@@ -503,7 +511,7 @@ const BUDGET_FIELDS: &[&str] = &[
     "targets",
 ];
 
-async fn route(
+pub(crate) async fn route(
     db: &mut SqliteConnection,
     p: &Principal,
     method: &str,
@@ -709,6 +717,8 @@ async fn route(
         ("GET", ["me"]) => ok(auth::me(db, p).await?),
         ("GET", ["auth", "csrf"]) => ok(json!({"csrf_token":p.csrf})),
         ("GET", ["settings", "household"]) => ok(auth::me(db, p).await?["household"].clone()),
+        ("GET" | "PATCH", ["settings", "quick-expense"]) =>
+            quick::settings(db, p, method, q, headers, body).await,
         ("PATCH", ["settings", "household"]) => {
             auth::admin(p)?;
             let before = auth::me(db, p).await?["household"].clone();

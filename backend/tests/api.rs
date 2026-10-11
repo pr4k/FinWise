@@ -1529,6 +1529,388 @@ async fn partner(owner: &Client) -> (Client, Value) {
     (client, membership)
 }
 
+async fn quick_client(
+    owner: &Client,
+    user: &Client,
+    _pool: &sqlx::SqlitePool,
+    default: &Value,
+    allowed: &[&Value],
+) -> Client {
+    let me = user.call("GET", "me", json!({}), None, None).await.1;
+    let settings = owner.call("GET", "settings/quick-expense", json!({}), None, None).await;
+    assert_eq!(settings.0, StatusCode::OK, "{}", settings.1);
+    let updated = owner.call("PATCH", "settings/quick-expense", json!({
+        "enabled": true,
+        "user_id": me["user"]["id"],
+        "default_account_id": default["id"],
+        "account_ids": allowed.iter().map(|account| account["id"].clone()).collect::<Vec<_>>()
+    }), None, Some(settings.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(updated.0, StatusCode::OK, "{}", updated.1);
+    Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() }
+}
+
+#[tokio::test]
+async fn owner_configures_quick_expenses_in_settings_and_can_disable_them() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let cash = owner.account("NAS cash", "cash").await;
+    let other = owner.account("NAS bank", "bank").await;
+    let anonymous = Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() };
+    let initial = owner.call("GET", "settings/quick-expense", json!({}), None, None).await;
+    assert_eq!(initial.0, StatusCode::OK);
+    assert_eq!(initial.1["enabled"], false);
+    assert_eq!(initial.1["revision"], 0);
+    assert!(initial.1["accounts"].as_array().unwrap().iter().any(|a| a["id"] == cash["id"]));
+    assert_eq!(member.call("GET", "settings/quick-expense", json!({}), None, None).await.0, StatusCode::FORBIDDEN);
+    let me = owner.call("GET", "me", json!({}), None, None).await.1;
+    let bad = owner.call("PATCH", "settings/quick-expense", json!({
+        "enabled":true,"user_id":me["user"]["id"],"default_account_id":cash["id"],"account_ids":[other["id"]]
+    }), None, Some(0)).await;
+    assert_eq!(bad.0, StatusCode::BAD_REQUEST, "{}", bad.1);
+    let enabled = owner.call("PATCH", "settings/quick-expense", json!({
+        "enabled":true,"user_id":me["user"]["id"],"default_account_id":cash["id"],"account_ids":[cash["id"]]
+    }), None, Some(0)).await;
+    assert_eq!(enabled.0, StatusCode::OK, "{}", enabled.1);
+    assert_eq!(enabled.1["revision"], 1);
+    assert_eq!(anonymous.call("GET", "quick-transactions/options", json!({}), None, None).await.1["default_account_id"], cash["id"]);
+    assert_eq!(member.call("PATCH", "settings/quick-expense", json!({"enabled":false}), None, Some(1)).await.0, StatusCode::FORBIDDEN);
+    let disabled = owner.call("PATCH", "settings/quick-expense", json!({"enabled":false}), None, Some(1)).await;
+    assert_eq!(disabled.0, StatusCode::OK, "{}", disabled.1);
+    assert_eq!(disabled.1["revision"], 2);
+    assert_eq!(anonymous.call("GET", "quick-transactions/options", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(anonymous.call("POST", "quick-transactions", json!({"amount":"1.00","category_id":"any"}), Some("disabled"), None).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn quick_expense_creates_normal_ledger_entry_with_defaults_and_options() {
+    let (owner, pool) = setup().await;
+    let account = owner.account("Quick cash", "cash").await;
+    let second_account = owner.account("Second bank", "bank").await;
+    let category = owner.category("Groceries", "expense").await;
+    let income = owner.category("Salary", "income").await;
+    let quick = quick_client(&owner, &owner, &pool, &account, &[&account, &second_account]).await;
+    let options = quick
+        .call("GET", "quick-transactions/options", json!({}), None, None)
+        .await;
+    assert_eq!(options.0, StatusCode::OK, "{}", options.1);
+    assert_eq!(options.1["default_account_id"], account["id"]);
+    assert_eq!(options.1["accounts"][0]["currency"], "INR");
+    assert!(
+        options.1["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == category["id"])
+    );
+    assert!(
+        !options.1["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == income["id"])
+    );
+    let request =
+        json!({"amount":"12.34","category_id":category["id"],"occurred_at":"2026-10-10T22:45:00Z"});
+    let saved = quick
+        .call(
+            "POST",
+            "quick-transactions",
+            request,
+            Some("quick-one"),
+            None,
+        )
+        .await;
+    assert_eq!(saved.0, StatusCode::CREATED, "{}", saved.1);
+    assert_eq!(saved.1["message"], "Expense recorded.");
+    assert_eq!(saved.1["effective_date"], "2026-10-11");
+    assert_eq!(saved.1["account_id"], account["id"]);
+    let entry = owner
+        .call(
+            "GET",
+            &format!("transactions/{}", saved.1["id"].as_str().unwrap()),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert_eq!(entry["amount"], "12.34");
+    assert_eq!(entry["description"], "Quick expense");
+    assert_eq!(entry["movements"][0]["amount"], "-12.34");
+    assert_eq!(entry["allocations"][0]["category_id"], category["id"]);
+    assert_eq!(entry["allocations"][0]["scope"], "personal");
+    let ledger = owner
+        .call(
+            "GET",
+            &format!(
+                "accounts/{}/ledger?from=2026-10-01&to=2026-11-01",
+                account["id"].as_str().unwrap()
+            ),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert!(
+        ledger["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["transaction_id"] == saved.1["id"] && row["movement"] == "-12.34")
+    );
+    let report = owner
+        .call(
+            "GET",
+            "analytics/summary?from=2026-10-01&to=2026-11-01&scope=personal&currency=INR",
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert_eq!(report["net_spending"], "12.34");
+    let before = chrono::Utc::now();
+    let another = quick.call("POST", "quick-transactions", json!({"amount":"1.00","category_id":category["id"],"account_id":second_account["id"],"description":"Tea"}), Some("quick-second"), None).await;
+    let after = chrono::Utc::now();
+    assert_eq!(another.0, StatusCode::CREATED, "{}", another.1);
+    assert_eq!(another.1["account_id"], second_account["id"]);
+    let recorded = owner.call("GET", &format!("transactions/{}", another.1["id"].as_str().unwrap()), json!({}), None, None).await.1;
+    let instant = chrono::DateTime::parse_from_rfc3339(recorded["effective_at"].as_str().unwrap()).unwrap().with_timezone(&chrono::Utc);
+    assert!(instant >= before && instant <= after);
+    assert_eq!(recorded["effective_date"], instant.with_timezone(&chrono_tz::Asia::Kolkata).date_naive().to_string());
+}
+
+#[tokio::test]
+async fn quick_expense_rejects_invalid_inputs_and_keeps_other_routes_authenticated() {
+    let (owner, pool) = setup().await;
+    let account = owner.account("Bank", "bank").await;
+    let other = owner.account("Other", "bank").await;
+    let expense = owner.category("Food", "expense").await;
+    let income = owner.category("Pay", "income").await;
+    let base = json!({"amount":"10.00","category_id":expense["id"]});
+    let disabled = Client {
+        app: owner.app.clone(),
+        cookie: String::new(),
+        csrf: String::new(),
+    };
+    for (method, path) in [
+        ("GET", "quick-transactions/options"),
+        ("POST", "quick-transactions"),
+    ] {
+        assert_eq!(
+            disabled
+                .call(method, path, base.clone(), Some("disabled"), None)
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    let quick = quick_client(&owner, &owner, &pool, &account, &[&account]).await;
+    assert_eq!(
+        quick
+            .call("GET", "transactions", json!({}), None, None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    for (body, status) in [
+        (
+            json!({"amount":10,"category_id":expense["id"]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"amount":"0.00","category_id":expense["id"]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"amount":"-1.00","category_id":expense["id"]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"amount":"1.001","category_id":expense["id"]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"amount":"1.00","category_id":income["id"]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"amount":"1.00","category_id":expense["id"],"account_id":other["id"]}),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            json!({"amount":"1.00","category_id":expense["id"],"occurred_at":"yesterday"}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            json!({"amount":"1.00","category_id":expense["id"],"user_id":"spoof"}),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let result = quick
+            .call(
+                "POST",
+                "quick-transactions",
+                body,
+                Some(&uuid::Uuid::new_v4().to_string()),
+                None,
+            )
+            .await;
+        assert_eq!(result.0, status, "{}", result.1);
+        assert!(result.1["error"]["code"].is_string());
+    }
+    assert_eq!(
+        quick
+            .call("POST", "quick-transactions", base, None, None)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn quick_expense_permissions_idempotency_and_concurrent_retries() {
+    let (owner, pool) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let shared = owner
+        .create(
+            "accounts",
+            json!({"name":"Shared","subtype":"bank","currency":"INR","visibility":"shared"}),
+        )
+        .await;
+    let private = owner
+        .create(
+            "accounts",
+            json!({"name":"Private","subtype":"bank","currency":"INR","visibility":"private"}),
+        )
+        .await;
+    let food = owner
+        .create(
+            "categories",
+            json!({"name":"Food","kind":"expense","visibility":"shared"}),
+        )
+        .await;
+    let secret = owner
+        .create(
+            "categories",
+            json!({"name":"Secret","kind":"expense","visibility":"private"}),
+        )
+        .await;
+    let quick = quick_client(&owner, &member, &pool, &shared, &[&shared]).await;
+    let options = quick
+        .call("GET", "quick-transactions/options", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(options["accounts"].as_array().unwrap().len(), 1);
+    assert!(
+        !options["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == secret["id"])
+    );
+    assert_eq!(
+        quick
+            .call(
+                "POST",
+                "quick-transactions",
+                json!({"amount":"1.00","category_id":food["id"],"account_id":private["id"]}),
+                Some("private-account"),
+                None
+            )
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        quick
+            .call(
+                "POST",
+                "quick-transactions",
+                json!({"amount":"1.00","category_id":secret["id"]}),
+                Some("private-category"),
+                None
+            )
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let request = json!({"amount":"9.50","category_id":food["id"],"description":"Lunch","occurred_at":"2026-10-10T12:00:00+05:30"});
+    let (first, second) = tokio::join!(
+        quick.call(
+            "POST",
+            "quick-transactions",
+            request.clone(),
+            Some("same-submission"),
+            None
+        ),
+        quick.call(
+            "POST",
+            "quick-transactions",
+            request.clone(),
+            Some("same-submission"),
+            None
+        )
+    );
+    assert_eq!(first.0, StatusCode::CREATED, "{}", first.1);
+    assert_eq!(second.0, StatusCode::CREATED, "{}", second.1);
+    assert_eq!(first.1, second.1);
+    assert_eq!(
+        quick
+            .call(
+                "POST",
+                "quick-transactions",
+                request.clone(),
+                Some("same-submission"),
+                None
+            )
+            .await
+            .1,
+        first.1
+    );
+    let changed = json!({"amount":"10.00","category_id":food["id"],"description":"Lunch","occurred_at":"2026-10-10T12:00:00+05:30"});
+    let conflict = quick
+        .call(
+            "POST",
+            "quick-transactions",
+            changed,
+            Some("same-submission"),
+            None,
+        )
+        .await;
+    assert_eq!(conflict.0, StatusCode::CONFLICT);
+    assert_eq!(conflict.1["error"]["code"], "idempotency_key_reused");
+    let entries = owner
+        .call("GET", "transactions", json!({}), None, None)
+        .await
+        .1;
+    assert_eq!(
+        entries["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| t["description"] == "Lunch")
+            .count(),
+        1
+    );
+    let saved = owner
+        .call(
+            "GET",
+            &format!("transactions/{}", first.1["id"].as_str().unwrap()),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert_eq!(
+        saved["entered_by"],
+        member.call("GET", "me", json!({}), None, None).await.1["user"]["id"]
+    );
+    assert_eq!(saved["allocations"][0]["scope"], "family");
+}
+
 #[tokio::test]
 async fn invited_member_can_record_family_spending() {
     let (owner, _) = setup().await;

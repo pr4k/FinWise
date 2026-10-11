@@ -773,6 +773,17 @@ const views = {
   async settings() {
     const members=await api.request(`households/${id(state.me.household.id)}/members`);
     const canInvite=['owner','admin'].includes(state.me.membership.role);
+    let quickPanel='';
+    if(state.me.membership.role==='owner') {
+      const initial=await api.request('settings/quick-expense');
+      const selected=state.quickSettingsUser||(initial.members.some(m=>m.id===initial.user_id)?initial.user_id:state.me.user.id);
+      const quick=selected===(initial.user_id||state.me.user.id)?initial:await api.request(`settings/quick-expense?user_id=${encodeURIComponent(selected)}`);
+      const sameUser=!quick.user_id||quick.user_id===selected;
+      const allowed=sameUser?quick.account_ids:[];
+      const defaultId=sameUser?quick.default_account_id:'';
+      quickPanel=panel('Apple Shortcuts quick expense',`<form id="quick-expense-settings-form">${field('Record expenses as',`<select id="quick-user-select" name="user_id" required>${quick.members.map(m=>option(m.id,`${m.name} · ${m.email}`,m.id===selected)).join('')}</select>`)}<p class="helper">This feature starts disabled. Anyone who can reach its API can add expenses as this user. Keep the API on your trusted LAN or private VPN; never expose it through a public reverse proxy or tunnel.</p><fieldset class="quick-account-list"><legend>Allowed accounts</legend>${quick.accounts.map(a=>`<label class="confirm-line"><input type="checkbox" name="quick_account_id" value="${h(a.id)}" ${allowed.includes(a.id)?'checked':''}> ${h(a.name)} · ${h(a.currency)}</label>`).join('')||'<p>No accounts accessible to this user and the owner.</p>'}</fieldset>${field('Default account',`<select name="default_account_id">${option('','Choose an account',!defaultId)}${quick.accounts.map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===defaultId)).join('')}</select>`)}<label class="confirm-line"><input type="checkbox" name="enabled" ${quick.enabled?'checked':''}> Enable unauthenticated quick expenses</label><button type="submit" class="primary-button">Save quick expense settings</button><p class="helper">Shortcut URL: <code>${h(location.origin)}/api/v1/quick-transactions</code>. The options URL ends in <code>/options</code>.</p></form>`);
+      state.quickSettingsRevision=quick.revision;
+    }
     const privateAccounts=state.accounts.filter(a=>a.owner_id===state.me.user.id&&a.visibility==='private');
     const privateCategories=state.categories.filter(c=>c.owner_id===state.me.user.id&&c.visibility==='private');
     const accessList=(items,label)=>items.length?`<ul class="compact-list" aria-label="${h(label)}">${items.join('')}</ul>`:empty(`No ${label.toLowerCase()} to move.`);
@@ -781,7 +792,7 @@ const views = {
     const householdAccess=panel('Move to household access',`<p class="helper access-intro">Sharing an account gives every member access to its full history. Share any personal categories it uses first.</p><div class="access-groups"><section><h3>Your personal accounts</h3>${accessList(accountRows,'Personal accounts')}</section><section><h3>Your personal categories</h3>${accessList(categoryRows,'Personal categories')}</section></div>`);
     const invite=canInvite?panel('Add a member',`<form id="invite-form">${field('Email address',input('email','type="email" required autocomplete="email"'))}${field('Role',`<select name="role">${option('member','Member')}${state.me.membership.role==='owner'?option('admin','Admin'):''}</select>`)}<p class="helper">Create a one-day invitation link and share it with the intended person. FinWise does not send email. Private accounts stay private unless you grant access.</p><button type="submit" class="primary-button">Create invitation link</button></form>${state.inviteLink?`<div class="invite-link">${field('Share this link now',input('link',`readonly value="${h(state.inviteLink)}"`))}${button('Copy link','copy-invite-link')}</div>`:''}`):'';
     const familySetting=panel('Family only mode',`<form id="family-mode-form"><label class="confirm-line"><input type="checkbox" name="family_only" ${familyMode()?'checked':''} ${canInvite?'':'disabled'}> Use Family for all household finances</label><p class="helper">When enabled, existing personal transactions, categories, accounts, plans, and budgets become family records. Private account history becomes visible to household members. Turning this off restores the scope choices but does not make converted records private again.</p>${canInvite?'<button type="submit" class="primary-button">Save family mode</button>':'<p class="helper">An owner or admin can change this setting.</p>'}</form>`);
-    return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+familySetting+(familyMode()?'':panel('Default transaction scope',`<form id="default-scope-form">${field('Scope for new transactions and imports',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<p class="helper">Saved in this browser for your account. You can choose a different scope during import review or when adding a transaction.</p><button type="submit" class="primary-button">Save default</button></form>`))+(!familyMode()?householdAccess:'')+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
+    return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+familySetting+quickPanel+(familyMode()?'':panel('Default transaction scope',`<form id="default-scope-form">${field('Scope for new transactions and imports',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<p class="helper">Saved in this browser for your account. You can choose a different scope during import review or when adding a transaction.</p><button type="submit" class="primary-button">Save default</button></form>`))+(!familyMode()?householdAccess:'')+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
   },
   async more() { return heading('Workspace','Choose a view.')+`<div class="mobile-more">${Object.entries(labels).filter(([v])=>v!=='more').map(([v,name])=>navButton(v,name)).join('')}${button('Sign out','logout')}</div>`; }
 };
@@ -881,8 +892,20 @@ function categoryEditor(key=null,parentKey=null) {
 function transactionEditor({accountId=null,date=localDate(),categoryId=null}={}) {
   if(!state.accounts.some(a=>a.active!==false)) { notify('Add an active account first.'); return; }
   const chosen=state.accounts.find(a=>a.id===(accountId||lastTransactionAccount()) && a.active!==false)?.id;
-  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}<p id="transfer-help" class="helper"></p></div><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name" autocomplete="off"'))}${field('Category','<select name="category_id" id="transaction-category"></select>')}${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
+  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}<p id="transfer-help" class="helper"></p></div><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name" autocomplete="off"'))}<div id="transaction-category-results" class="transaction-category-results" aria-live="polite"></div>${field('Category','<select name="category_id" id="transaction-category"></select>')}<p id="transaction-category-hint" class="helper"></p>${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
   const form=dialog.querySelector('#transaction-form');
+  const byId=new Map(state.categories.map(category=>[category.id,category]));
+  const paths=new Map();
+  const pathFor=(category,seen=new Set())=>{
+    if(paths.has(category.id))return paths.get(category.id);
+    if(seen.has(category.id))return category.name;
+    seen.add(category.id);
+    const parent=byId.get(category.parent_id);
+    const path=parent?`${pathFor(parent,seen)} › ${category.name}`:category.name;
+    paths.set(category.id,path);
+    return path;
+  };
+  form.categoryChoices=categoryView.ordered(state.categories).filter(({category})=>category.archived!==true).map(({category})=>({id:category.id,kind:category.kind,path:pathFor(category)}));
   form.querySelector('.dialog-actions').insertAdjacentHTML('beforeend','<button class="outline-button" type="submit" name="save_action" value="another">Save & add another</button>');
   updateCategories();
   if(categoryId && [...form.elements.category_id.options].some(o=>o.value===categoryId)) { form.elements.category_id.value=categoryId; form.elements.category_id.dataset.manual='true'; }
@@ -927,9 +950,16 @@ function updateCategories() {
   } else form.elements.destination.required=false;
   const selected=form.elements.category_id.value;
   const search=form.elements.category_search.value.trim().toLocaleLowerCase();
-  const choices=categoryView.ordered(state.categories,kind==='income'?'income':'expense').filter(({category})=>category.archived!==true && (!search || categoryName(category.id).toLocaleLowerCase().includes(search)));
-  form.elements.category_id.innerHTML=option('','Uncategorized')+choices.map(({category,depth})=>option(category.id,`${'　'.repeat(depth)}${depth?'↳ ':''}${category.name}`,category.id===selected)).join('');
-  if(selected && choices.some(({category})=>category.id===selected)) form.elements.category_id.value=selected;
+  const choices=form.categoryChoices.filter(choice=>choice.kind===(kind==='income'?'income':'expense') && (!search || choice.path.toLocaleLowerCase().includes(search)));
+  const shown=choices.slice(0,30);
+  if(selected && !shown.some(choice=>choice.id===selected)) {
+    const current=form.categoryChoices.find(choice=>choice.id===selected);
+    if(current && current.kind===(kind==='income'?'income':'expense'))shown.unshift(current);
+  }
+  form.elements.category_id.innerHTML=option('','Uncategorized')+shown.map(choice=>option(choice.id,choice.path,choice.id===selected)).join('');
+  if(selected && shown.some(choice=>choice.id===selected)) form.elements.category_id.value=selected;
+  form.querySelector('#transaction-category-hint').textContent=search?`${choices.length} matching categor${choices.length===1?'y':'ies'}${choices.length>30?' · first 30 shown in the menu':''}`:`Type to search all ${form.categoryChoices.filter(choice=>choice.kind===(kind==='income'?'income':'expense')).length} categories. The menu shows 30 at a time.`;
+  form.querySelector('#transaction-category-results').innerHTML=search?choices.slice(0,8).map(choice=>button(choice.path,'choose-transaction-category',`data-category="${h(choice.id)}"`)).join(''):'';
 }
 function suggestTransactionCategory() {
   const form=dialog.querySelector('#transaction-form');if(!form || form.elements.category_id.dataset.manual)return;
@@ -1167,7 +1197,7 @@ const actions = {
   refresh:()=>renderRoute(), 'select-month':el=>{setMonth(el.dataset.month);renderRoute();}, 'transaction-period':()=>navigate('transactions',location.hash.slice(1)==='transactions/all'?[]:['all']), 'clear-transaction-filters':()=>{state.transactionFilters={account:'',accountType:'',eventType:''};saveView();renderRoute();}, 'copy-invite-link':async()=>{await navigator.clipboard.writeText(state.inviteLink);notify('Invitation link copied.');}, logout:async()=>{await api.request('auth/logout',{method:'POST',body:{}});resetSession();},
   'reset-add-month':async()=>{const month=document.querySelector('#reset-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('Choose a valid month.');if(state.resetMonths.length>=24)throw new Error('Select at most 24 months.');state.resetMonths=[...new Set([...state.resetMonths,month])].sort();state.resetPreview=null;await renderRoute();},
   'reset-remove-month':async el=>{state.resetMonths=state.resetMonths.filter(month=>month!==el.dataset.month);state.resetPreview=null;await renderRoute();},
-  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});},
+  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});}, 'choose-transaction-category':el=>{const form=dialog.querySelector('#transaction-form');if(!form)return;const choice=form.categoryChoices.find(choice=>choice.id===el.dataset.category);if(!choice)return;form.elements.category_search.value=choice.path;updateCategories();form.elements.category_id.value=choice.id;form.elements.category_id.dataset.manual='true';updateTransactionPreview();},
   settlement:settlementEditor, split:splitEditor, repayment:el=>repaymentEditor(el.dataset.id), 'settlement-edit':el=>settlementEditEditor(el.dataset.id),
   'settlement-filter':el=>{state.settlementFilter=el.dataset.filter;renderRoute();}, 'investment-filter':el=>{state.investmentFilter=el.dataset.filter;renderRoute();},
   'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;syncScopeControl();saveView();renderRoute();},
@@ -1217,6 +1247,7 @@ document.addEventListener('click',async event=>{
   try { await action(el); } catch(e) { if(state.me) failure(e,dialog.open?dialog:root); } finally { el.disabled=false; }
 });
 document.addEventListener('change',async event=>{
+  if(event.target.id==='quick-user-select') { state.quickSettingsUser=event.target.value; await renderRoute(); return; }
   if(event.target.id==='transfer-destination') updateTransferCounterparts();
   if(event.target.id==='amendment-target' && state.amendmentGroup) {
     const group=state.amendmentGroup;
@@ -1334,6 +1365,14 @@ document.addEventListener('submit',async event=>{
       localStorage.setItem(`finwise-default-scope:${state.me.user.id}`,data.scope==='family'?'family':'personal');
       notify('Default transaction scope saved in this browser.');
       await renderRoute();return;
+    }
+    if(form.id==='quick-expense-settings-form') {
+      const account_ids=formData.getAll('quick_account_id');
+      const enabled=form.elements.enabled.checked;
+      if(enabled && !account_ids.includes(data.default_account_id)) throw new Error('Include the default account in the allowed accounts.');
+      if(enabled && !window.confirm('Enable unauthenticated expense entry for anyone on your trusted LAN or private VPN who can reach this server?')) return;
+      await api.request('settings/quick-expense',{method:'PATCH',revision:state.quickSettingsRevision,body:enabled?{enabled,user_id:data.user_id,default_account_id:data.default_account_id,account_ids}:{enabled:false}});
+      notify(enabled?'Quick expense API enabled.':'Quick expense API disabled.');await renderRoute();return;
     }
     if(form.id==='family-mode-form') {
       const enabled=form.elements.family_only.checked;

@@ -46,6 +46,11 @@ schemas["PlannedItemInput"] = obj({"title": S, "due_date": D, "amount": M, "curr
 schemas["PlannedItem"] = obj(dict(schemas["PlannedItemInput"]["properties"], id=S, revision=I, owner_id=S, status=enum("planned","done","skipped"), created_at=S), list(schemas["PlannedItemInput"]["required"])+["id","revision","owner_id","status","created_at"])
 schemas["PlannedItemCollection"] = obj({"data":arr(ref("PlannedItem")),"page":obj({}),"meta":obj({})}, ("data","page","meta"))
 schemas["PlannedItemPatch"] = obj(dict(schemas["PlannedItemInput"]["properties"], status=enum("planned","done","skipped"), expected_revision=I))
+schemas["QuickExpenseInput"] = obj({"amount": M, "category_id": S, "account_id": S, "description": S, "occurred_at": {"type":"string","format":"date-time"}}, ("amount","category_id"))
+schemas["QuickExpenseResult"] = obj({"id": S, "message": S, "amount": M, "currency": S, "account_id": S, "category_id": S, "effective_date": D}, ("id","message","amount","currency","account_id","category_id","effective_date"))
+schemas["QuickExpenseOptions"] = obj({"default_account_id": S, "selected_account_id": S, "accounts": arr(obj({"id": S, "name": S, "currency": S}, ("id","name","currency"))), "categories": arr(obj({"id": S, "name": S, "label": S, "parent_id": {"type":["string","null"]}}, ("id","name","label")))}, ("default_account_id","selected_account_id","accounts","categories"))
+schemas["QuickExpenseSettings"] = obj({"enabled": B, "user_id": {"type":["string","null"]}, "default_account_id": {"type":["string","null"]}, "account_ids": arr(S), "revision": I, "members": arr(obj({"id": S,"name": S,"email": S})), "accounts": arr(obj({"id": S,"name": S,"currency": S}))}, ("enabled","account_ids","revision"))
+schemas["QuickExpenseSettingsPatch"] = obj({"enabled": B,"user_id": S,"default_account_id": S,"account_ids": arr(S),"expected_revision": I}, ("enabled","user_id","default_account_id","account_ids"))
 schemas["BootstrapInput"] = obj({"owner": ref("Owner"), "household": ref("HouseholdInput")}, ("owner", "household"))
 for name in ["Account", "Category", "Transaction", "Budget"]:
     source = schemas[name + "Input"]
@@ -65,7 +70,7 @@ for name in ["Account", "Category", "Transaction", "Budget"]:
 paths = {}
 
 def route(path, method, response=None, request=None, public=False, revision=False, implemented=True, parameters=()):
-    status = "201" if method == "post" and path in ["/auth/bootstrap", "/accounts", "/categories", "/transactions", "/budgets", "/planned-items"] or method == "post" and path.endswith(("/balance-checks", "/copy")) or method == "post" and path.endswith("/invites") else "200"
+    status = "201" if method == "post" and path in ["/auth/bootstrap", "/accounts", "/categories", "/transactions", "/quick-transactions", "/budgets", "/planned-items"] or method == "post" and path.endswith(("/balance-checks", "/copy")) or method == "post" and path.endswith("/invites") else "200"
     if method == "delete" or path == "/auth/logout":
         status = "204"
     params = [{"name": part[1:-1], "in": "path", "required": True, "schema": S} for part in path.split("/") if part.startswith("{")]
@@ -94,6 +99,8 @@ route("/auth/logout", "post")
 route("/auth/csrf", "get")
 route("/me", "get")
 route("/openapi.json", "get", public=True)
+route("/quick-transactions/options", "get", "QuickExpenseOptions", public=True, parameters=["account_id"])
+route("/quick-transactions", "post", "QuickExpenseResult", "QuickExpenseInput", public=True)
 for health in ["live", "ready"]:
     route(f"/health/{health}", "get", public=True)
 for plural, name in [("accounts", "Account"), ("categories", "Category"), ("transactions", "Transaction"), ("budgets", "Budget")]:
@@ -148,6 +155,8 @@ for action in ["activate", "archive", "copy"]:
 route("/budgets/{id}/tracking", "get", parameters=["from", "to"])
 route("/settings/household", "get", "HouseholdSettings")
 route("/settings/household", "patch", "HouseholdSettings", "HouseholdSettingsPatch", revision=True)
+route("/settings/quick-expense", "get", "QuickExpenseSettings", parameters=["user_id"])
+route("/settings/quick-expense", "patch", "QuickExpenseSettings", "QuickExpenseSettingsPatch", revision=True)
 route("/households/{household_id}/members", "get")
 route("/households/{household_id}/invites", "post", request="InviteInput")
 route("/invites/{token}/accept", "post", public=True)

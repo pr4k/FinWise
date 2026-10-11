@@ -11,6 +11,8 @@ sudo docker compose --env-file .env -f deploy/compose.yaml exec finwise curl --f
 
 Compose publishes `0.0.0.0:3000` and allows HTTP sign-in by default. Open `http://<TrueNAS-Tailscale-IP>:3000` when Tailscale runs on TrueNAS. If you use a Tailscale subnet router, open `http://<TrueNAS-LAN-IP>:3000` through that route. Use the IP address with `http://`. Keep port 3000 off the public internet.
 
+For the opt-in Apple Shortcuts expense API, deploy this version, then sign in as the household owner and configure **Settings → Apple Shortcuts quick expense** using the NAS accounts. Follow [the quick expense guide](../docs/quick-expense-shortcuts.md). The quick routes have no authentication, so the NAS port and these routes must remain reachable only through your trusted LAN or private VPN. Do not expose them through a public reverse proxy or tunnel.
+
 If an existing account cannot sign in, an administrator with NAS shell access can reset its password after deploying a build that includes the recovery command. From the repository root, run `sudo -v` first, then:
 
 ```sh

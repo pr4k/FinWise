@@ -1,5 +1,9 @@
 # FinWise HTTP API specification
 
+### Opt-in quick expense entry
+
+`GET /api/v1/quick-transactions/options` and `POST /api/v1/quick-transactions` are the only unauthenticated expense-entry routes. They are disabled by default and derive the user and household from owner-managed, server-stored settings. `GET` and `PATCH /api/v1/settings/quick-expense` require an owner session; PATCH also requires CSRF and a revision. POST requires an `Idempotency-Key` and creates an ordinary expense transaction with the configured user's permissions. These routes must stay on a trusted LAN or private VPN, outside any public proxy or tunnel. See [Apple Shortcuts quick expenses](quick-expense-shortcuts.md) for configuration, payloads, responses, curl examples, and iPhone setup.
+
 ### Settle up, investments, and savings plans
 
 `GET/POST /settle-ups` stores private, per-person obligations with `person`, `direction` (`owed_to_me` or `i_owe`), `kind`, exact decimal `amount`, `currency`, `date`, and `description`. `POST /settle-ups/splits` accepts a purchase `total`, `my_share`, named `shares`, and `paid_by` (`me` or a name among the shares); their exact minor-unit sum must equal the total. If you paid, it creates a receivable for each other person. If another person paid, it creates a payable for your share. An optional `transaction_id` links a purchase you paid to an accessible, active expense with the same total and currency; a transaction can have only one split. Splits do not create expenses. `POST /settle-ups/{id}/repayments` takes `amount` and `date`, requires the current revision, and cannot exceed the remaining balance. `PATCH /settle-ups/{id}` corrects obligation details, while keeping a split share amount locked. `DELETE /settle-ups/{id}/repayments/{payment_id}` removes a mistaken repayment with the current obligation revision. Revisions remain in the audit history.

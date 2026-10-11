@@ -284,6 +284,8 @@ body{background:#f6f7fb}
 .transaction-quick-fields{display:grid;grid-template-columns:minmax(120px,.75fr) minmax(0,1.25fr);gap:12px}
 .transaction-summary{padding:12px;border-radius:8px;background:#f3f1ff;color:#39315f;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
 .transaction-duplicate{padding:10px 12px;border-radius:8px;background:#fff4dc;color:#754a11;font-size:12px;line-height:1.5}
+.transaction-category-results{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+.transaction-category-results button{min-height:36px;text-align:left;font-size:12px;white-space:normal}
 @media(max-width:520px){.transaction-quick-fields{grid-template-columns:1fr}.live-dialog #transaction-form .dialog-actions{display:grid;grid-template-columns:1fr 1fr}.live-dialog #transaction-form .dialog-actions button{width:100%;padding:8px}.live-dialog #transaction-form .dialog-actions button:last-child{grid-column:1/-1}}
 
 /* Recorded activity keeps the transaction readable before showing ledger detail. */
@@ -415,3 +417,6 @@ body{background:#f6f7fb}
 .analytics-subscription-amount small{display:block;margin-top:4px}
 @media(max-width:700px){.recurring-summary{gap:7px}.recurring-summary>div{padding:12px}.recurring-summary strong{font-size:23px}.analytics-subscription-grid{grid-template-columns:1fr}}
 @media(max-width:520px){.recurring-card{padding:16px}.recurring-card-main{display:grid;gap:13px}.recurring-card-price{text-align:left}.recurring-history li{grid-template-columns:1fr auto}.recurring-history li span{grid-column:1/-1}.analytics-subscription{display:grid}.analytics-subscription-amount{text-align:left}}
+.quick-account-list{display:grid;gap:8px;margin:16px 0;padding:14px;border:1px solid var(--line);border-radius:12px;max-height:240px;overflow:auto}
+.quick-account-list legend{font-weight:700;padding:0 6px}
+.quick-account-list .confirm-line{margin:0}

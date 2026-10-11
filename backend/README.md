@@ -26,6 +26,8 @@ Secure cookies are the default. The local HTTP override requires binding to a lo
 
 Container deployment instructions are in [deploy/README.md](../deploy/README.md). The server handles SIGINT and SIGTERM for graceful shutdown.
 
+The opt-in, unauthenticated Apple Shortcuts routes are configured by the household owner in **Settings → Apple Shortcuts quick expense**. See [Quick expenses from Apple Shortcuts](../docs/quick-expense-shortcuts.md). Keep these routes on a trusted LAN or private VPN only.
+
 The binary reads process environment variables; `.env.example` is documentation, not automatically loaded configuration.
 
 ## Implemented routes
