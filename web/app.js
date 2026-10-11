@@ -30,6 +30,7 @@ const labels = { overview:'Overview', household:'Household', analytics:'Analytic
 const previousMonth=new Date(`${savedView.month}-01T00:00:00Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
 const compareParam=new URLSearchParams(location.search).get('compare');
 const state = { me:null, accounts:[], categories:[], members:[], plannedItems:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), recurringFilter:'review', settlementFilter:'open', investmentFilter:'all', compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
+let recentTransactions=[];
 function familyMode() { return state.me?.household?.family_only===true; }
 function scopeField(name='scope') { return familyMode()?input(name,'type="hidden" value="family"'):field('Scope',`<select name="${name}">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`); }
 let toastTimer;
@@ -62,6 +63,10 @@ function defaultTransactionScope() {
   if(familyMode()) return 'family';
   const saved=localStorage.getItem(`finwise-default-scope:${state.me?.user.id}`);
   return saved==='family'?'family':'personal';
+}
+function lastTransactionAccount() {
+  const key=localStorage.getItem(`finwise-last-account:${state.me.user.id}`);
+  return state.accounts.some(a=>a.id===key && a.active!==false)?key:null;
 }
 const accountOptions = selected => state.accounts.filter(a=>a.active!==false).map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===selected)).join('');
 const payerId = t => t.paid_by_user_id || (t.source_refs?.length?state.accounts.find(a=>a.id===t.movements[0]?.account_id)?.owner_id:t.entered_by);
@@ -129,7 +134,7 @@ async function start() {
   catch(e) { authRoot.innerHTML='<section class="panel auth-card"><h1>FinWise is unavailable</h1><p>Could not complete startup. Check the NAS connection, then reload this page.</p><button class="primary-button" onclick="location.reload()">Retry connection</button></section>'; failure(e.name==='AbortError'?new Error('The FinWise API did not respond within 15 seconds.'):e,authRoot); }
   finally { clearTimeout(timer); }
 }
-function resetSession() { state.generation++; state.me=null; state.accounts=[]; state.categories=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); root.replaceChildren(); authForm(); }
+function resetSession() { state.generation++; state.me=null; state.accounts=[]; state.categories=[]; recentTransactions=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); root.replaceChildren(); authForm(); }
 window.addEventListener('session-expired',resetSession);
 function navigate(view,parts=[]) { const hash=[view,...parts].map(encodeURIComponent).join('/'); if(location.hash.slice(1)===hash) renderRoute(); else location.hash=hash; }
 async function loadLedgerBalances(values,allDates=false,extraAccountIds=[]) {
@@ -638,7 +643,7 @@ const views = {
       const [ledger,checks]=await Promise.all([api.collection(`accounts/${id(selected.id)}/ledger?${new URLSearchParams(period())}`),api.collection(`accounts/${id(selected.id)}/balance-checks`)]);
       state.selectedChecks=checks.data;
       const opening=selected.opening_balance;
-      content+=panel('Known balance',`<p>${opening?`${amount(opening.amount,selected.currency)} as of ${h(opening.as_of)}`:'No known balance recorded.'}</p>${selected.owner_id===state.me.user.id?button(opening?'Edit known balance':'Set known balance','opening-balance',`data-id="${h(selected.id)}"`):''}<p class="helper">Enter a balance for today or any known date and time. Recorded transactions calculate balances backward for earlier dates and forward for later dates.</p>`)+panel(`${selected.name} · ${state.month} ledger`,table(['Date / time','Description','Movement','Computed from anchor','Displayed balance'],ledger.data.map(r=>[h(r.effective_at),h(r.description)+(r.same_time_count>1?'<small>'+groupBalanceLabel(r,selected.id).replace(/^ · /,'')+'</small>':''),r.movement==null?'—':amount(r.movement,r.currency),amount(r.computed_from_start,r.currency),`${amount(r.balance_after,r.currency)}<small>${h(balanceLabel(r))}</small>`])))+panel('Manual balance checks',table(['As of','Entered balance','Computed from anchor','Difference now','Status',''],checks.data.map(c=>[h(c.as_of),amount(c.amount,c.currency),amount(c.current_calculated,c.currency),amount(c.current_variance,c.currency),h(c.voided?'Removed':c.stale?'Ledger changed':'Current'),c.voided?'':button('Edit','edit-balance-check',`data-account="${h(selected.id)}" data-id="${h(c.id)}"`)+button('Remove','remove-balance-check',`data-account="${h(selected.id)}" data-id="${h(c.id)}"`)])))+`<p class="helper">Difference = entered balance minus the current ledger calculation. Removed checks stay in history but no longer anchor balances.</p>`;
+      content+=panel('Known balance',`<p>${opening?`${amount(opening.amount,selected.currency)} as of ${h(opening.as_of)}`:'No known balance recorded.'}</p>${selected.owner_id===state.me.user.id?button(opening?'Edit known balance':'Set known balance','opening-balance',`data-id="${h(selected.id)}"`):''}<p class="helper">Enter a balance for today or any known date and time. Recorded transactions calculate balances backward for earlier dates and forward for later dates.</p>`)+panel(`${selected.name} · ${state.month} ledger`,button('Add transaction to this account','transaction-account',`data-account="${h(selected.id)}"`)+table(['Date / time','Description','Movement','Computed from anchor','Displayed balance'],ledger.data.map(r=>[h(r.effective_at),h(r.description)+(r.same_time_count>1?'<small>'+groupBalanceLabel(r,selected.id).replace(/^ · /,'')+'</small>':''),r.movement==null?'—':amount(r.movement,r.currency),amount(r.computed_from_start,r.currency),`${amount(r.balance_after,r.currency)}<small>${h(balanceLabel(r))}</small>`])))+panel('Manual balance checks',table(['As of','Entered balance','Computed from anchor','Difference now','Status',''],checks.data.map(c=>[h(c.as_of),amount(c.amount,c.currency),amount(c.current_calculated,c.currency),amount(c.current_variance,c.currency),h(c.voided?'Removed':c.stale?'Ledger changed':'Current'),c.voided?'':button('Edit','edit-balance-check',`data-account="${h(selected.id)}" data-id="${h(c.id)}"`)+button('Remove','remove-balance-check',`data-account="${h(selected.id)}" data-id="${h(c.id)}"`)])))+`<p class="helper">Difference = entered balance minus the current ledger calculation. Removed checks stay in history but no longer anchor balances.</p>`;
     }
     return content+coverage();
   },
@@ -798,7 +803,7 @@ async function analyticsCategoryDetail(key,currency) {
   const signed=({transaction,allocation})=>transaction.event_type==='refund'?analyticsView.negate(allocation.amount):allocation.amount;
   const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
   const total=analyticsView.sumMoney(rows.map(signed),scale);
-  detailDialog(`${name} · ${state.month}`,`<p class="detail-lead">Recorded net spending ${amount(total,currency)} across ${rows.length} allocation${rows.length===1?'':'s'} in the ${h(state.scope)} scope.</p>${table(['Date','Transaction','Type','Allocation',''],rows.map(row=>[h(row.transaction.effective_date),h(row.transaction.description||'Transaction'),h(row.transaction.event_type),amount(signed(row),currency),button('Open','analytics-open-transaction',`data-id="${h(row.transaction.id)}"`)]))}<p class="helper">Refunds reduce spending. Each row is an allocation from a visible ledger transaction.</p>`);
+  detailDialog(`${name} · ${state.month}`,`<p class="detail-lead">Recorded net spending ${amount(total,currency)} across ${rows.length} allocation${rows.length===1?'':'s'} in the ${h(state.scope)} scope.</p>${key==='uncategorized'?'':button('Add transaction in this category','transaction-category-context',`data-category="${h(key)}"`)}${table(['Date','Transaction','Type','Allocation',''],rows.map(row=>[h(row.transaction.effective_date),h(row.transaction.description||'Transaction'),h(row.transaction.event_type),amount(signed(row),currency),button('Open','analytics-open-transaction',`data-id="${h(row.transaction.id)}"`)]))}<p class="helper">Refunds reduce spending. Each row is an allocation from a visible ledger transaction.</p>`);
 }
 async function analyticsInvestmentDetail(key) {
   const item=await api.request(`investments/${id(key)}`);
@@ -873,10 +878,22 @@ function categoryEditor(key=null,parentKey=null) {
     `<p class="helper">Personal categories work with your private accounts. Move a personal category to household access in Settings.</p>`,
     'category-form',current?'Save category':'Create category');
 }
-function transactionEditor() {
+function transactionEditor({accountId=null,date=localDate(),categoryId=null}={}) {
   if(!state.accounts.some(a=>a.active!==false)) { notify('Add an active account first.'); return; }
-  editor('Add transaction',field('Description',input('description','required maxlength="240"'))+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Amount',moneyInput('amount'))+field('Date',input('effective_date',`type="date" required value="${localDate()}"`))+field('Account / transfer source',`<select name="account_id" required>${accountOptions()}</select>`)+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}</div><div id="allocation-fields">${field('Category','<select name="category_id" id="transaction-category"></select>')}${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div>`,'transaction-form');
+  const chosen=state.accounts.find(a=>a.id===(accountId||lastTransactionAccount()) && a.active!==false)?.id;
+  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}<p id="transfer-help" class="helper"></p></div><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name" autocomplete="off"'))}${field('Category','<select name="category_id" id="transaction-category"></select>')}${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
+  const form=dialog.querySelector('#transaction-form');
+  form.querySelector('.dialog-actions').insertAdjacentHTML('beforeend','<button class="outline-button" type="submit" name="save_action" value="another">Save & add another</button>');
   updateCategories();
+  if(categoryId && [...form.elements.category_id.options].some(o=>o.value===categoryId)) { form.elements.category_id.value=categoryId; form.elements.category_id.dataset.manual='true'; }
+  updateTransactionPreview();
+  form.elements.amount.focus();
+  api.request('transactions?limit=100').then(result=>{
+    if(dialog.querySelector('#transaction-form')!==form) return;
+    recentTransactions=result.data.filter(t=>!t.voided);
+    suggestTransactionCategory();
+    updateTransactionPreview();
+  }).catch(()=>{});
 }
 function planEditor(key=null) {
   const item=state.plannedItems.find(v=>v.id===key);
@@ -894,7 +911,47 @@ function planEditor(key=null) {
     `<p class="helper">Household plans can use only household accounts. A plan does not post money movement.</p>`,
     'plan-form',item?'Save plan':'Add plan');
 }
-function updateCategories() { const kind=document.querySelector('#event-type').value; const transfer=kind==='transfer'; document.querySelector('#transfer-target').hidden=!transfer; document.querySelector('#allocation-fields').hidden=transfer;document.querySelector('#paid-by-field').hidden=kind==='income'||transfer; document.querySelector('#transaction-category').innerHTML=option('','Uncategorized')+categoryOptions(kind==='income'?'income':'expense'); }
+function updateCategories() {
+  const form=dialog.querySelector('#transaction-form');if(!form)return;
+  const kind=form.elements.event_type.value,transfer=kind==='transfer';
+  form.querySelector('#transfer-target').hidden=!transfer;
+  form.querySelector('#allocation-fields').hidden=transfer;
+  form.querySelector('#paid-by-field').hidden=kind==='income'||transfer;
+  if(transfer) {
+    const source=state.accounts.find(a=>a.id===form.elements.account_id.value);
+    const old=form.elements.destination.value;
+    const targets=state.accounts.filter(a=>a.active!==false && a.id!==source?.id && a.currency===source?.currency);
+    form.elements.destination.innerHTML=targets.map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===old)).join('');
+    form.querySelector('#transfer-help').textContent=targets.length?'Move money between your own accounts without counting it as spending.':'Add another active account in this currency to record a transfer.';
+    form.elements.destination.required=true;
+  } else form.elements.destination.required=false;
+  const selected=form.elements.category_id.value;
+  const search=form.elements.category_search.value.trim().toLocaleLowerCase();
+  const choices=categoryView.ordered(state.categories,kind==='income'?'income':'expense').filter(({category})=>category.archived!==true && (!search || categoryName(category.id).toLocaleLowerCase().includes(search)));
+  form.elements.category_id.innerHTML=option('','Uncategorized')+choices.map(({category,depth})=>option(category.id,`${'　'.repeat(depth)}${depth?'↳ ':''}${category.name}`,category.id===selected)).join('');
+  if(selected && choices.some(({category})=>category.id===selected)) form.elements.category_id.value=selected;
+}
+function suggestTransactionCategory() {
+  const form=dialog.querySelector('#transaction-form');if(!form || form.elements.category_id.dataset.manual)return;
+  const description=form.elements.description.value.trim().toLocaleLowerCase();
+  const match=description && form.elements.event_type.value!=='transfer' && recentTransactions.find(t=>t.description?.trim().toLocaleLowerCase()===description && t.event_type===form.elements.event_type.value && t.movements?.[0]?.account_id===form.elements.account_id.value);
+  const categoryId=match?.allocations?.[0]?.category_id;
+  const select=form.elements.category_id;
+  if(categoryId && [...select.options].some(o=>o.value===categoryId)) { select.value=categoryId; select.dataset.suggested=categoryId; }
+  else if(select.dataset.suggested) { select.value=''; delete select.dataset.suggested; }
+}
+function updateTransactionPreview() {
+  const form=dialog.querySelector('#transaction-form');if(!form)return;
+  const data=Object.fromEntries(new FormData(form));
+  const account=state.accounts.find(a=>a.id===data.account_id);
+  const pieces=[data.amount?`${account?.currency||''} ${data.amount}`:'Amount',data.event_type[0].toUpperCase()+data.event_type.slice(1),data.description||'Description',account?.name||'Account',data.event_type==='transfer'?`→ ${accountName(data.destination)}`:form.elements.category_id.selectedOptions[0]?.textContent||'Uncategorized',data.effective_date];
+  if(data.event_type!=='transfer' && !familyMode())pieces.push(data.scope==='family'?'Family':'Personal');
+  if(['expense','refund'].includes(data.event_type)) pieces.push(`Paid by ${state.members.find(m=>m.user_id===data.paid_by_user_id)?.name||'you'}`);
+  form.querySelector('#transaction-summary').textContent=pieces.join(' · ');
+  const duplicate=recentTransactions.some(t=>!t.voided && t.event_type===data.event_type && t.effective_date===data.effective_date && Number(t.amount)===Number(data.amount) && t.description?.trim().toLocaleLowerCase()===data.description?.trim().toLocaleLowerCase() && t.movements?.[0]?.account_id===data.account_id);
+  const warning=form.querySelector('#transaction-duplicate');warning.hidden=!data.amount||!data.description||!duplicate;
+  warning.textContent=duplicate?'A matching transaction is already recorded for this date and account. Check before saving.':'';
+}
 async function transactionDetail(key) {
   const t=await api.request(`transactions/${id(key)}`);
   await loadLedgerBalances([t],true);
@@ -1110,7 +1167,7 @@ const actions = {
   refresh:()=>renderRoute(), 'select-month':el=>{setMonth(el.dataset.month);renderRoute();}, 'transaction-period':()=>navigate('transactions',location.hash.slice(1)==='transactions/all'?[]:['all']), 'clear-transaction-filters':()=>{state.transactionFilters={account:'',accountType:'',eventType:''};saveView();renderRoute();}, 'copy-invite-link':async()=>{await navigator.clipboard.writeText(state.inviteLink);notify('Invitation link copied.');}, logout:async()=>{await api.request('auth/logout',{method:'POST',body:{}});resetSession();},
   'reset-add-month':async()=>{const month=document.querySelector('#reset-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('Choose a valid month.');if(state.resetMonths.length>=24)throw new Error('Select at most 24 months.');state.resetMonths=[...new Set([...state.resetMonths,month])].sort();state.resetPreview=null;await renderRoute();},
   'reset-remove-month':async el=>{state.resetMonths=state.resetMonths.filter(month=>month!==el.dataset.month);state.resetPreview=null;await renderRoute();},
-  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:transactionEditor,
+  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});},
   settlement:settlementEditor, split:splitEditor, repayment:el=>repaymentEditor(el.dataset.id), 'settlement-edit':el=>settlementEditEditor(el.dataset.id),
   'settlement-filter':el=>{state.settlementFilter=el.dataset.filter;renderRoute();}, 'investment-filter':el=>{state.investmentFilter=el.dataset.filter;renderRoute();},
   'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;syncScopeControl();saveView();renderRoute();},
@@ -1131,7 +1188,7 @@ const actions = {
   'open-session':el=>navigate('reconcile',[el.dataset.id]),
   'review-account':el=>editor('Start account review',field('Bank or card account',`<select name="account_id" required>${state.accounts.filter(a=>['bank','credit_card'].includes(a.subtype)).map(a=>option(a.id,a.name,a.id===el.dataset.id)).join('')}</select>`)+`<p>${h(state.month)}</p>`,'session-form','Start review'),
   'review-balance':el=>navigate('reconcile',['balance',el.dataset.account,el.dataset.check]),
-  'add-reconcile-transaction':el=>{transactionEditor();const select=dialog.querySelector('[name="account_id"]');if(select)select.value=el.dataset.account;},
+  'add-reconcile-transaction':el=>transactionEditor({accountId:el.dataset.account}),
   'auto-match':async el=>{const label=el.textContent;el.textContent='Matching…';el.setAttribute('aria-busy','true');try {const result=await api.request(`reconciliation/sessions/${id(el.dataset.id)}/auto-match`,{method:'POST',revision:state.session.revision,body:{}});notify(`${result.matched_count} exact transaction pairs matched.`);await refreshReconciliationComparison();} finally {el.textContent=label;el.removeAttribute('aria-busy');}},
   'save-amendment':()=>{const selected=selectedComparison();if(selected?.ledger.length && selected.observations.length) openAmendmentGroup(selected);else {const recent=amendmentGroupFromRecent();if(recent)openAmendmentGroup(recent,true);}},
   'create-from-statement':createFromStatementEditor,
@@ -1176,7 +1233,12 @@ document.addEventListener('change',async event=>{
     document.querySelectorAll('#bulk-scope-form [name="transaction_id"]').forEach(box=>{box.checked=event.target.checked;});
   }
   if(event.target.id==='compare-month' && /^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) { const chosen=event.target.value;state.compareMonth=chosen===state.month?new Date(Date.UTC(Number(chosen.slice(0,4)),Number(chosen.slice(5,7))-2,1)).toISOString().slice(0,7):chosen;if(chosen===state.month)notify(`Comparison moved to ${state.compareMonth} so the periods differ.`);const url=new URL(location.href);url.searchParams.set('compare',state.compareMonth);history.replaceState(null,'',url.pathname+url.search+url.hash);renderRoute(); }
-  if(event.target.id==='event-type') updateCategories();
+  if(event.target.id==='event-type' || event.target.form?.id==='transaction-form' && event.target.name==='account_id') updateCategories();
+  if(event.target.form?.id==='transaction-form') {
+    if(event.target.name==='category_id') event.target.dataset.manual='true';
+    if(['description','account_id','event_type'].includes(event.target.name)) suggestTransactionCategory();
+    updateTransactionPreview();
+  }
   if(event.target.id==='account-subtype') document.querySelector('#card-due-fields').hidden=event.target.value!=='credit_card';
   if(event.target.id==='category-kind') document.querySelector('#category-parent').innerHTML=option('','Top level',true)+categoryOptions(event.target.value);
   if(event.target.id==='statement-account') navigate('statements',[event.target.value]);
@@ -1192,10 +1254,17 @@ document.addEventListener('change',async event=>{
     } catch(e) { if(output) output.textContent=e.message; }
   }
 });
+document.addEventListener('input',event=>{
+  if(event.target.form?.id!=='transaction-form')return;
+  if(event.target.name==='category_search')updateCategories();
+  if(event.target.name==='description')suggestTransactionCategory();
+  updateTransactionPreview();
+});
 document.addEventListener('submit',async event=>{
   const form=event.target; if(!(form instanceof HTMLFormElement)) return;
   event.preventDefault(); if(form.dataset.busy) return;
   form.dataset.busy='true'; const submit=form.querySelector('[type="submit"]'); if(submit) submit.disabled=true;
+  const addAnother=form.id==='transaction-form' && event.submitter?.value==='another';
   const formData=new FormData(form);
   const data=Object.fromEntries(formData);
   try {
@@ -1350,11 +1419,21 @@ document.addEventListener('submit',async event=>{
     }
     else if(form.id==='transaction-form') {
       const account=state.accounts.find(a=>a.id===data.account_id); const transfer=data.event_type==='transfer';
+      if(transfer && (!data.destination || data.destination===data.account_id)) throw new Error('Choose a different destination account with the same currency.');
       const movements=[{account_id:data.account_id,amount:['expense','transfer'].includes(data.event_type)?`-${data.amount}`:data.amount}];
       if(transfer) movements.push({account_id:data.destination,amount:data.amount});
       const body={event_type:data.event_type,amount:data.amount,currency:account.currency,effective_date:data.effective_date,description:data.description,movements,allocations:transfer?[]:[{category_id:data.category_id || null,amount:data.amount,scope:data.scope}]};
       if(['expense','refund'].includes(data.event_type)) body.paid_by_user_id=data.paid_by_user_id;
-      await api.request('transactions',{method:'POST',body});
+      const created=await api.request('transactions',{method:'POST',body});
+      recentTransactions.unshift(created);
+      localStorage.setItem(`finwise-last-account:${state.me.user.id}`,data.account_id);
+      if(addAnother) {
+        dialog.close();
+        await renderRoute();
+        transactionEditor({accountId:data.account_id,date:data.effective_date});
+        notify('Transaction saved. Add the next one.');
+        return;
+      }
     } else if(form.id==='transaction-full-edit-form') {
       const transfer=data.event_type==='transfer';
       const signed=transfer || data.event_type==='expense'?`-${data.amount}`:data.amount;
