@@ -1099,7 +1099,7 @@ impl Client {
         } else {
             serde_json::from_slice(&bytes).unwrap()
         };
-        assert_eq!(headers["cache-control"], "no-store");
+        assert_eq!(headers["cache-control"], if path.starts_with("widgets/spending") && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
         assert_eq!(headers["x-request-id"], "integration-test");
         (status, value, headers)
     }
@@ -1547,6 +1547,83 @@ async fn quick_client(
     }), None, Some(settings.1["revision"].as_i64().unwrap())).await;
     assert_eq!(updated.0, StatusCode::OK, "{}", updated.1);
     Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() }
+}
+
+#[tokio::test]
+async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let anonymous = Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() };
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+    assert_eq!(anonymous.call("GET","analytics/summary?from=2026-10-01&to=2026-11-01",json!({}),None,None).await.0,StatusCode::UNAUTHORIZED);
+    assert_eq!(member.call("GET","settings/widgets",json!({}),None,None).await.0,StatusCode::FORBIDDEN);
+    let cash=owner.create("accounts",json!({"name":"Widget cash","subtype":"cash","currency":"INR","visibility":"shared"})).await;
+    let bank=owner.create("accounts",json!({"name":"Widget bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let food=owner.category("Food","expense").await;
+    let lunch=owner.create("categories",json!({"name":"Lunch","kind":"expense","parent_id":food["id"]})).await;
+    let bills=owner.category("Bills","expense").await;
+    let settlement=owner.category("Credit card settlement","expense").await;
+    let me=owner.call("GET","me",json!({}),None,None).await.1;
+    let enabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"]}),None,Some(0)).await;
+    assert_eq!(enabled.0,StatusCode::OK,"{}",enabled.1);
+    assert_eq!(owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(0)).await.0,StatusCode::CONFLICT);
+    assert_eq!(member.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(1)).await.0,StatusCode::FORBIDDEN);
+    let now=chrono::Utc::now();
+    let local=now.with_timezone(&chrono_tz::Asia::Kolkata);
+    let make=|kind:&str,amount:&str,account:&Value,category:&Value| {
+        let mut value=transaction(kind,amount,account,category,"family");
+        value["effective_date"]=json!(local.date_naive().to_string());
+        value["effective_at"]=json!(local.to_rfc3339());
+        value
+    };
+    owner.create("transactions",make("expense","20.00",&cash,&lunch)).await;
+    owner.create("transactions",make("refund","5.00",&cash,&lunch)).await;
+    owner.create("transactions",make("expense","7.00",&bank,&bills)).await;
+    owner.create("transactions",make("expense","11.00",&cash,&settlement)).await;
+    let voided=owner.create("transactions",make("expense","13.00",&cash,&food)).await;
+    assert_eq!(owner.call("DELETE",&format!("transactions/{}",voided["id"].as_str().unwrap()),json!({"reason":"Excluded test entry"}),None,Some(voided["revision"].as_i64().unwrap())).await.0,StatusCode::NO_CONTENT);
+    owner.create("transactions",json!({"event_type":"transfer","amount":"3.00","currency":"INR","effective_date":local.date_naive().to_string(),"effective_at":local.to_rfc3339(),"description":"Card payment","allocations":[],"movements":[{"account_id":cash["id"],"amount":"-3.00"},{"account_id":bank["id"],"amount":"3.00"}]})).await;
+    let later=(chrono::Utc::now()+chrono::Duration::days(1)).with_timezone(&chrono_tz::Asia::Kolkata);
+    let mut future=make("expense","9.00",&cash,&food);
+    future["effective_date"]=json!(later.date_naive().to_string());
+    future["effective_at"]=json!(later.to_rfc3339());
+    owner.create("transactions",future).await;
+    owner.create("transactions",make("income","99.00",&cash,&owner.category("Salary","income").await)).await;
+    let all=anonymous.call("GET","widgets/spending",json!({}),None,None).await;
+    assert_eq!(all.0,StatusCode::OK,"{}",all.1);
+    assert_eq!(all.2["cache-control"],"private, max-age=300");
+    assert_eq!(all.1["currency"],"INR");
+    assert_eq!(all.1["timezone"],"Asia/Kolkata");
+    for period in ["today","week","month"] {
+        assert_eq!(all.1["summary"][period]["spent"],"22.00");
+        assert_eq!(all.1["summary"][period]["transaction_count"],2);
+    }
+    assert_eq!(all.1["categories"]["total_spent"],"22.00");
+    assert_eq!(all.1["categories"]["items"][0]["id"],food["id"]);
+    assert_eq!(all.1["categories"]["items"][0]["amount"],"15.00");
+    assert_eq!(all.1["categories"]["items"][0]["percentage"],68.18);
+    assert_eq!(all.1["categories"]["items"][1]["amount"],"7.00");
+    assert_eq!(anonymous.call("GET","widgets/spending?category_limit=1",json!({}),None,None).await.1["categories"]["other_amount"],"7.00");
+    let filtered=anonymous.call("GET",&format!("widgets/spending?account_id={}&include_children=false&category_limit=1",cash["id"].as_str().unwrap()),json!({}),None,None).await;
+    assert_eq!(filtered.0,StatusCode::OK,"{}",filtered.1);
+    assert_eq!(filtered.1["summary"]["month"]["spent"],"15.00");
+    assert_eq!(filtered.1["categories"]["items"][0]["id"],lunch["id"]);
+    assert_eq!(filtered.1["categories"]["other_amount"],"0.00");
+    assert_eq!(anonymous.call("GET","widgets/spending?category_limit=0",json!({}),None,None).await.0,StatusCode::BAD_REQUEST);
+    assert_eq!(anonymous.call("GET","widgets/spending?account_id=invalid",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+    let disabled=owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(1)).await;
+    assert_eq!(disabled.0,StatusCode::OK,"{}",disabled.1);
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+    let private_account=owner.create("accounts",json!({"name":"Owner private","subtype":"cash","currency":"INR","visibility":"private"})).await;
+    let private_category=owner.create("categories",json!({"name":"Private spending","kind":"expense","visibility":"private"})).await;
+    let mut private_expense=make("expense","4.00",&private_account,&private_category);
+    private_expense["allocations"][0]["scope"]=json!("personal");
+    owner.create("transactions",private_expense).await;
+    let member_id=member.call("GET","me",json!({}),None,None).await.1["user"]["id"].clone();
+    let reenabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":member_id}),None,Some(2)).await;
+    assert_eq!(reenabled.0,StatusCode::OK,"{}",reenabled.1);
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["summary"]["month"]["spent"],"22.00");
+    assert_eq!(anonymous.call("GET",&format!("widgets/spending?account_id={}",private_account["id"].as_str().unwrap()),json!({}),None,None).await.0,StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

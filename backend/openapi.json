@@ -363,6 +363,58 @@
         }
       }
     },
+    "/widgets/spending": {
+      "get": {
+        "operationId": "get_widgets_spending",
+        "security": [],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category_limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_children",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetSpending"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "get_health_live",
@@ -4561,6 +4613,99 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/QuickExpenseSettingsPatch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/widgets": {
+      "get": {
+        "operationId": "get_settings_widgets",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_settings_widgets",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetSettings"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WidgetSettingsPatch"
               }
             }
           }
@@ -10898,6 +11043,229 @@
           "user_id",
           "default_account_id",
           "account_ids"
+        ]
+      },
+      "WidgetSpending": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "today": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "spent": {
+                    "type": "string",
+                    "pattern": "^-?\\d+(\\.\\d+)?$",
+                    "description": "Exact decimal money; never a JSON number."
+                  },
+                  "transaction_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "date",
+                  "spent",
+                  "transaction_count"
+                ]
+              },
+              "week": {
+                "type": "object",
+                "properties": {
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "end_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "spent": {
+                    "type": "string",
+                    "pattern": "^-?\\d+(\\.\\d+)?$",
+                    "description": "Exact decimal money; never a JSON number."
+                  },
+                  "transaction_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "start_date",
+                  "end_date",
+                  "spent",
+                  "transaction_count"
+                ]
+              },
+              "month": {
+                "type": "object",
+                "properties": {
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "end_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "spent": {
+                    "type": "string",
+                    "pattern": "^-?\\d+(\\.\\d+)?$",
+                    "description": "Exact decimal money; never a JSON number."
+                  },
+                  "transaction_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "start_date",
+                  "end_date",
+                  "spent",
+                  "transaction_count"
+                ]
+              }
+            },
+            "required": [
+              "today",
+              "week",
+              "month"
+            ]
+          },
+          "categories": {
+            "type": "object",
+            "properties": {
+              "period": {
+                "type": "string",
+                "enum": [
+                  "month"
+                ]
+              },
+              "total_spent": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "amount": {
+                      "type": "string",
+                      "pattern": "^-?\\d+(\\.\\d+)?$",
+                      "description": "Exact decimal money; never a JSON number."
+                    },
+                    "percentage": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "amount",
+                    "percentage"
+                  ]
+                }
+              },
+              "other_amount": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              }
+            },
+            "required": [
+              "period",
+              "total_spent",
+              "items",
+              "other_amount"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "generated_at",
+          "currency",
+          "timezone",
+          "summary",
+          "categories"
+        ]
+      },
+      "WidgetSettings": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                }
+              },
+              "required": []
+            }
+          }
+        },
+        "required": [
+          "enabled",
+          "revision"
+        ]
+      },
+      "WidgetSettingsPatch": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled"
         ]
       },
       "BootstrapInput": {

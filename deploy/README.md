@@ -13,6 +13,8 @@ Compose publishes `0.0.0.0:3000` and allows HTTP sign-in by default. Open `http:
 
 For the opt-in Apple Shortcuts expense API, deploy this version, then sign in as the household owner and configure **Settings → Apple Shortcuts quick expense** using the NAS accounts. Follow [the quick expense guide](../docs/quick-expense-shortcuts.md). The quick routes have no authentication, so the NAS port and these routes must remain reachable only through your trusted LAN or private VPN. Do not expose them through a public reverse proxy or tunnel.
 
+The read-only [widget spending API](../docs/widgets-api.md) is enabled separately in **Settings → Widget analytics API**. It also has no authentication and must stay on the trusted LAN or private VPN.
+
 If an existing account cannot sign in, an administrator with NAS shell access can reset its password after deploying a build that includes the recovery command. From the repository root, run `sudo -v` first, then:
 
 ```sh

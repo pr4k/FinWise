@@ -8,6 +8,7 @@ pub mod recovery;
 pub mod recurring;
 pub mod reset;
 pub mod storage;
+pub mod widgets;
 
 use axum::{Router, routing::any};
 use sqlx::{

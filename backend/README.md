@@ -28,6 +28,8 @@ Container deployment instructions are in [deploy/README.md](../deploy/README.md)
 
 The opt-in, unauthenticated Apple Shortcuts routes are configured by the household owner in **Settings → Apple Shortcuts quick expense**. See [Quick expenses from Apple Shortcuts](../docs/quick-expense-shortcuts.md). Keep these routes on a trusted LAN or private VPN only.
 
+The opt-in, read-only [widget spending API](../docs/widgets-api.md) is configured separately in **Settings → Widget analytics API**. Its GET endpoint needs no session or token and must stay on the trusted LAN or private VPN.
+
 The binary reads process environment variables; `.env.example` is documentation, not automatically loaded configuration.
 
 ## Implemented routes

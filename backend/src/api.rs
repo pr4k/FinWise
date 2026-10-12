@@ -4,7 +4,7 @@ use crate::{
     balances,
     domain::{self, add, format_money, money, text},
     error::{ApiError, Result},
-    imports, planning, quick, reconciliation, recurring, storage,
+    imports, planning, quick, reconciliation, recurring, storage, widgets,
 };
 use axum::{
     Json,
@@ -42,6 +42,8 @@ fn unsupported() -> ApiError {
 }
 
 pub async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
+    let widget_request = request.method() == axum::http::Method::GET
+        && request.uri().path().trim_end_matches('/') == "/api/v1/widgets/spending";
     let request_id = request
         .headers()
         .get("x-request-id")
@@ -72,9 +74,11 @@ pub async fn dispatch(State(state): State<AppState>, request: Request) -> Respon
         Ok((status, value)) => (status, Json(value)).into_response(),
         Err(error) => (error.status, Json(error.body(&request_id))).into_response(),
     };
+    let widget_success = widget_request && response.status().is_success();
     let headers = response.headers_mut();
     headers.insert("x-request-id", request_id.parse().unwrap());
-    headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    headers.insert(header::CACHE_CONTROL,
+        if widget_success { "private, max-age=300" } else { "no-store" }.parse().unwrap());
     headers.insert("x-content-type-options", "nosniff".parse().unwrap());
     if headers.contains_key(header::CONTENT_TYPE) {
         headers.insert(
@@ -120,6 +124,9 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
     let query: Query = axum::extract::Query::try_from_uri(&parts.uri)
         .map_err(|_| ApiError::invalid("Invalid query string."))?
         .0;
+    if method == "GET" && path == "widgets/spending" {
+        return widgets::spending(state, &query).await;
+    }
     if let Some(operation) = operation(method, path)
         && operation["x-implemented"] == false
     {
@@ -717,6 +724,8 @@ pub(crate) async fn route(
         ("GET", ["me"]) => ok(auth::me(db, p).await?),
         ("GET", ["auth", "csrf"]) => ok(json!({"csrf_token":p.csrf})),
         ("GET", ["settings", "household"]) => ok(auth::me(db, p).await?["household"].clone()),
+        ("GET" | "PATCH", ["settings", "widgets"]) =>
+            widgets::settings(db, p, method, q, headers, body).await,
         ("GET" | "PATCH", ["settings", "quick-expense"]) =>
             quick::settings(db, p, method, q, headers, body).await,
         ("PATCH", ["settings", "household"]) => {
