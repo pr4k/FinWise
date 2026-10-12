@@ -1,7 +1,7 @@
 'use strict';
 const themeLink=document.querySelector('link[href^="/reference-theme.css"]');
-if(themeLink && themeLink.getAttribute('href')!=='/reference-theme.css?v=20261012c')
-  themeLink.href='/reference-theme.css?v=20261012c';
+if(themeLink && themeLink.getAttribute('href')!=='/reference-theme.css?v=20261012f')
+  themeLink.href='/reference-theme.css?v=20261012f';
 const api = window.finwiseAPI;
 const viewState = window.finwiseViewState;
 const categoryView = window.finwiseCategories;
@@ -96,7 +96,7 @@ function reportQuery(month=state.month) { return new URLSearchParams({...period(
 function heading(title,description,actions='') { return `<div class="page-heading"><div><span class="eyebrow">${h(state.me?.household?.name||'MY HOUSEHOLD')} / ${h(state.scope.toUpperCase())}</span><h1>${h(title)}</h1><p>${h(description)}</p></div><div class="heading-actions">${actions}</div></div>`; }
 function scopeTabs() { return familyMode()?'':`<div class="analytics-scope-tabs" role="group" aria-label="View scope">${[['personal','Personal'],['family','Family'],['combined','Combined']].map(([scope,label])=>`<button type="button" data-action="analytics-scope" data-scope="${scope}" aria-pressed="${state.scope===scope}" class="${state.scope===scope?'active':''}">${label}</button>`).join('')}</div>`; }
 function panel(title,body) { return `<section class="panel live-panel"><h2>${h(title)}</h2>${body}</section>`; }
-function table(headers,rows) { return rows.length ? `<div class="table-scroll"><table class="live-table"><thead><tr>${headers.map(v=>`<th>${h(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map((v,i)=>`<td data-label="${h(headers[i])}">${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : empty('No records yet.'); }
+function table(headers,rows) { return rows.length ? `<div class="table-scroll"><table class="live-table"><thead><tr>${headers.map(v=>`<th>${h(v)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map((v,i)=>`<td data-label="${h(headers[i])}"><div class="cell-value">${v}</div></td>`).join('')}</tr>`).join('')}</tbody></table></div>` : empty('No records yet.'); }
 function notify(message) { const toast=document.querySelector('#toast'); toast.textContent=message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.classList.remove('show'),6000); }
 function failure(error,target=root) { const p=document.createElement('p'); p.className='live-error'; p.setAttribute('role','alert'); p.textContent=error.message || 'Could not reach the server. Please retry.'; target.querySelector('.live-error')?.remove(); target.prepend(p); }
 function coverage() { return '<p class="helper coverage-note">Recorded data only. Source coverage is unconfirmed; transfers do not count as spending.</p>'; }
@@ -169,6 +169,33 @@ function groupBalanceLabel(row,accountId) {
 }
 
 function transactionIndicators(t) { const tracked=t.movements.some(m=>['bank','credit_card'].includes(state.accounts.find(a=>a.id===m.account_id)?.subtype));return `<span class="transaction-indicators">${tracked?`<span class="transaction-indicator ${h(t.reconciliation_state)}">${h(t.reconciliation_state==='matched'?'Reconciled':t.reconciliation_state==='partial'?'Partly reconciled':'Not reconciled')}</span>`:''}${t.amendment?`<span class="transaction-indicator amended">Amended · ${t.money_manager_synced_at?'updated in Money Manager':'update Money Manager'}</span>`:''}${t.reconciliation_created?`<span class="transaction-indicator created">${t.money_manager_synced_at?'Updated in Money Manager':t.reconciliation_created.action==='update_transfer'?'Internal transfer · update Money Manager':'Created from statement · add to Money Manager'}</span>`:''}</span>`; }
+function transactionFeed(entries) {
+  let lastDate='';
+  const rows=entries.map(entry=>{
+    const t=entry.transaction;
+    const date=t?.effective_date || entry.row.effective_at.slice(0,10);
+    const group=date!==lastDate?`<div class="tx-date-group"><time datetime="${h(date)}">${h(new Date(`${date}T00:00:00`).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'}))}</time></div>`:'';
+    lastDate=date;
+    if(!t) {
+      const {account,row}=entry;
+      const opening=entry.kind==='opening_balance';
+      const observed=opening?account.opening_balance?.amount:row.observed_amount;
+      const title=opening?'Starting balance':'Balance check';
+      return `${group}<details class="tx-expand tx-anchor"><summary class="tx-scan-row" aria-label="${h(title)} for ${h(account.name)} on ${h(date)}. Expand balance details"><span class="tx-scan-icon" aria-hidden="true"><svg class="icon"><use href="#i-wallet"/></svg></span><span class="tx-scan-content"><span class="tx-scan-primary"><strong>${title}</strong><b class="tx-scan-amount">${amount(observed,account.currency)}</b></span><span class="tx-scan-secondary">${h(account.name)} · ${opening?'Opening':'Observed check'}</span></span><span class="tx-expand-chevron" aria-hidden="true">⌄</span></summary><div class="tx-quick-breakdown"><p class="tx-expanded-description">${h(account.name)} · ${title}</p>${opening?'<p class="tx-quick-note">Known opening balance.</p>':`<div class="tx-quick-line"><span>Calculated from start</span><b>${amount(row.computed_from_start,account.currency)}</b></div><div class="tx-quick-line"><span>Difference</span><b>${amount(row.computed_from_start==null?null:analyticsView.difference(observed,row.computed_from_start),account.currency)}</b></div>`}<div class="tx-quick-footer">${button('Account ledger','account-ledger',`data-id="${h(account.id)}"`)}</div></div></details>`;
+    }
+    const scale=new Intl.NumberFormat('en',{style:'currency',currency:t.currency}).resolvedOptions().maximumFractionDigits;
+    const scoped=t.event_type==='transfer'?t.amount:analyticsView.sumMoney(t.allocations.map(a=>a.amount),scale);
+    const signed=`${t.event_type==='income'||t.event_type==='refund'?'+ ':t.event_type==='expense'?'− ':t.event_type==='transfer'?'↔ ':''}${amount(scoped,t.currency)}`;
+    const accountNames=[...new Set(t.movements.map(m=>accountName(m.account_id)))].join(t.event_type==='transfer'?' ↔ ':' · ');
+    const scopes=t.event_type==='transfer'?'No allocation':([...new Set(t.allocations.map(a=>a.scope))].map(s=>s==='family'?'Family':'Personal').join(' + ')||'No allocation');
+    const author=t.entered_by===state.me.user.id?'You':state.members.find(m=>m.user_id===t.entered_by)?.name||'Household member';
+    const review=t.amendment&&!t.money_manager_synced_at?'Update Money Manager':t.reconciliation_created&&!t.money_manager_synced_at?'Add to Money Manager':t.reconciliation_state==='matched'?'Reconciled':t.reconciliation_state==='partial'?'Partly reconciled':'Not reconciled';
+    const movements=t.movements.map(m=>{const balance=state.ledgerBalances.get(`${m.account_id}:${t.id}`);return `<div class="tx-quick-line"><span>${h(accountName(m.account_id))}<small>${h(balanceLabel(balance))}</small></span><b>${amount(m.amount,t.currency)}<small>After ${amount(balance?.balance_after,t.currency)}</small></b></div>`;}).join('');
+    const allocations=t.event_type==='transfer'?'<p class="tx-quick-note">Transfers have no allocation scope and do not count as spending.</p>':t.allocations.map(a=>`<div class="tx-quick-line"><span>${h(categoryName(a.category_id))}<small>${h(a.scope)}</small></span><b>${amount(a.amount,t.currency)}</b></div>`).join('')||'<p class="tx-quick-note">No allocations recorded.</p>';
+    return `${group}<details class="tx-expand"><summary class="tx-scan-row ${h(t.event_type)}" aria-label="${h(t.description||'Untitled')}, ${h(date)}, ${h(t.event_type)}, ${h(accountNames)}, ${h(signed)}, ${h(scopes)}, ${h(review)}. Expand quick breakdown"><span class="tx-scan-icon" aria-hidden="true"><svg class="icon"><use href="#${t.event_type==='transfer'?'i-arrow':t.event_type==='income'||t.event_type==='refund'?'i-chart':'i-receipt'}"/></svg></span><span class="tx-scan-content"><span class="tx-scan-primary"><strong title="${h(t.description||'Untitled')}">${h(t.description||'Untitled')}</strong><b class="tx-scan-amount">${signed}</b></span><span class="tx-scan-secondary"><span>${h(accountNames)} · ${h(t.event_type)}</span></span><span class="tx-scan-context"><span>${h(scopes)} · ${h(author)}</span><span class="tx-review ${review==='Reconciled'?'':'unresolved'}">${h(review)}</span></span></span><span class="tx-expand-chevron" aria-hidden="true">⌄</span></summary><div class="tx-quick-breakdown"><p class="tx-expanded-description">${h(t.description||'Untitled')}</p><div class="tx-quick-facts"><div><span>Total transaction</span><b>${amount(t.amount,t.currency)} · ${h(t.event_type)}</b></div><div><span>Recorded by</span><b>${h(author)} · ${h(date)}</b></div></div><div class="tx-quick-section"><span class="tx-quick-label">Account movements</span>${movements}</div><div class="tx-quick-section"><span class="tx-quick-label">${t.event_type==='transfer'?'Allocation':'Budget allocations'}</span>${allocations}</div><div class="tx-quick-footer"><span>${h(review)}<small>${h(scopes)}${['expense','refund'].includes(t.event_type)?` · Paid by ${h(payerName(t))}`:''}</small></span>${button('Full details & edit','transaction-detail',`data-id="${h(t.id)}"`)}</div></div></details>`;
+  }).join('');
+  return `<div class="tx-feed">${rows}</div>`;
+}
 function transactionTable(values,balanceEvents=[],accountFilter='') {
   const entries=activityView.timeline(values,balanceEvents,state.ledgerBalances,accountFilter);
   const mobile=window.matchMedia('(max-width:600px)').matches;
@@ -211,7 +238,7 @@ function transactionTable(values,balanceEvents=[],accountFilter='') {
       button('Details','transaction-detail','data-id="'+h(t.id)+'"')
     ];
   });
-  return rows.length?'<div class="table-scroll activity-table-wrap"><table class="live-table activity-table"><thead><tr><th>Date</th><th>Activity</th><th>Account</th><th>Amount</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>'+rows.map((row,i)=>'<tr class="'+(entries[i].kind==='transaction'?'activity-'+(['income','expense','refund','transfer'].includes(entries[i].transaction.event_type)?entries[i].transaction.event_type:'other'):'activity-marker-row')+'">'+row.map((cell,j)=>'<td data-label="'+['Date','Activity','Account','Amount','Actions'][j]+'">'+cell+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':empty('No activity yet.');
+  return rows.length?'<div class="tx-desktop"><div class="table-scroll activity-table-wrap"><table class="live-table activity-table"><thead><tr><th>Date</th><th>Activity</th><th>Account</th><th>Amount</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>'+rows.map((row,i)=>'<tr class="'+(entries[i].kind==='transaction'?'activity-'+(['income','expense','refund','transfer'].includes(entries[i].transaction.event_type)?entries[i].transaction.event_type:'other'):'activity-marker-row')+'">'+row.map((cell,j)=>'<td data-label="'+['Date','Activity','Account','Amount','Actions'][j]+'">'+cell+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></div><div class="tx-mobile">'+transactionFeed(entries)+'</div>':empty('No activity yet.');
 }
 async function renderRoute() {
   if(!state.me) return;
@@ -816,7 +843,14 @@ const views = {
     const familySetting=panel('Family only mode',`<form id="family-mode-form"><label class="confirm-line"><input type="checkbox" name="family_only" ${familyMode()?'checked':''} ${canInvite?'':'disabled'}> Use Family for all household finances</label><p class="helper">When enabled, existing personal transactions, categories, accounts, plans, and budgets become family records. Private account history becomes visible to household members. Turning this off restores the scope choices but does not make converted records private again.</p>${canInvite?'<button type="submit" class="primary-button">Save family mode</button>':'<p class="helper">An owner or admin can change this setting.</p>'}</form>`);
     return heading('Settings','Your connected household.')+panel('Household',table(['Setting','Value'],[['Name',h(state.me.household.name)],['Timezone',h(state.me.household.timezone)],['Currency',h(state.me.household.base_currency)],['Signed in as',h(state.me.user.email)],['Role',h(state.me.membership.role)]]))+familySetting+quickPanel+widgetPanel+(familyMode()?'':panel('Default transaction scope',`<form id="default-scope-form">${field('Scope for new transactions and imports',`<select name="scope">${option('personal','Personal',defaultTransactionScope()==='personal')}${option('family','Family',defaultTransactionScope()==='family')}</select>`)}<p class="helper">Saved in this browser for your account. You can choose a different scope during import review or when adding a transaction.</p><button type="submit" class="primary-button">Save default</button></form>`))+(!familyMode()?householdAccess:'')+panel('Members',table(['Name','Email','Role'],members.data.map(m=>[h(m.name),h(m.email),h(m.role)])))+invite+(canInvite?monthResetPanel():'')+panel('AI providers','<p>AI provider configuration is not available in this backend release.</p>')+button('Sign out','logout');
   },
-  async more() { return heading('Workspace','Choose a view.')+`<div class="mobile-more">${Object.entries(labels).filter(([v])=>v!=='more').map(([v,name])=>navButton(v,name)).join('')}${button('Sign out','logout')}</div>`; }
+  async more() {
+    const groups=[
+      ['Insights',['overview','household','analytics']],
+      ['Your money',['transactions','recurring','planner','accounts','budgets','settlements','investments']],
+      ['Workspace',['categories','statements','reconcile','changes','imports','settings']]
+    ];
+    return heading('More','All your household finance views.')+`<div class="mobile-more-index">${groups.map(([title,items])=>`<section class="panel more-section"><h2>${title}</h2><div class="mobile-more">${items.map(view=>navButton(view,labels[view])).join('')}</div></section>`).join('')}<div class="more-session">${button('Sign out','logout')}</div></div>`;
+  }
 };
 
 function editor(title,fields,formId,submit='Save') {

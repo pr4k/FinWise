@@ -23,7 +23,7 @@
     </script>
     <link rel="stylesheet" href="/styles.css?v=20261010i" />
     <link rel="stylesheet" href="/design.css?v=20261006a" />
-    <link rel="stylesheet" href="/reference-theme.css?v=20261012c" />
+    <link rel="stylesheet" href="/reference-theme.css?v=20261012f" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
     <script src="/api.js?v=20261006b" defer></script>
     <script src="/view-state.js?v=20261009c" defer></script>
@@ -33,7 +33,7 @@
     <script src="/time.js?v=20261002e" defer></script>
     <script src="/reconciliation.js?v=20261002e" defer></script>
     <script src="/compact-money.js?v=20261010a" defer></script>
-    <script src="/app.js?v=20261012c" defer></script>
+    <script src="/app.js?v=20261012e" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -111,7 +111,9 @@
       <main class="main-area">
         <header class="topbar">
           <button class="mobile-menu icon-button" id="menu-button" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="desktop-nav"><svg><use href="#i-menu"/></svg></button>
+          <a class="mobile-brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>FinWise<span class="brand-dot">.</span></span></a>
           <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Overview</strong></div>
+          <button class="mobile-profile icon-button" type="button" data-view="settings" aria-label="Open settings and profile"><svg><use href="#i-settings"/></svg></button>
           <div class="topbar-actions">
             <div class="scope-segments" role="group" aria-label="Report scope"><button type="button" data-action="analytics-scope" data-scope="personal">Personal</button><button type="button" data-action="analytics-scope" data-scope="family">Family</button><button type="button" data-action="analytics-scope" data-scope="combined">Combined</button></div>
             <label class="month-filter"><span>Month</span><input id="report-month" type="month" aria-label="Report month" required></label>

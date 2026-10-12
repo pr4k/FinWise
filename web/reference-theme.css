@@ -467,3 +467,129 @@ h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
   .plan-item .compact-item-actions .outline-button {flex:1 1 auto}
   .compact-item-end,.compact-item-actions,.access-item .compact-item-actions {padding-left:0}
 }
+
+/* Shared responsive shell and detail layouts used by every live view. */
+.mobile-brand,.mobile-profile {display:none}
+.cell-value {min-width:0}
+.mobile-more-index {display:grid;gap:16px}
+.more-section h2 {margin:0 0 14px;font-size:15px}
+.more-session {display:flex;justify-content:flex-end}
+@media (max-width:760px) {
+  .topbar {display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 12px;height:auto;min-height:0;padding:11px 16px}
+  .topbar .mobile-brand {display:flex;align-items:center;gap:8px;grid-column:1;color:var(--ink);font:750 17px var(--display);letter-spacing:-.5px;text-decoration:none}
+  .topbar .mobile-brand .brand-mark {width:28px;height:28px;font-size:21px}
+  .topbar .breadcrumb {display:flex;grid-column:2;margin:0;justify-content:center;min-width:0}
+  .topbar .breadcrumb span {display:none}
+  .topbar .breadcrumb strong {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+  .topbar .mobile-profile {display:grid;grid-column:3;width:44px;height:44px;color:#4a604c}
+  .topbar-actions {grid-column:1/-1;display:flex;width:100%;gap:10px;margin:0}
+  .scope-segments {min-width:0;flex:1}
+  .scope-segments button {min-height:44px;flex:1;padding:8px 5px}
+  .topbar .month-filter {flex:0 0 auto;width:180px;max-width:45%;min-width:0;min-height:44px;margin:0;padding:2px 8px}
+  .topbar .month-filter input {min-width:0;width:100%;max-width:none;font-size:15px;padding-inline:4px}
+  .topbar-actions:has(.scope-segments[hidden]) .month-filter {width:100%}
+  .bottom-nav .bottom-item,.bottom-nav .bottom-add {min-width:48px;min-height:44px}
+  .bottom-nav .bottom-add {width:48px;height:48px}
+  .content {padding-bottom:calc(100px + env(safe-area-inset-bottom))}
+  .mobile-more-index .more-section {padding:18px}
+  .mobile-more-index .mobile-more {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .mobile-more-index .mobile-more .outline-button {display:flex;align-items:center;justify-content:flex-start;text-align:left;min-width:0;min-height:48px;padding:10px 12px;white-space:normal;background:#f6f9f2}
+  .file-tabs,.finance-tabs,.recurring-tabs,.analytics-page>.tabs {flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;padding-bottom:4px}
+  .file-tabs>*,.finance-tabs>*,.recurring-tabs>*,.analytics-page>.tabs>* {flex:none;min-height:44px}
+  .live-dialog {max-height:100dvh;overflow-y:auto;overscroll-behavior:contain}
+  .live-dialog .dialog-actions {z-index:1}
+  .field input,.field select,.field textarea,.live-table select {font-size:16px}
+}
+@media (max-width:600px) {
+  .table-scroll {overflow-x:visible}
+  .live-table td {min-width:0}
+  .live-table td>.cell-value {flex:1 1 63%;max-width:63%;text-align:right;overflow-wrap:anywhere}
+  .live-table td>.cell-value>* {max-width:100%}
+  .live-table td>.cell-value button,.live-table td>.cell-value select,.live-table td>.cell-value input {max-width:100%;min-width:0;white-space:normal}
+  .live-table td>.cell-value select {width:100%}
+  .live-table td[data-label="Actions"]>.cell-value {display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+  .live-table td[data-label="Actions"]>.cell-value button {min-height:40px}
+  .finance-card-actions button,.finance-history-rows button,.heading-actions button {min-height:44px}
+  .reconcile-lists>* {min-width:0}
+}
+@media (max-width:430px) {
+  .topbar-actions {display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+  .scope-segments {width:100%}
+  .topbar .month-filter {display:flex;justify-self:stretch;justify-content:space-between;width:100%;max-width:none;min-width:0;gap:8px;padding:0 12px}
+  .topbar .month-filter>span {display:inline;font-size:11px}
+  .topbar .month-filter input {flex:1 1 auto;width:0;max-width:none;min-width:0;height:44px;font-size:15px;text-align:right}
+}
+@media (max-width:359px) {
+  .content {padding-left:12px;padding-right:12px}
+  .overview-metrics,.cards,.finance-metrics,.budget-summary-grid,.mobile-more-index .mobile-more {grid-template-columns:minmax(0,1fr)}
+  .topbar {padding-inline:12px}
+  .topbar .month-filter input {width:0;max-width:none}
+}
+@media (max-width:760px) and (max-height:500px) {
+  .topbar {position:static}
+  .bottom-nav {position:sticky;height:auto;min-height:52px}
+  .bottom-nav .bottom-add {margin-top:0}
+}
+
+/* Match the reference transaction feed on tablet and phone. */
+.tx-mobile {display:none}
+@media (max-width:1100px) {
+  .transaction-page .tx-desktop {display:none}
+  .transaction-page .tx-mobile {display:block}
+  .tx-feed {background:#fff;min-width:0}
+  .tx-date-group {padding:7px 15px;background:#f7f9f2;border-top:1px solid #eaf0e2;border-bottom:1px solid #eaf0e2;color:#7e8c70;font-size:10px;font-weight:650}
+  .tx-expand {display:block;margin:0;border-bottom:1px solid #edf1e6}
+  .tx-expand>summary.tx-scan-row {display:flex;align-items:center;gap:10px;min-width:0;min-height:66px;margin:0;padding:11px 15px;list-style:none;cursor:pointer;background:#fff;color:inherit}
+  .tx-expand>summary::-webkit-details-marker {display:none}
+  .tx-expand>summary:hover {background:#f8fbf3}
+  .tx-expand[open]>summary {background:#f5f9ee}
+  .tx-scan-icon {display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:8px;background:#f0f1e8;color:#8b9777}
+  .tx-scan-icon .icon {width:16px;height:16px}
+  .tx-scan-row.income .tx-scan-icon,.tx-scan-row.refund .tx-scan-icon {background:#e9f3dd;color:#78a050}
+  .tx-scan-row.transfer .tx-scan-icon {background:#efedf7;color:#8e85ac}
+  .tx-scan-content {display:block;flex:1;min-width:0}
+  .tx-scan-primary {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:12px;line-height:1.45}
+  .tx-scan-primary>strong {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#31442b;font-size:13px;font-weight:600}
+  .tx-scan-amount {white-space:nowrap;text-align:right;color:#33442d;font-size:14px;font-weight:650;font-variant-numeric:tabular-nums}
+  .tx-scan-row.income .tx-scan-amount,.tx-scan-row.refund .tx-scan-amount {color:#4b7c32}
+  .tx-scan-row.transfer .tx-scan-amount {color:#837596}
+  .tx-scan-secondary {display:block;min-width:0;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7d8d6e;font-size:11px;line-height:1.5}
+  .tx-scan-context {display:flex;align-items:center;justify-content:space-between;gap:9px;min-width:0;margin-top:3px;color:#93a182;font-size:10px;line-height:1.4}
+  .tx-scan-context>span:first-child {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tx-review {flex:none;font-size:9px;color:#7b9861}
+  .tx-review.unresolved {color:#a38b4e}
+  .tx-review::before {content:'';display:inline-block;width:4px;height:4px;margin-right:4px;border-radius:50%;background:currentColor;vertical-align:middle}
+  .tx-expand-chevron {flex:none;width:13px;color:#93a17f;font-size:17px;line-height:1;transition:transform .15s}
+  .tx-expand[open] .tx-expand-chevron {transform:rotate(180deg)}
+  .tx-quick-breakdown {min-width:0;padding:15px 17px 16px;border-top:1px solid #e7eedb;background:#fafcf6}
+  .tx-expanded-description {margin:0 0 12px;color:#50693e;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+  .tx-quick-facts {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
+  .tx-quick-facts span {display:block;color:#8c9b79;font-size:10px}
+  .tx-quick-facts b {display:block;margin-top:3px;color:#5a7149;font-size:12px;overflow-wrap:anywhere}
+  .tx-quick-section {padding:10px 0;border-top:1px solid #e7eddc}
+  .tx-quick-label {display:block;margin-bottom:6px;color:#7a8f65;font-size:10px;font-weight:650}
+  .tx-quick-line {display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:3px 0;color:#657c53;font-size:12px;line-height:1.6}
+  .tx-quick-line>span {min-width:0;overflow-wrap:anywhere}
+  .tx-quick-line b {flex:none;text-align:right;color:#5b7449;font-size:12px}
+  .tx-quick-line small {display:block;color:#94a280;font-size:10px;font-weight:400}
+  .tx-quick-note {margin:5px 0;color:#889a72;font-size:10px;line-height:1.75;overflow-wrap:anywhere}
+  .tx-quick-footer {display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:12px;border-top:1px solid #e7eddc;color:#8a9a76;font-size:10px}
+  .tx-quick-footer small {display:block;margin-top:5px;font-size:10px}
+  .tx-quick-footer button {flex:none;min-height:38px}
+}
+@media (max-width:760px) {
+  .tx-date-group {padding:6px 12px}
+  .tx-expand>summary.tx-scan-row {gap:9px;padding:10px 12px}
+  .tx-scan-icon {width:26px;height:26px;border-radius:7px}
+  .tx-scan-icon .icon {width:14px;height:14px}
+  .tx-scan-primary {gap:8px}
+  .tx-scan-amount {font-size:13px}
+  .tx-quick-breakdown {padding:14px}
+  .tx-quick-footer button {min-height:44px}
+}
+@media (max-width:359px) {
+  .tx-scan-context {display:block}
+  .tx-review {display:block;margin-top:2px}
+  .tx-quick-facts {grid-template-columns:1fr}
+  .tx-quick-footer {align-items:stretch;flex-direction:column}
+}
