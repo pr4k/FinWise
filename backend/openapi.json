@@ -11162,6 +11162,27 @@
               "month"
             ]
           },
+          "daily_spending": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "spent": {
+                  "type": "string",
+                  "pattern": "^-?\\d+(\\.\\d+)?$",
+                  "description": "Exact decimal money; never a JSON number."
+                }
+              },
+              "required": [
+                "date",
+                "spent"
+              ]
+            }
+          },
           "categories": {
             "type": "object",
             "properties": {
@@ -11225,6 +11246,7 @@
           "timezone",
           "scope",
           "summary",
+          "daily_spending",
           "categories"
         ]
       },

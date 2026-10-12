@@ -1605,6 +1605,12 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
         assert_eq!(all.1["summary"][period]["spent"],"22.00");
         assert_eq!(all.1["summary"][period]["transaction_count"],2);
     }
+    let daily = all.1["daily_spending"].as_array().unwrap();
+    assert_eq!(daily.len(), 7);
+    assert_eq!(daily[0]["date"], (local.date_naive() - chrono::Duration::days(6)).to_string());
+    assert_eq!(daily[6]["date"], local.date_naive().to_string());
+    assert_eq!(daily[6]["spent"], "22.00");
+    assert!(daily[..6].iter().all(|day| day["spent"] == "0.00"));
     assert_eq!(all.1["categories"]["total_spent"],"22.00");
     assert_eq!(all.1["categories"]["items"][0]["id"],food["id"]);
     assert_eq!(all.1["categories"]["items"][0]["amount"],"15.00");
@@ -1614,6 +1620,7 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
     let filtered=anonymous.call("GET",&format!("widgets/spending?scope=family&account_id={}&include_children=false&category_limit=1",cash["id"].as_str().unwrap()),json!({}),None,None).await;
     assert_eq!(filtered.0,StatusCode::OK,"{}",filtered.1);
     assert_eq!(filtered.1["summary"]["month"]["spent"],"15.00");
+    assert_eq!(filtered.1["daily_spending"][6]["spent"],"15.00");
     assert_eq!(filtered.1["categories"]["items"][0]["id"],lunch["id"]);
     assert_eq!(filtered.1["categories"]["other_amount"],"0.00");
     assert_eq!(anonymous.call("GET","widgets/spending?category_limit=0",json!({}),None,None).await.0,StatusCode::BAD_REQUEST);
@@ -1624,6 +1631,7 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
     private_expense["allocations"][0]["scope"]=json!("personal");
     owner.create("transactions",private_expense).await;
     assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["summary"]["month"]["spent"],"4.00");
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["daily_spending"][6]["spent"],"4.00");
     assert_eq!(anonymous.call("GET","widgets/spending?scope=combined",json!({}),None,None).await.1["summary"]["month"]["spent"],"26.00");
     let disabled=owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(2)).await;
     assert_eq!(disabled.0,StatusCode::OK,"{}",disabled.1);
@@ -1639,6 +1647,45 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
     assert_eq!(family_off.0,StatusCode::OK,"{}",family_off.1);
     assert_eq!(anonymous.call("GET","widgets/spending?scope=family",json!({}),None,None).await.0,StatusCode::FORBIDDEN);
     assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.0,StatusCode::OK);
+}
+
+#[tokio::test]
+async fn widget_daily_spending_covers_seven_calendar_days_with_refunds_and_zeroes() {
+    let (owner, _) = setup().await;
+    let cash = owner.account("Daily cash", "cash").await;
+    let bank = owner.account("Daily bank", "bank").await;
+    let food = owner.category("Daily food", "expense").await;
+    let me = owner.call("GET", "me", json!({}), None, None).await.1;
+    let enabled = owner.call("PATCH", "settings/widgets", json!({
+        "enabled": true, "user_id": me["user"]["id"]
+    }), None, Some(0)).await;
+    assert_eq!(enabled.0, StatusCode::OK, "{}", enabled.1);
+    let local = chrono::Utc::now().with_timezone(&chrono_tz::Asia::Kolkata);
+    for (offset, kind, amount, account) in [
+        (6, "expense", "20.00", &cash),
+        (6, "refund", "5.00", &cash),
+        (6, "expense", "7.00", &bank),
+        (7, "expense", "99.00", &cash),
+    ] {
+        let at = local - chrono::Duration::days(offset);
+        let mut entry = transaction(kind, amount, account, &food, "personal");
+        entry["effective_date"] = json!(at.date_naive().to_string());
+        entry["effective_at"] = json!(at.to_rfc3339());
+        owner.create("transactions", entry).await;
+    }
+    let anonymous = Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() };
+    let response = anonymous.call("GET", "widgets/spending", json!({}), None, None).await;
+    assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    let days = response.1["daily_spending"].as_array().unwrap();
+    assert_eq!(days.len(), 7);
+    for (index, day) in days.iter().enumerate() {
+        assert_eq!(day["date"], (local.date_naive() - chrono::Duration::days(6 - index as i64)).to_string());
+        assert_eq!(day["spent"], if index == 0 { "22.00" } else { "0.00" });
+    }
+    let filtered = anonymous.call("GET", &format!("widgets/spending?account_id={}", cash["id"].as_str().unwrap()), json!({}), None, None).await;
+    assert_eq!(filtered.0, StatusCode::OK, "{}", filtered.1);
+    assert_eq!(filtered.1["daily_spending"][0]["spent"], "15.00");
+    assert_eq!(filtered.1["daily_spending"][6]["spent"], filtered.1["summary"]["today"]["spent"]);
 }
 
 #[tokio::test]
