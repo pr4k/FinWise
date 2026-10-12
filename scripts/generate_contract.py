@@ -273,7 +273,8 @@ schemas["SettlementInput"] = obj({"person":S,"direction":enum("owed_to_me","i_ow
 schemas["SplitInput"] = obj({"description":S,"date":D,"currency":S,"total":M,"my_share":M,"paid_by":S,"transaction_id":S,"shares":arr(obj({"person":S,"amount":M},("person","amount")))},("description","date","currency","total","my_share","shares"))
 schemas["RepaymentInput"] = obj({"amount":M,"date":D,"note":S,"expected_revision":I},("amount","date"))
 schemas["SipSchedule"] = obj({"amount":M,"day":{"type":"integer","minimum":1,"maximum":31},"start_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"end_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"status":enum("active","paused")},("amount","day","start_month","status"))
-schemas["InvestmentInput"] = obj({"name":S,"type":enum("investment","emergency_fund"),"currency":S,"target":M,"monthly_goal":M,"notes":S,"visibility":enum("private","shared"),"sip":{"oneOf":[ref("SipSchedule"),{"type":"null"}]}},("name","type","currency"))
+schemas["InitialInvestmentRecord"] = obj({"month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"principal":M,"current_value":M},("month","principal","current_value"))
+schemas["InvestmentInput"] = obj({"name":S,"type":enum("investment","emergency_fund"),"currency":S,"target":M,"monthly_goal":M,"notes":S,"visibility":enum("private","shared"),"sip":{"oneOf":[ref("SipSchedule"),{"type":"null"}]},"initial_record":ref("InitialInvestmentRecord")},("name","type","currency"))
 schemas["InvestmentMonthInput"] = obj({"contribution":M,"withdrawal":M,"value":M,"expected_revision":I},("contribution","withdrawal","value"))
 for path, method, request, revision, params in [
     ("/settle-ups","get",None,False,["status","cursor","limit"]),

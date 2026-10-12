@@ -415,6 +415,7 @@ pub async fn route(
                     "notes",
                     "visibility",
                     "sip",
+                    "initial_record",
                 ],
             )?;
             domain::choice(body, "type", &["investment", "emergency_fund"])?;
@@ -439,11 +440,25 @@ pub async fn route(
                 }
                 validate_sip(sip, currency)?;
             }
+            let initial_record = if let Some(record) = body.get("initial_record") {
+                let fields = record.as_object().ok_or_else(|| ApiError::invalid("Initial valuation must be an object."))?;
+                if fields.keys().any(|key| !["month", "principal", "current_value"].contains(&key.as_str())) {
+                    return Err(ApiError::invalid("Unknown initial valuation field."));
+                }
+                let record_month = text(record, "month")?;
+                month(record_month)?;
+                positive(record, "principal", currency)?;
+                nonnegative(record, "current_value", currency)?;
+                Some(json!({"month":record_month,"contribution":record["principal"],"withdrawal":"0","value":record["current_value"]}))
+            } else {
+                None
+            };
             let mut v = body.clone();
+            v.as_object_mut().ok_or_else(|| ApiError::invalid("Investment must be an object."))?.remove("initial_record");
             if v.get("visibility").is_none() {
                 v["visibility"] = json!("private");
             }
-            v["records"] = json!([]);
+            v["records"] = json!(initial_record.into_iter().collect::<Vec<_>>());
             let mut v = storage::create(db, p, "investments", v).await?;
             decorate_investment(&mut v)?;
             Ok((StatusCode::CREATED, v))

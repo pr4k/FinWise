@@ -18,6 +18,8 @@
 
 An investment may also have one `sip` schedule on create or PATCH: `{amount, day, start_month, end_month?, status}`. Amount is a positive decimal string in the holding currency, day is 1–31, months use `YYYY-MM`, and status is `active` or `paused`. PATCH with `sip: null` removes it. The planned day falls on the last day in shorter months. A SIP is a planning schedule; it does not create monthly contributions, valuations, or ledger transactions.
 
+`POST /investments` may include `initial_record: {month, principal, current_value}` to save the first monthly valuation atomically with the holding. Principal is a positive cost basis, current value is nonnegative, and both are exact decimal strings. The stored month has that principal as its contribution and zero withdrawal; the initial gain or loss is current value minus principal. Use the actual opening month because this principal also counts as an addition in that month's reports. Later changes use the monthly record endpoint.
+
 `DELETE /investments/{id}/months/{month}` removes one monthly record and recalculates later net additions and value change; it rejects a deletion that would leave withdrawals greater than contributions. `DELETE /investments/{id}` hides the holding and its monthly records from active views and analytics. Both require the current investment revision, retain audit history, and leave ledger transactions unchanged.
 
 Budgets accept an optional `savings_goal` alongside expected income and category limits. The browser compares expected income, limits, savings goal, recorded income, actual category spending, and unbudgeted spending. These planning records do not create bank/cash transactions or automatically move funds.

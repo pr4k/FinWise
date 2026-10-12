@@ -565,6 +565,25 @@ async fn investment_sip_schedule_is_validated_and_does_not_record_contributions(
 }
 
 #[tokio::test]
+async fn investment_initial_principal_and_value_calculate_gain_or_loss() {
+    let (client, _) = setup().await;
+    let created = client.create("investments", json!({"name":"Index fund","type":"investment","currency":"INR","sip":{"amount":"500.00","day":5,"start_month":"2026-10","status":"active"},"initial_record":{"month":"2026-09","principal":"10000.00","current_value":"11250.00"}})).await;
+    assert_eq!(created["net_contributions"], "10000.00");
+    assert_eq!(created["current_value"], "11250.00");
+    assert_eq!(created["gain_loss"], "1250.00");
+    assert_eq!(created["records"][0]["month"], "2026-09");
+    assert!(created.get("initial_record").is_none());
+    let fetched = client.call("GET", &format!("investments/{}", created["id"].as_str().unwrap()), json!({}), None, None).await;
+    assert_eq!(fetched.1["gain_loss"], "1250.00");
+
+    let loss = client.create("investments", json!({"name":"Loss holding","type":"investment","currency":"INR","initial_record":{"month":"2026-10","principal":"500.00","current_value":"450.00"}})).await;
+    assert_eq!(loss["gain_loss"], "-50.00");
+
+    let invalid = client.call("POST", "investments", json!({"name":"Invalid","type":"investment","currency":"INR","initial_record":{"month":"2026-10","principal":"0","current_value":"100.00"}}), Some("invalid-initial-value"), None).await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn split_paid_by_another_person_records_only_my_payable() {
     let (client, _) = setup().await;
     let split=client.create("settle-ups/splits",json!({"description":"Trip","date":"2026-10-08","currency":"INR","total":"1200.00","my_share":"400.00","paid_by":"Alex","shares":[{"person":"Alex","amount":"500.00"},{"person":"Sam","amount":"300.00"}]})).await;

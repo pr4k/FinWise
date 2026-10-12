@@ -217,6 +217,16 @@ body{background:#f6f7fb}
 .analytics-planning h4{margin:16px 0 8px;font-size:12px}
 .analytics-planning .planning-actions{display:flex;justify-content:flex-end;margin-top:16px}
 .analytics-planning .live-table small{display:block;margin-top:4px;color:#758092;font-size:11px}
+.investment-insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:14px 0 18px}
+.investment-insight-card{min-width:0;padding:16px;border:1px solid #dce7f0;border-radius:13px;background:linear-gradient(145deg,#f7fbff,#fff)}
+.investment-insight-head span{color:#627b93;font-size:10px;font-weight:750;letter-spacing:.06em;text-transform:uppercase}
+.investment-insight-head h3{margin:5px 0 13px;font-size:15px;color:#20334b;overflow-wrap:anywhere}
+.investment-insight-values{display:grid;gap:8px}.investment-insight-values div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-top:1px solid #e8eef4;padding-top:8px}
+.investment-insight-values span,.investment-insight-card>small{color:#728195;font-size:11px}.investment-insight-values strong{color:#263d55;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.investment-insight-values strong.positive{color:#17684f}.investment-insight-values strong.negative{color:#a33f48}.investment-insight-card>small{display:block;margin-top:13px}
+.overview-investments{margin:18px 0}.overview-investments .budget-summary-grid{margin:16px 0 0;grid-template-columns:repeat(4,minmax(0,1fr))}.overview-investments .helper{margin:10px 0 0}
+@media(max-width:800px){.overview-investments .budget-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:380px){.overview-investments .budget-summary-grid{grid-template-columns:1fr}}
 
 /* Investment and settle-up workspaces. */
 .household-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:8px 0 20px}
