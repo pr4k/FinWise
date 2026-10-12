@@ -198,6 +198,7 @@ async fn calculate(
         .map_err(|_| ApiError::invalid("Invalid household timezone."))?;
     let local = now.with_timezone(&tz);
     let today = local.date_naive();
+    let seven_start = today - Duration::days(6);
     let (monday, sunday, month_start, month_end) = period_bounds(today)?;
     let categories = storage::list(db, p, "categories").await?;
     let by_id: HashMap<String, Value> = categories
@@ -210,8 +211,9 @@ async fn calculate(
     let mut today_count = 0_u64;
     let mut week_count = 0_u64;
     let mut month_count = 0_u64;
+    let mut daily_amounts = [0_i64; 7];
     let mut grouped: HashMap<String, i64> = HashMap::new();
-    let from = std::cmp::min(monday, month_start).to_string();
+    let from = std::cmp::min(std::cmp::min(monday, month_start), seven_start).to_string();
     let to = (today + Duration::days(1)).to_string();
     for tx in storage::transactions_in_period(db, p, &from, &to, false).await? {
         if tx["voided"] == true
@@ -264,6 +266,10 @@ async fn calculate(
         if !any {
             continue;
         }
+        if date >= seven_start && date <= today {
+            let day = (date - seven_start).num_days() as usize;
+            daily_amounts[day] = add(daily_amounts[day], eligible)?;
+        }
         if date == today {
             today_amount = add(today_amount, eligible)?;
             if sign > 0 {
@@ -311,6 +317,16 @@ async fn calculate(
     let other = month_amount
         .checked_sub(selected)
         .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+    let daily_spending = daily_amounts
+        .into_iter()
+        .enumerate()
+        .map(|(day, amount)| {
+            Ok(json!({
+                "date": (seven_start + Duration::days(day as i64)).to_string(),
+                "spent": format_money(amount, currency)?
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok((
         StatusCode::OK,
         json!({
@@ -320,6 +336,7 @@ async fn calculate(
                 "week":{"start_date":monday.to_string(),"end_date":sunday.to_string(),"spent":format_money(week_amount,currency)?,"transaction_count":week_count},
                 "month":{"start_date":month_start.to_string(),"end_date":month_end.to_string(),"spent":format_money(month_amount,currency)?,"transaction_count":month_count}
             },
+            "daily_spending":daily_spending,
             "categories":{"period":"month","total_spent":format_money(month_amount,currency)?,"items":items,"other_amount":format_money(other,currency)?}
         }),
     ))

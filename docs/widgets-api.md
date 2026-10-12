@@ -46,6 +46,15 @@ HTTP 200 returns this shape (amounts shown are illustrative):
     "week": {"start_date": "2026-10-12", "end_date": "2026-10-18", "spent": "1850.00", "transaction_count": 4},
     "month": {"start_date": "2026-10-01", "end_date": "2026-10-31", "spent": "42850.00", "transaction_count": 72}
   },
+  "daily_spending": [
+    {"date": "2026-10-06", "spent": "1200.00"},
+    {"date": "2026-10-07", "spent": "3400.00"},
+    {"date": "2026-10-08", "spent": "800.00"},
+    {"date": "2026-10-09", "spent": "2500.00"},
+    {"date": "2026-10-10", "spent": "1100.00"},
+    {"date": "2026-10-11", "spent": "750.00"},
+    {"date": "2026-10-12", "spent": "1850.00"}
+  ],
   "categories": {
     "period": "month",
     "total_spent": "42850.00",
@@ -63,7 +72,8 @@ HTTP 200 returns this shape (amounts shown are illustrative):
 
 - Time windows use the household timezone. Today starts at local midnight, this week starts Monday at local midnight and ends Sunday, and this month starts on the first and ends on its last calendar day. Spending includes entries through the current instant only. `generated_at` uses the household offset.
 - Amounts use exact decimal strings in the household base currency. FinWise has no exchange-rate conversion; transactions in other currencies are excluded, as in its existing currency-filtered analytics.
-- The default Personal scope includes the configured member's Personal allocations. When the owner enables Family scopes, `scope=family` includes Family allocations and `scope=combined` includes the member's Personal plus Family allocations once. Other members' private allocations are excluded. Family and Combined requests return 403 while the Family scope switch is off. The account filter applies to today, week, month, categories, and counts.
+- The default Personal scope includes the configured member's Personal allocations. When the owner enables Family scopes, `scope=family` includes Family allocations and `scope=combined` includes the member's Personal plus Family allocations once. Other members' private allocations are excluded. Family and Combined requests return 403 while the Family scope switch is off. The account filter applies to today, week, month, daily spending, categories, and counts.
+- `daily_spending` contains the last seven household calendar dates, including today, sorted oldest to newest. Days without eligible spending are returned as `"0.00"`. Each amount uses the same expense, refund, scope, account, currency, and time filters as the summary.
 - Expense allocations add spending; eligible refunds subtract it. `transaction_count` counts expense transactions with at least one included allocation, excluding refunds. One transaction counts once even with several allocations.
 - Transfers, income, voided transactions, balance checks, and card settlements recorded as transfers are excluded. Allocations under a category named `Credit card settlement` or `Card settlement` are also excluded. Date-only transactions use FinWise's existing 10:00 AM assumed time in the household timezone.
 - Categories use net monthly amounts, sorted by amount descending. `other_amount` is the net remainder after the displayed categories. Percentages are rounded to two decimal places; money calculations never use floating-point arithmetic.
