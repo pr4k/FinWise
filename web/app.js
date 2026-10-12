@@ -777,7 +777,7 @@ const views = {
     if(state.me.membership.role==='owner') {
       const widgets=await api.request('settings/widgets');
       const widgetUser=widgets.members.some(m=>m.id===widgets.user_id)?widgets.user_id:state.me.user.id;
-      widgetPanel=panel('Widget analytics API',`<form id="widget-settings-form">${field('Show spending visible to',`<select name="user_id">${widgets.members.map(m=>option(m.id,`${m.name} · ${m.email}`,m.id===widgetUser)).join('')}</select>`)}<label class="confirm-line"><input type="checkbox" name="enabled" ${widgets.enabled?'checked':''}> Enable unauthenticated widget analytics</label><p class="helper">Read-only spending data is available to anyone who can reach this URL. Keep it on your trusted LAN or private VPN, never a public proxy or tunnel. Responses may be cached for five minutes.</p><p class="helper">Widget URL: <code>${h(location.origin)}/api/v1/widgets/spending</code></p><button type="submit" class="primary-button">Save widget settings</button></form>`);
+      widgetPanel=panel('Widget analytics API',`<form id="widget-settings-form">${field('Show spending visible to',`<select name="user_id">${widgets.members.map(m=>option(m.id,`${m.name} · ${m.email}`,m.id===widgetUser)).join('')}</select>`)}<label class="confirm-line"><input type="checkbox" name="enabled" ${widgets.enabled?'checked':''}> Enable unauthenticated widget analytics</label><label class="confirm-line"><input type="checkbox" name="family_enabled" ${widgets.family_enabled?'checked':''}> Allow Family and Combined spending scopes</label><p class="helper">The default URL shows Personal spending. Add <code>?scope=family</code> for Family spending, or <code>?scope=combined</code> for both, after allowing Family scopes. Anyone who can reach this URL can read the enabled data. Keep it on your trusted LAN or private VPN, never a public proxy or tunnel. Responses may be cached for five minutes.</p><p class="helper">Widget URL: <code>${h(location.origin)}/api/v1/widgets/spending</code></p><button type="submit" class="primary-button">Save widget settings</button></form>`);
       state.widgetSettingsRevision=widgets.revision;
       const initial=await api.request('settings/quick-expense');
       const selected=state.quickSettingsUser||(initial.members.some(m=>m.id===initial.user_id)?initial.user_id:state.me.user.id);
@@ -1381,7 +1381,7 @@ document.addEventListener('submit',async event=>{
     if(form.id==='widget-settings-form') {
       const enabled=form.elements.enabled.checked;
       if(enabled && !window.confirm('Enable unauthenticated read access to spending data for devices on your trusted LAN or private VPN?')) return;
-      await api.request('settings/widgets',{method:'PATCH',revision:state.widgetSettingsRevision,body:enabled?{enabled:true,user_id:data.user_id}:{enabled:false}});
+      await api.request('settings/widgets',{method:'PATCH',revision:state.widgetSettingsRevision,body:enabled?{enabled:true,user_id:data.user_id,family_enabled:form.elements.family_enabled.checked}:{enabled:false}});
       notify(enabled?'Widget analytics API enabled.':'Widget analytics API disabled.');await renderRoute();return;
     }
     if(form.id==='family-mode-form') {

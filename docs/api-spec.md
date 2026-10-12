@@ -6,7 +6,7 @@
 
 ### Opt-in widget analytics
 
-`GET /api/v1/widgets/spending` is an unauthenticated, read-only summary using the configured member's accessible ledger, the household base currency, and timezone. It is disabled by default. The owner manages it through authenticated `GET` and `PATCH /api/v1/settings/widgets`; PATCH requires CSRF and a revision. Successful widget responses permit a five-minute private cache. Keep the widget route on a trusted LAN or private VPN, outside any public proxy or tunnel. See [Widget spending API](widgets-api.md) for filters, response shape, calculation rules, and curl examples.
+`GET /api/v1/widgets/spending` is an unauthenticated, read-only summary using the configured member's accessible ledger, the household base currency, and timezone. It is disabled by default. `scope=personal` is the default; `scope=family` and `scope=combined` are available only after the owner enables Family scopes in Settings. The owner manages it through authenticated `GET` and `PATCH /api/v1/settings/widgets`; PATCH requires CSRF and a revision. Successful widget responses permit a five-minute private cache. Keep the widget route on a trusted LAN or private VPN, outside any public proxy or tunnel. See [Widget spending API](widgets-api.md) for filters, response shape, calculation rules, and curl examples.
 
 ### Settle up, investments, and savings plans
 

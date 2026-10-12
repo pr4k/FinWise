@@ -1566,6 +1566,9 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
     let me=owner.call("GET","me",json!({}),None,None).await.1;
     let enabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"]}),None,Some(0)).await;
     assert_eq!(enabled.0,StatusCode::OK,"{}",enabled.1);
+    assert_eq!(enabled.1["family_enabled"],false);
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=family",json!({}),None,None).await.0,StatusCode::FORBIDDEN);
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=combined",json!({}),None,None).await.0,StatusCode::FORBIDDEN);
     assert_eq!(owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(0)).await.0,StatusCode::CONFLICT);
     assert_eq!(member.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(1)).await.0,StatusCode::FORBIDDEN);
     let now=chrono::Utc::now();
@@ -1589,11 +1592,15 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
     future["effective_at"]=json!(later.to_rfc3339());
     owner.create("transactions",future).await;
     owner.create("transactions",make("income","99.00",&cash,&owner.category("Salary","income").await)).await;
-    let all=anonymous.call("GET","widgets/spending",json!({}),None,None).await;
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["summary"]["month"]["spent"],"0.00");
+    let family_setting=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"],"family_enabled":true}),None,Some(1)).await;
+    assert_eq!(family_setting.0,StatusCode::OK,"{}",family_setting.1);
+    let all=anonymous.call("GET","widgets/spending?scope=family",json!({}),None,None).await;
     assert_eq!(all.0,StatusCode::OK,"{}",all.1);
     assert_eq!(all.2["cache-control"],"private, max-age=300");
     assert_eq!(all.1["currency"],"INR");
     assert_eq!(all.1["timezone"],"Asia/Kolkata");
+    assert_eq!(all.1["scope"],"family");
     for period in ["today","week","month"] {
         assert_eq!(all.1["summary"][period]["spent"],"22.00");
         assert_eq!(all.1["summary"][period]["transaction_count"],2);
@@ -1603,27 +1610,35 @@ async fn unauthenticated_widget_spending_uses_ledger_rules_and_account_filter() 
     assert_eq!(all.1["categories"]["items"][0]["amount"],"15.00");
     assert_eq!(all.1["categories"]["items"][0]["percentage"],68.18);
     assert_eq!(all.1["categories"]["items"][1]["amount"],"7.00");
-    assert_eq!(anonymous.call("GET","widgets/spending?category_limit=1",json!({}),None,None).await.1["categories"]["other_amount"],"7.00");
-    let filtered=anonymous.call("GET",&format!("widgets/spending?account_id={}&include_children=false&category_limit=1",cash["id"].as_str().unwrap()),json!({}),None,None).await;
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=family&category_limit=1",json!({}),None,None).await.1["categories"]["other_amount"],"7.00");
+    let filtered=anonymous.call("GET",&format!("widgets/spending?scope=family&account_id={}&include_children=false&category_limit=1",cash["id"].as_str().unwrap()),json!({}),None,None).await;
     assert_eq!(filtered.0,StatusCode::OK,"{}",filtered.1);
     assert_eq!(filtered.1["summary"]["month"]["spent"],"15.00");
     assert_eq!(filtered.1["categories"]["items"][0]["id"],lunch["id"]);
     assert_eq!(filtered.1["categories"]["other_amount"],"0.00");
     assert_eq!(anonymous.call("GET","widgets/spending?category_limit=0",json!({}),None,None).await.0,StatusCode::BAD_REQUEST);
     assert_eq!(anonymous.call("GET","widgets/spending?account_id=invalid",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
-    let disabled=owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(1)).await;
-    assert_eq!(disabled.0,StatusCode::OK,"{}",disabled.1);
-    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
     let private_account=owner.create("accounts",json!({"name":"Owner private","subtype":"cash","currency":"INR","visibility":"private"})).await;
     let private_category=owner.create("categories",json!({"name":"Private spending","kind":"expense","visibility":"private"})).await;
     let mut private_expense=make("expense","4.00",&private_account,&private_category);
     private_expense["allocations"][0]["scope"]=json!("personal");
     owner.create("transactions",private_expense).await;
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["summary"]["month"]["spent"],"4.00");
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=combined",json!({}),None,None).await.1["summary"]["month"]["spent"],"26.00");
+    let disabled=owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(2)).await;
+    assert_eq!(disabled.0,StatusCode::OK,"{}",disabled.1);
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
     let member_id=member.call("GET","me",json!({}),None,None).await.1["user"]["id"].clone();
-    let reenabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":member_id}),None,Some(2)).await;
+    let reenabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":member_id.clone(),"family_enabled":true}),None,Some(3)).await;
     assert_eq!(reenabled.0,StatusCode::OK,"{}",reenabled.1);
-    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["summary"]["month"]["spent"],"22.00");
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.1["summary"]["month"]["spent"],"0.00");
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=family",json!({}),None,None).await.1["summary"]["month"]["spent"],"22.00");
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=combined",json!({}),None,None).await.1["summary"]["month"]["spent"],"22.00");
     assert_eq!(anonymous.call("GET",&format!("widgets/spending?account_id={}",private_account["id"].as_str().unwrap()),json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+    let family_off=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":member_id,"family_enabled":false}),None,Some(4)).await;
+    assert_eq!(family_off.0,StatusCode::OK,"{}",family_off.1);
+    assert_eq!(anonymous.call("GET","widgets/spending?scope=family",json!({}),None,None).await.0,StatusCode::FORBIDDEN);
+    assert_eq!(anonymous.call("GET","widgets/spending",json!({}),None,None).await.0,StatusCode::OK);
 }
 
 #[tokio::test]

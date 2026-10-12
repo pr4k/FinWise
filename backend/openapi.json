@@ -388,6 +388,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "x-implemented": true,
@@ -11061,6 +11068,14 @@
           "timezone": {
             "type": "string"
           },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "family",
+              "combined"
+            ]
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -11208,6 +11223,7 @@
           "generated_at",
           "currency",
           "timezone",
+          "scope",
           "summary",
           "categories"
         ]
@@ -11223,6 +11239,9 @@
               "string",
               "null"
             ]
+          },
+          "family_enabled": {
+            "type": "boolean"
           },
           "revision": {
             "type": "integer"
@@ -11248,6 +11267,7 @@
         },
         "required": [
           "enabled",
+          "family_enabled",
           "revision"
         ]
       },
@@ -11259,6 +11279,9 @@
           },
           "user_id": {
             "type": "string"
+          },
+          "family_enabled": {
+            "type": "boolean"
           },
           "expected_revision": {
             "type": "integer"

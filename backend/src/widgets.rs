@@ -27,19 +27,20 @@ pub async fn settings(
     if p.role != "owner" {
         return Err(ApiError::forbidden());
     }
-    let row =
-        sqlx::query("SELECT enabled,user_id,revision FROM widget_settings WHERE household_id=?")
-            .bind(&p.household_id)
-            .fetch_optional(&mut *db)
-            .await?;
+    let row = sqlx::query(
+        "SELECT enabled,user_id,revision,family_enabled FROM widget_settings WHERE household_id=?",
+    )
+    .bind(&p.household_id)
+    .fetch_optional(&mut *db)
+    .await?;
     let current = if let Some(row) = row {
-        json!({"enabled":row.get::<bool,_>(0),"user_id":row.get::<Option<String>,_>(1),"revision":row.get::<i64,_>(2)})
+        json!({"enabled":row.get::<bool,_>(0),"user_id":row.get::<Option<String>,_>(1),"revision":row.get::<i64,_>(2),"family_enabled":row.get::<bool,_>(3)})
     } else {
-        json!({"enabled":false,"user_id":null,"revision":0})
+        json!({"enabled":false,"user_id":null,"revision":0,"family_enabled":false})
     };
     if method == "PATCH" {
         api::allowed_query(query, &[])?;
-        api::allowed_body(body, &["enabled", "user_id"])?;
+        api::allowed_body(body, &["enabled", "user_id", "family_enabled"])?;
         api::revision(headers, body, &current)?;
         let enabled = body["enabled"]
             .as_bool()
@@ -52,7 +53,7 @@ pub async fn settings(
                 .bind(&p.household_id)
                 .execute(&mut *db)
                 .await?;
-                let saved = json!({"enabled":false,"user_id":current["user_id"],"revision":current["revision"].as_i64().unwrap_or(0)+1});
+                let saved = json!({"enabled":false,"user_id":current["user_id"],"family_enabled":current["family_enabled"],"revision":current["revision"].as_i64().unwrap_or(0)+1});
                 storage::audit(
                     db,
                     p,
@@ -67,6 +68,11 @@ pub async fn settings(
             return Ok((StatusCode::OK, current));
         }
         let user_id = text(body, "user_id")?;
+        let family_enabled = match body.get("family_enabled") {
+            None => current["family_enabled"].as_bool().unwrap_or(false),
+            Some(Value::Bool(value)) => *value,
+            _ => return Err(ApiError::invalid("family_enabled must be a boolean.")),
+        };
         member(db, &p.household_id, user_id).await?;
         let other: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM widget_settings WHERE enabled=1 AND household_id<>?",
@@ -80,9 +86,9 @@ pub async fn settings(
             ));
         }
         let revision = current["revision"].as_i64().unwrap_or(0) + 1;
-        sqlx::query("INSERT INTO widget_settings(household_id,enabled,user_id,revision) VALUES(?,1,?,?) ON CONFLICT(household_id) DO UPDATE SET enabled=1,user_id=excluded.user_id,revision=excluded.revision")
-            .bind(&p.household_id).bind(user_id).bind(revision).execute(&mut *db).await?;
-        let saved = json!({"enabled":true,"user_id":user_id,"revision":revision});
+        sqlx::query("INSERT INTO widget_settings(household_id,enabled,user_id,revision,family_enabled) VALUES(?,1,?,?,?) ON CONFLICT(household_id) DO UPDATE SET enabled=1,user_id=excluded.user_id,revision=excluded.revision,family_enabled=excluded.family_enabled")
+            .bind(&p.household_id).bind(user_id).bind(revision).bind(family_enabled).execute(&mut *db).await?;
+        let saved = json!({"enabled":true,"user_id":user_id,"family_enabled":family_enabled,"revision":revision});
         storage::audit(
             db,
             p,
@@ -100,7 +106,7 @@ pub async fn settings(
         .map(|r|json!({"id":r.get::<&str,_>(0),"name":r.get::<&str,_>(1),"email":r.get::<&str,_>(2)})).collect::<Vec<_>>();
     Ok((
         StatusCode::OK,
-        json!({"enabled":current["enabled"],"user_id":current["user_id"],"revision":current["revision"],"members":members}),
+        json!({"enabled":current["enabled"],"user_id":current["user_id"],"family_enabled":current["family_enabled"],"revision":current["revision"],"members":members}),
     ))
 }
 
@@ -124,12 +130,15 @@ async fn member(db: &mut SqliteConnection, household: &str, user: &str) -> Resul
 
 pub async fn spending(state: &AppState, query: &Query) -> Result<Reply> {
     let mut db = state.pool.acquire().await?;
-    let row = sqlx::query("SELECT household_id,user_id FROM widget_settings WHERE enabled=1")
-        .fetch_optional(&mut *db)
-        .await?
-        .ok_or_else(ApiError::missing)?;
+    let row = sqlx::query(
+        "SELECT household_id,user_id,family_enabled FROM widget_settings WHERE enabled=1",
+    )
+    .fetch_optional(&mut *db)
+    .await?
+    .ok_or_else(ApiError::missing)?;
     let household: String = row.get(0);
     let user: String = row.get(1);
+    let family_enabled: bool = row.get(2);
     let p = member(&mut db, &household, &user).await.map_err(|_| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -137,16 +146,29 @@ pub async fn spending(state: &AppState, query: &Query) -> Result<Reply> {
             "Widget configuration is no longer valid.",
         )
     })?;
-    calculate(&mut db, &p, query, Utc::now()).await
+    calculate(&mut db, &p, query, family_enabled, Utc::now()).await
 }
 
 async fn calculate(
     db: &mut SqliteConnection,
     p: &Principal,
     query: &Query,
+    family_enabled: bool,
     now: DateTime<Utc>,
 ) -> Result<Reply> {
-    api::allowed_query(query, &["account_id", "category_limit", "include_children"])?;
+    api::allowed_query(
+        query,
+        &["account_id", "category_limit", "include_children", "scope"],
+    )?;
+    let scope = query.get("scope").map(String::as_str).unwrap_or("personal");
+    if !["personal", "family", "combined"].contains(&scope) {
+        return Err(ApiError::invalid(
+            "scope must be personal, family, or combined.",
+        ));
+    }
+    if scope != "personal" && !family_enabled {
+        return Err(ApiError::forbidden());
+    }
     let limit = match query.get("category_limit") {
         None => 5,
         Some(value) => value
@@ -214,9 +236,13 @@ async fn calculate(
         let mut eligible = 0_i64;
         let mut any = false;
         for allocation in tx["allocations"].as_array().into_iter().flatten() {
-            if allocation["scope"] != "family"
-                && !(allocation["scope"] == "personal" && tx["entered_by"] == p.user_id)
-            {
+            let personal = allocation["scope"] == "personal" && tx["entered_by"] == p.user_id;
+            let family = allocation["scope"] == "family";
+            if !match scope {
+                "personal" => personal,
+                "family" => family,
+                _ => personal || family,
+            } {
                 continue;
             }
             let category_id = allocation["category_id"]
@@ -288,7 +314,7 @@ async fn calculate(
     Ok((
         StatusCode::OK,
         json!({
-            "success":true,"generated_at":local.to_rfc3339(),"currency":currency,"timezone":timezone,
+            "success":true,"generated_at":local.to_rfc3339(),"currency":currency,"timezone":timezone,"scope":scope,
             "summary":{
                 "today":{"date":today.to_string(),"spent":format_money(today_amount,currency)?,"transaction_count":today_count},
                 "week":{"start_date":monday.to_string(),"end_date":sunday.to_string(),"spent":format_money(week_amount,currency)?,"transaction_count":week_count},
