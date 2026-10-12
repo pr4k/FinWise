@@ -7,6 +7,7 @@ use crate::{
     reconciliation,
 };
 use axum::http::{HeaderMap, StatusCode};
+use chrono::Datelike;
 use serde_json::{Value, json};
 use sqlx::SqliteConnection;
 use std::collections::HashSet;
@@ -95,11 +96,20 @@ fn decorate_obligation(v: &mut Value) -> Result<()> {
 }
 fn decorate_investment(v: &mut Value) -> Result<()> {
     let currency = text(v, "currency")?.to_owned();
-    let mut invested = 0_i64;
-    let mut last_value = None;
+    let opening = if v.get("opening_value").is_some() {
+        month(text(v, "opening_month")?)?;
+        Some(nonnegative(v, "opening_value", &currency)?)
+    } else { None };
+    let mut invested = opening.unwrap_or(0);
+    let mut last_value = opening;
+    let mut valuation_month = v["opening_month"].clone();
+    let mut pending_valuation = false;
     let mut records = v["records"].as_array().cloned().unwrap_or_default();
     records.sort_by(|a, b| a["month"].as_str().cmp(&b["month"].as_str()));
     for record in &mut records {
+        if v["opening_month"].as_str().is_some_and(|start| record["month"].as_str().is_some_and(|record_month| record_month < start)) {
+            return Err(ApiError::invalid("Investment months cannot precede the opening value."));
+        }
         let contribution = nonnegative(record, "contribution", &currency)?;
         let withdrawal = nonnegative(record, "withdrawal", &currency)?;
         invested = add(invested, contribution)?
@@ -108,23 +118,29 @@ fn decorate_investment(v: &mut Value) -> Result<()> {
         if invested < 0 {
             return Err(ApiError::invalid("Withdrawals exceed contributions."));
         }
-        let value = nonnegative(record, "value", &currency)?;
         record["net_contributions"] = json!(format_money(invested, &currency)?);
-        record["gain_loss"] = json!(format_money(
-            value
-                .checked_sub(invested)
-                .ok_or_else(|| ApiError::invalid("Money total is out of range."))?,
-            &currency
-        )?);
-        last_value = Some(value);
+        if record["value"].is_null() {
+            record["gain_loss"] = Value::Null;
+            if contribution != 0 || withdrawal != 0 { pending_valuation = true; }
+        } else {
+            let value = nonnegative(record, "value", &currency)?;
+            record["gain_loss"] = json!(format_money(
+                value.checked_sub(invested).ok_or_else(|| ApiError::invalid("Money total is out of range."))?,
+                &currency
+            )?);
+            last_value = Some(value);
+            valuation_month = record["month"].clone();
+            pending_valuation = false;
+        }
     }
     v["records"] = json!(records);
     v["net_contributions"] = json!(format_money(invested, &currency)?);
+    v["valuation_month"] = valuation_month;
     v["current_value"] = last_value
         .map(|n| format_money(n, &currency))
         .transpose()?
         .map_or(Value::Null, |s| json!(s));
-    v["gain_loss"] = last_value
+    v["gain_loss"] = if pending_valuation { None } else { last_value }
         .map(|n| {
             n.checked_sub(invested)
                 .ok_or_else(|| ApiError::invalid("Money total is out of range."))
@@ -456,6 +472,8 @@ pub async fn route(
                     "visibility",
                     "sip",
                     "initial_record",
+                    "opening_value",
+                    "opening_month",
                 ],
             )?;
             domain::choice(body, "type", &["investment", "emergency_fund"])?;
@@ -479,6 +497,13 @@ pub async fn route(
                     return Err(ApiError::invalid("SIPs are available for investments only."));
                 }
                 validate_sip(sip, currency)?;
+            }
+            if body.get("opening_value").is_some() != body.get("opening_month").is_some() {
+                return Err(ApiError::invalid("Opening value and month must be supplied together."));
+            }
+            if body.get("opening_value").is_some() {
+                nonnegative(body, "opening_value", currency)?;
+                month(text(body, "opening_month")?)?;
             }
             let initial_record = if let Some(record) = body.get("initial_record") {
                 let fields = record.as_object().ok_or_else(|| ApiError::invalid("Initial valuation must be an object."))?;
@@ -505,6 +530,8 @@ pub async fn route(
                 v["visibility"] = json!("private");
             }
             v["records"] = json!(initial_record.into_iter().collect::<Vec<_>>());
+            let mut check = v.clone();
+            decorate_investment(&mut check)?;
             let mut v = storage::create(db, p, "investments", v).await?;
             if v["records"][0]["account_id"].is_string() {
                 let before = v.clone();
@@ -541,7 +568,7 @@ pub async fn route(
         ("PATCH", ["investments", id]) => {
             api::allowed_body(
                 body,
-                &["name", "target", "monthly_goal", "notes", "visibility", "sip"],
+                &["name", "target", "monthly_goal", "notes", "visibility", "sip", "opening_value", "opening_month"],
             )?;
             let before = storage::get(db, p, "investments", id).await?;
             owner(p, &before)?;
@@ -551,7 +578,7 @@ pub async fn route(
             if after.get("visibility").is_none() {
                 after["visibility"] = json!("private");
             }
-            for key in ["name", "target", "monthly_goal", "notes", "visibility", "sip"] {
+            for key in ["name", "target", "monthly_goal", "notes", "visibility", "sip", "opening_value", "opening_month"] {
                 if let Some(v) = body.get(key) {
                     after[key] = v.clone();
                 }
@@ -572,7 +599,63 @@ pub async fn route(
                 }
                 validate_sip(&after["sip"], text(&after, "currency")?)?;
             }
+            if after.get("opening_value").is_some() != after.get("opening_month").is_some() {
+                return Err(ApiError::invalid("Opening value and month must be supplied together."));
+            }
+            let mut check = after.clone();
+            decorate_investment(&mut check)?;
             let mut saved = storage::update(db, p, &before, after, "update").await?;
+            decorate_investment(&mut saved)?;
+            ok(saved)
+        }
+        ("POST", ["investments", id, "sip", record_month, "process"]) => {
+            api::allowed_body(body, &["account_id", "transaction_date", "value"])?;
+            month(record_month)?;
+            let before = storage::get(db, p, "investments", id).await?;
+            owner(p, &before)?;
+            active(&before)?;
+            api::revision(headers, body, &before)?;
+            if before["type"] != "investment" || before["sip"].is_null() {
+                return Err(ApiError::invalid("This holding has no SIP schedule."));
+            }
+            let sip = &before["sip"];
+            validate_sip(sip, text(&before, "currency")?)?;
+            if sip["status"] != "active" || *record_month < text(sip, "start_month")?
+                || sip["end_month"].as_str().is_some_and(|end| *record_month > end) {
+                return Err(ApiError::invalid("The SIP is not active for this month."));
+            }
+            let account_id = text(body, "account_id")?;
+            if !body["value"].is_null() { nonnegative(body, "value", text(&before, "currency")?)?; }
+            let (_, next_month) = api::month_bounds(record_month)?;
+            let last = domain::date(&next_month)?.pred_opt().ok_or_else(|| ApiError::invalid("Invalid SIP month."))?;
+            let due_day = (sip["day"].as_u64().unwrap() as u32).min(last.day());
+            let due_date = format!("{record_month}-{due_day:02}");
+            let transaction_date = body["transaction_date"].as_str().unwrap_or(&due_date);
+            domain::date(transaction_date)?;
+            if !transaction_date.starts_with(record_month) {
+                return Err(ApiError::invalid("SIP transaction date must be in the selected month."));
+            }
+            let mut after = before.clone();
+            let records = after["records"].as_array_mut().ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
+            if let Some(existing) = records.iter().find(|v| v["month"] == *record_month) {
+                if existing["sip_processed"] == true {
+                    return Err(ApiError::conflict("This SIP month has already been processed."));
+                }
+                if nonnegative(existing, "contribution", text(&before, "currency")?)? != 0
+                    || nonnegative(existing, "withdrawal", text(&before, "currency")?)? != 0 {
+                    return Err(ApiError::conflict("This month already has investment activity. Use Add or correct month to review it."));
+                }
+                if existing["value"].is_string() && body["value"].is_null() {
+                    return Err(ApiError::invalid("Enter the updated portfolio value after this SIP."));
+                }
+            }
+            let mut record = json!({"month":record_month,"contribution":sip["amount"],"withdrawal":"0","value":body["value"],"account_id":account_id,"transaction_date":transaction_date,"sip_processed":true});
+            post_investment_movements(db, p, &before, &mut record).await?;
+            if let Some(existing) = records.iter_mut().find(|v| v["month"] == *record_month) { *existing = record; }
+            else { records.push(record); }
+            let mut check = after.clone();
+            decorate_investment(&mut check)?;
+            let mut saved = storage::update(db, p, &before, after, "sip_processed").await?;
             decorate_investment(&mut saved)?;
             ok(saved)
         }
@@ -586,7 +669,7 @@ pub async fn route(
             let currency = text(&before, "currency")?;
             nonnegative(body, "contribution", currency)?;
             nonnegative(body, "withdrawal", currency)?;
-            nonnegative(body, "value", currency)?;
+            if !body["value"].is_null() { nonnegative(body, "value", currency)?; }
             if body.get("account_id").is_some() { text(body, "account_id")?; }
             if body.get("transaction_date").is_some() && body.get("account_id").is_none() {
                 return Err(ApiError::invalid("Choose an account for the investment movement date."));
@@ -597,6 +680,9 @@ pub async fn route(
                 .ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
             let old_record = records.iter().find(|v| v["month"] == *record_month).cloned();
             let mut record = json!({"month":record_month,"contribution":body["contribution"],"withdrawal":body["withdrawal"],"value":body["value"]});
+            if let Some(old) = &old_record {
+                if old["sip_processed"] == true { record["sip_processed"] = json!(true); }
+            }
             if let Some(account) = body.get("account_id") {
                 record["account_id"] = account.clone();
                 record["transaction_date"] = json!(text(body, "transaction_date")?);

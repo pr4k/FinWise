@@ -105,3 +105,15 @@ test('planning analytics uses selected-month valuations and repayments without m
   assert.equal(result.valuedCount,1);
   assert.equal(result.settlementRows.length,2);
 });
+test('opening portfolio value is a baseline and an unvalued SIP is excluded from gain totals',()=>{
+  const view=analytics();
+  const opening={currency:'INR',opening_value:'1000.00',opening_month:'2026-10',records:[]};
+  const before=view.planningSummary([opening],[],'2026-10','INR');
+  assert.equal(before.value,'1000.00');
+  assert.equal(before.gain,'0.00');
+  assert.equal(before.added,'0.00');
+  const pending={...opening,records:[{month:'2026-10',contribution:'100.00',withdrawal:'0',value:null,net_contributions:'1100.00',gain_loss:null}]};
+  const after=view.planningSummary([pending],[],'2026-10','INR');
+  assert.equal(after.added,'100.00');
+  assert.equal(after.valuedCount,0);
+});

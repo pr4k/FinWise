@@ -614,6 +614,70 @@ async fn investment_movements_debit_account_without_becoming_expenses() {
 }
 
 #[tokio::test]
+async fn opening_portfolio_value_is_baseline_and_sip_is_processed_once() {
+    let (client, _) = setup().await;
+    let bank = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"2000.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
+    let holding = client.create("investments", json!({"name":"Existing fund","type":"investment","currency":"INR","opening_value":"1000.00","opening_month":"2026-10","sip":{"amount":"100.00","day":12,"start_month":"2026-10","status":"active"}})).await;
+    assert_eq!(holding["current_value"], "1000.00");
+    assert_eq!(holding["gain_loss"], "0.00");
+    assert_eq!(holding["net_contributions"], "1000.00");
+    let id = holding["id"].as_str().unwrap();
+    let path = format!("investments/{id}/sip/2026-10/process");
+    let processed = client.call("POST", &path, json!({"account_id":bank["id"],"transaction_date":"2026-10-12"}), Some("process-october-sip"), Some(holding["revision"].as_i64().unwrap())).await;
+    assert_eq!(processed.0, StatusCode::OK, "{}", processed.1);
+    assert_eq!(processed.1["records"][0]["contribution"], "100.00");
+    assert_eq!(processed.1["records"][0]["value"], Value::Null);
+    assert_eq!(processed.1["net_contributions"], "1100.00");
+    assert_eq!(processed.1["gain_loss"], Value::Null);
+    let repeat = client.call("POST", &path, json!({"account_id":bank["id"],"transaction_date":"2026-10-12"}), Some("another-process-attempt"), Some(processed.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(repeat.0, StatusCode::CONFLICT);
+    let entries = client.call("GET", "transactions?event_type=investment", json!({}), None, None).await;
+    assert_eq!(entries.1["data"].as_array().unwrap().len(), 1);
+    assert_eq!(entries.1["data"][0]["amount"], "100.00");
+    let balance = client.call("GET", &format!("accounts/{}/balance-at?as_of=2026-10-31T23%3A59%3A00%2B05%3A30", bank["id"].as_str().unwrap()), json!({}), None, None).await;
+    assert_eq!(balance.1["amount"], "1900.00");
+    let summary = client.call("GET", "analytics/summary?from=2026-10-01&to=2026-11-01&scope=personal&currency=INR", json!({}), None, None).await;
+    assert_eq!(summary.1["net_spending"], "0.00");
+    let valued = client.call("PUT", &format!("investments/{id}/months/2026-10"), json!({"contribution":"100.00","withdrawal":"0","value":"1120.00","account_id":bank["id"],"transaction_date":"2026-10-12"}), None, Some(processed.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(valued.0, StatusCode::OK, "{}", valued.1);
+    assert_eq!(valued.1["gain_loss"], "20.00");
+    assert_eq!(valued.1["records"][0]["sip_processed"], true);
+    let entries = client.call("GET", "transactions?event_type=investment", json!({}), None, None).await;
+    assert_eq!(entries.1["data"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn existing_valuation_can_gain_an_opening_baseline_without_an_account_debit() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments", json!({"name":"Old portfolio","type":"investment","currency":"INR"})).await;
+    let id = holding["id"].as_str().unwrap();
+    let valued = client.call("PUT", &format!("investments/{id}/months/2026-10"), json!({"contribution":"0","withdrawal":"0","value":"750.00"}), None, Some(1)).await;
+    assert_eq!(valued.1["gain_loss"], "750.00");
+    let fixed = client.call("PATCH", &format!("investments/{id}"), json!({"opening_value":"750.00","opening_month":"2026-10"}), None, Some(valued.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(fixed.0, StatusCode::OK, "{}", fixed.1);
+    assert_eq!(fixed.1["gain_loss"], "0.00");
+    assert_eq!(fixed.1["current_value"], "750.00");
+    let entries = client.call("GET", "transactions?event_type=investment", json!({}), None, None).await;
+    assert!(entries.1["data"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn processing_sip_after_monthly_valuation_requires_updated_value() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let holding = client.create("investments", json!({"name":"Fund","type":"investment","currency":"INR","opening_value":"1000.00","opening_month":"2026-10","sip":{"amount":"100.00","day":12,"start_month":"2026-10","status":"active"}})).await;
+    let id = holding["id"].as_str().unwrap();
+    let valuation = client.call("PUT", &format!("investments/{id}/months/2026-10"), json!({"contribution":"0","withdrawal":"0","value":"1010.00"}), None, Some(1)).await;
+    assert_eq!(valuation.0, StatusCode::OK, "{}", valuation.1);
+    let path = format!("investments/{id}/sip/2026-10/process");
+    let missing = client.call("POST", &path, json!({"account_id":bank["id"]}), Some("sip-needs-value"), Some(valuation.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(missing.0, StatusCode::BAD_REQUEST);
+    let processed = client.call("POST", &path, json!({"account_id":bank["id"],"value":"1110.00"}), Some("sip-updated-value"), Some(valuation.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(processed.0, StatusCode::OK, "{}", processed.1);
+    assert_eq!(processed.1["gain_loss"], "10.00");
+}
+
+#[tokio::test]
 async fn split_paid_by_another_person_records_only_my_payable() {
     let (client, _) = setup().await;
     let split=client.create("settle-ups/splits",json!({"description":"Trip","date":"2026-10-08","currency":"INR","total":"1200.00","my_share":"400.00","paid_by":"Alex","shares":[{"person":"Alex","amount":"500.00"},{"person":"Sam","amount":"300.00"}]})).await;
