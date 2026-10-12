@@ -1139,7 +1139,7 @@ impl Client {
         } else {
             serde_json::from_slice(&bytes).unwrap()
         };
-        assert_eq!(headers["cache-control"], if path.starts_with("widgets/spending") && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
+        assert_eq!(headers["cache-control"], if (path.starts_with("widgets/spending") || path.starts_with("widgets/accounts")) && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
         assert_eq!(headers["x-request-id"], "integration-test");
         (status, value, headers)
     }
@@ -1587,6 +1587,50 @@ async fn quick_client(
     }), None, Some(settings.1["revision"].as_i64().unwrap())).await;
     assert_eq!(updated.0, StatusCode::OK, "{}", updated.1);
     Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() }
+}
+
+#[tokio::test]
+async fn unauthenticated_widget_accounts_show_accessible_balances_and_latest_activity() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let anonymous = Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() };
+    assert_eq!(anonymous.call("GET", "widgets/accounts", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    let now = chrono::Utc::now().with_timezone(&chrono_tz::Asia::Kolkata);
+    let opening = (now - chrono::Duration::days(5)).to_rfc3339();
+    let bank = owner.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","visibility":"shared","opening_balance":{"amount":"100.00","as_of":opening}})).await;
+    let card = owner.create("accounts", json!({"name":"Card","subtype":"credit_card","currency":"INR","visibility":"shared","opening_balance":{"amount":"20.00","as_of":opening}})).await;
+    let private = owner.create("accounts", json!({"name":"Private","subtype":"cash","currency":"INR","visibility":"private","opening_balance":{"amount":"999.00","as_of":opening}})).await;
+    let unknown = owner.create("accounts", json!({"name":"Unknown","subtype":"cash","currency":"INR","visibility":"shared"})).await;
+    let food = owner.category("Widget food", "expense").await;
+    for (account, amount, offset) in [(&bank, "10.00", 2), (&bank, "5.00", 1), (&card, "3.00", 1)] {
+        let at = now - chrono::Duration::days(offset);
+        let mut tx = transaction("expense", amount, account, &food, "family");
+        tx["effective_at"] = json!(at.to_rfc3339());
+        tx["effective_date"] = json!(at.date_naive().to_string());
+        owner.create("transactions", tx).await;
+    }
+    let member_id = member.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    assert_eq!(owner.call("PATCH", "settings/widgets", json!({"enabled":true,"user_id":member_id.clone()}), None, Some(0)).await.0, StatusCode::OK);
+    assert_eq!(anonymous.call("GET", "widgets/accounts", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(owner.call("PATCH", "settings/widgets", json!({"enabled":true,"user_id":member_id,"accounts_enabled":true}), None, Some(1)).await.0, StatusCode::OK);
+    let result = anonymous.call("GET", "widgets/accounts", json!({}), None, None).await;
+    assert_eq!(result.0, StatusCode::OK, "{}", result.1);
+    assert_eq!(result.1["currency"], "INR");
+    assert_eq!(result.1["success"], true);
+    assert!(result.1["generated_at"].as_str().unwrap().ends_with("+05:30"));
+    let accounts = result.1["accounts"].as_array().unwrap();
+    assert_eq!(accounts.len(), 3);
+    assert!(accounts.iter().all(|account| account["id"] != private["id"]));
+    let find = |id: &Value| accounts.iter().find(|account| account["id"] == *id).unwrap();
+    assert_eq!(find(&bank["id"])["balance"], "85.00");
+    assert_eq!(find(&bank["id"])["last_transaction_date"], (now - chrono::Duration::days(1)).date_naive().to_string());
+    assert_eq!(find(&card["id"])["type"], "credit_card");
+    assert_eq!(find(&card["id"])["balance"], "-23.00");
+    assert_eq!(find(&unknown["id"])["balance"], Value::Null);
+    assert_eq!(find(&unknown["id"])["last_transaction_date"], Value::Null);
+    assert_eq!(anonymous.call("GET", "widgets/accounts?scope=family", json!({}), None, None).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(owner.call("PATCH", "settings/widgets", json!({"enabled":false}), None, Some(2)).await.0, StatusCode::OK);
+    assert_eq!(anonymous.call("GET", "widgets/accounts", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

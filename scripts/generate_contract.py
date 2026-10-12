@@ -53,8 +53,9 @@ schemas["QuickExpenseSettings"] = obj({"enabled": B, "user_id": {"type":["string
 schemas["QuickExpenseSettingsPatch"] = obj({"enabled": B,"user_id": S,"default_account_id": S,"account_ids": arr(S),"expected_revision": I}, ("enabled","user_id","default_account_id","account_ids"))
 widget_period = obj({"start_date": D,"end_date": D,"spent": M,"transaction_count": I}, ("start_date","end_date","spent","transaction_count"))
 schemas["WidgetSpending"] = obj({"success": B,"generated_at": {"type":"string","format":"date-time"},"currency": S,"timezone": S,"scope": enum("personal","family","combined"),"summary": obj({"today": obj({"date": D,"spent": M,"transaction_count": I}, ("date","spent","transaction_count")),"week": widget_period,"month": widget_period}, ("today","week","month")),"daily_spending": arr(obj({"date": D,"spent": M}, ("date","spent"))),"categories": obj({"period": enum("month"),"total_spent": M,"items": arr(obj({"id": S,"label": S,"amount": M,"percentage": {"type":"number"}}, ("id","label","amount","percentage"))),"other_amount": M}, ("period","total_spent","items","other_amount"))}, ("success","generated_at","currency","timezone","scope","summary","daily_spending","categories"))
-schemas["WidgetSettings"] = obj({"enabled": B,"user_id": {"type":["string","null"]},"family_enabled": B,"revision": I,"members": arr(obj({"id": S,"name": S,"email": S}))}, ("enabled","family_enabled","revision"))
-schemas["WidgetSettingsPatch"] = obj({"enabled": B,"user_id": S,"family_enabled": B,"expected_revision": I}, ("enabled",))
+schemas["WidgetAccounts"] = obj({"success": B,"generated_at": {"type":"string","format":"date-time"},"currency": S,"accounts": arr(obj({"id": S,"name": S,"type": enum("bank","credit_card","cash","settle_up"),"balance": {"type":["string","null"],"pattern":M["pattern"]},"last_transaction_date": {"type":["string","null"],"format":"date"}}, ("id","name","type","balance","last_transaction_date")))}, ("success","generated_at","currency","accounts"))
+schemas["WidgetSettings"] = obj({"enabled": B,"user_id": {"type":["string","null"]},"family_enabled": B,"accounts_enabled": B,"revision": I,"members": arr(obj({"id": S,"name": S,"email": S}))}, ("enabled","family_enabled","accounts_enabled","revision"))
+schemas["WidgetSettingsPatch"] = obj({"enabled": B,"user_id": S,"family_enabled": B,"accounts_enabled": B,"expected_revision": I}, ("enabled",))
 schemas["BootstrapInput"] = obj({"owner": ref("Owner"), "household": ref("HouseholdInput")}, ("owner", "household"))
 for name in ["Account", "Category", "Transaction", "Budget"]:
     source = schemas[name + "Input"]
@@ -106,6 +107,7 @@ route("/openapi.json", "get", public=True)
 route("/quick-transactions/options", "get", "QuickExpenseOptions", public=True, parameters=["account_id"])
 route("/quick-transactions", "post", "QuickExpenseResult", "QuickExpenseInput", public=True)
 route("/widgets/spending", "get", "WidgetSpending", public=True, parameters=["account_id","category_limit","include_children","scope"])
+route("/widgets/accounts", "get", "WidgetAccounts", public=True)
 for health in ["live", "ready"]:
     route(f"/health/{health}", "get", public=True)
 for plural, name in [("accounts", "Account"), ("categories", "Category"), ("transactions", "Transaction"), ("budgets", "Budget")]:

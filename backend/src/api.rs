@@ -43,7 +43,8 @@ fn unsupported() -> ApiError {
 
 pub async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
     let widget_request = request.method() == axum::http::Method::GET
-        && request.uri().path().trim_end_matches('/') == "/api/v1/widgets/spending";
+        && ["/api/v1/widgets/spending", "/api/v1/widgets/accounts"]
+            .contains(&request.uri().path().trim_end_matches('/'));
     let request_id = request
         .headers()
         .get("x-request-id")
@@ -126,6 +127,9 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
         .0;
     if method == "GET" && path == "widgets/spending" {
         return widgets::spending(state, &query).await;
+    }
+    if method == "GET" && path == "widgets/accounts" {
+        return widgets::accounts(state, &query).await;
     }
     if let Some(operation) = operation(method, path)
         && operation["x-implemented"] == false

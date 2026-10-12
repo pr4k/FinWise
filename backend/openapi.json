@@ -422,6 +422,36 @@
         }
       }
     },
+    "/widgets/accounts": {
+      "get": {
+        "operationId": "get_widgets_accounts",
+        "security": [],
+        "parameters": [],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetAccounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "get_health_live",
@@ -11250,6 +11280,71 @@
           "categories"
         ]
       },
+      "WidgetAccounts": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "bank",
+                    "credit_card",
+                    "cash",
+                    "settle_up"
+                  ]
+                },
+                "balance": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^-?\\d+(\\.\\d+)?$"
+                },
+                "last_transaction_date": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "type",
+                "balance",
+                "last_transaction_date"
+              ]
+            }
+          }
+        },
+        "required": [
+          "success",
+          "generated_at",
+          "currency",
+          "accounts"
+        ]
+      },
       "WidgetSettings": {
         "type": "object",
         "properties": {
@@ -11263,6 +11358,9 @@
             ]
           },
           "family_enabled": {
+            "type": "boolean"
+          },
+          "accounts_enabled": {
             "type": "boolean"
           },
           "revision": {
@@ -11290,6 +11388,7 @@
         "required": [
           "enabled",
           "family_enabled",
+          "accounts_enabled",
           "revision"
         ]
       },
@@ -11303,6 +11402,9 @@
             "type": "string"
           },
           "family_enabled": {
+            "type": "boolean"
+          },
+          "accounts_enabled": {
             "type": "boolean"
           },
           "expected_revision": {

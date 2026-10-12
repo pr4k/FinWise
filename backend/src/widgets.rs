@@ -28,19 +28,19 @@ pub async fn settings(
         return Err(ApiError::forbidden());
     }
     let row = sqlx::query(
-        "SELECT enabled,user_id,revision,family_enabled FROM widget_settings WHERE household_id=?",
+        "SELECT enabled,user_id,revision,family_enabled,accounts_enabled FROM widget_settings WHERE household_id=?",
     )
     .bind(&p.household_id)
     .fetch_optional(&mut *db)
     .await?;
     let current = if let Some(row) = row {
-        json!({"enabled":row.get::<bool,_>(0),"user_id":row.get::<Option<String>,_>(1),"revision":row.get::<i64,_>(2),"family_enabled":row.get::<bool,_>(3)})
+        json!({"enabled":row.get::<bool,_>(0),"user_id":row.get::<Option<String>,_>(1),"revision":row.get::<i64,_>(2),"family_enabled":row.get::<bool,_>(3),"accounts_enabled":row.get::<bool,_>(4)})
     } else {
-        json!({"enabled":false,"user_id":null,"revision":0,"family_enabled":false})
+        json!({"enabled":false,"user_id":null,"revision":0,"family_enabled":false,"accounts_enabled":false})
     };
     if method == "PATCH" {
         api::allowed_query(query, &[])?;
-        api::allowed_body(body, &["enabled", "user_id", "family_enabled"])?;
+        api::allowed_body(body, &["enabled", "user_id", "family_enabled", "accounts_enabled"])?;
         api::revision(headers, body, &current)?;
         let enabled = body["enabled"]
             .as_bool()
@@ -53,7 +53,7 @@ pub async fn settings(
                 .bind(&p.household_id)
                 .execute(&mut *db)
                 .await?;
-                let saved = json!({"enabled":false,"user_id":current["user_id"],"family_enabled":current["family_enabled"],"revision":current["revision"].as_i64().unwrap_or(0)+1});
+                let saved = json!({"enabled":false,"user_id":current["user_id"],"family_enabled":current["family_enabled"],"accounts_enabled":current["accounts_enabled"],"revision":current["revision"].as_i64().unwrap_or(0)+1});
                 storage::audit(
                     db,
                     p,
@@ -73,6 +73,11 @@ pub async fn settings(
             Some(Value::Bool(value)) => *value,
             _ => return Err(ApiError::invalid("family_enabled must be a boolean.")),
         };
+        let accounts_enabled = match body.get("accounts_enabled") {
+            None => current["accounts_enabled"].as_bool().unwrap_or(false),
+            Some(Value::Bool(value)) => *value,
+            _ => return Err(ApiError::invalid("accounts_enabled must be a boolean.")),
+        };
         member(db, &p.household_id, user_id).await?;
         let other: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM widget_settings WHERE enabled=1 AND household_id<>?",
@@ -86,9 +91,9 @@ pub async fn settings(
             ));
         }
         let revision = current["revision"].as_i64().unwrap_or(0) + 1;
-        sqlx::query("INSERT INTO widget_settings(household_id,enabled,user_id,revision,family_enabled) VALUES(?,1,?,?,?) ON CONFLICT(household_id) DO UPDATE SET enabled=1,user_id=excluded.user_id,revision=excluded.revision,family_enabled=excluded.family_enabled")
-            .bind(&p.household_id).bind(user_id).bind(revision).bind(family_enabled).execute(&mut *db).await?;
-        let saved = json!({"enabled":true,"user_id":user_id,"family_enabled":family_enabled,"revision":revision});
+        sqlx::query("INSERT INTO widget_settings(household_id,enabled,user_id,revision,family_enabled,accounts_enabled) VALUES(?,1,?,?,?,?) ON CONFLICT(household_id) DO UPDATE SET enabled=1,user_id=excluded.user_id,revision=excluded.revision,family_enabled=excluded.family_enabled,accounts_enabled=excluded.accounts_enabled")
+            .bind(&p.household_id).bind(user_id).bind(revision).bind(family_enabled).bind(accounts_enabled).execute(&mut *db).await?;
+        let saved = json!({"enabled":true,"user_id":user_id,"family_enabled":family_enabled,"accounts_enabled":accounts_enabled,"revision":revision});
         storage::audit(
             db,
             p,
@@ -106,7 +111,7 @@ pub async fn settings(
         .map(|r|json!({"id":r.get::<&str,_>(0),"name":r.get::<&str,_>(1),"email":r.get::<&str,_>(2)})).collect::<Vec<_>>();
     Ok((
         StatusCode::OK,
-        json!({"enabled":current["enabled"],"user_id":current["user_id"],"family_enabled":current["family_enabled"],"revision":current["revision"],"members":members}),
+        json!({"enabled":current["enabled"],"user_id":current["user_id"],"family_enabled":current["family_enabled"],"accounts_enabled":current["accounts_enabled"],"revision":current["revision"],"members":members}),
     ))
 }
 
@@ -147,6 +152,102 @@ pub async fn spending(state: &AppState, query: &Query) -> Result<Reply> {
         )
     })?;
     calculate(&mut db, &p, query, family_enabled, Utc::now()).await
+}
+
+pub async fn accounts(state: &AppState, query: &Query) -> Result<Reply> {
+    api::allowed_query(query, &[])?;
+    let mut db = state.pool.acquire().await?;
+    let row = sqlx::query("SELECT household_id,user_id FROM widget_settings WHERE enabled=1 AND accounts_enabled=1")
+        .fetch_optional(&mut *db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let household: String = row.get(0);
+    let user: String = row.get(1);
+    let p = member(&mut db, &household, &user).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "widget_unavailable",
+            "Widget configuration is no longer valid.",
+        )
+    })?;
+    let household_document: String =
+        sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+            .bind(&p.household_id)
+            .fetch_one(&mut *db)
+            .await?;
+    let household_document: Value = serde_json::from_str(&household_document)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+    let currency = text(&household_document, "base_currency")?;
+    let timezone: Tz = text(&household_document, "timezone")?
+        .parse()
+        .map_err(|_| ApiError::invalid("Invalid household timezone."))?;
+    let now = Utc::now();
+    let mut items = Vec::new();
+    for account in storage::list(&mut db, &p, "accounts").await? {
+        if account["active"] == false
+            || account["archived"] == true
+            || account["currency"] != currency
+        {
+            continue;
+        }
+        let account_id = text(&account, "id")?;
+        let account_tz = balances::timezone(&mut db, &p, &account).await?;
+        let rows: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='transactions' AND EXISTS(SELECT 1 FROM json_each(document,'$.movements') WHERE json_extract(value,'$.account_id')=?)")
+            .bind(&p.household_id)
+            .bind(account_id)
+            .fetch_all(&mut *db)
+            .await?;
+        let mut last_date: Option<NaiveDate> = None;
+        for row in rows {
+            let event: Value = serde_json::from_str(&row)
+                .map_err(|_| ApiError::invalid("Invalid stored transaction."))?;
+            if event["voided"] == true {
+                continue;
+            }
+            let at = balances::effective_at(&event, account_tz)?;
+            if at <= now {
+                let date = at.with_timezone(&account_tz).date_naive();
+                last_date = Some(last_date.map_or(date, |previous| previous.max(date)));
+            }
+        }
+        let derived = balances::derived(&mut db, &p, &account, now).await?;
+        // Account balances are assets less liabilities in this compact widget.
+        let balance = derived["amount"]
+            .as_str()
+            .map(|amount| {
+                if account["subtype"] == "credit_card" {
+                    money(amount, currency)
+                        .and_then(|value| {
+                            value
+                                .checked_neg()
+                                .ok_or_else(|| ApiError::invalid("Card balance out of range."))
+                        })
+                        .and_then(|value| format_money(value, currency))
+                } else {
+                    Ok(amount.to_owned())
+                }
+            })
+            .transpose()?;
+        items.push(json!({
+            "id":account_id,
+            "name":text(&account,"name")?,
+            "type":text(&account,"subtype")?,
+            "balance":balance,
+            "last_transaction_date":last_date.map(|date| date.to_string()),
+        }));
+    }
+    items.sort_by(|a, b| {
+        (a["name"].as_str(), a["id"].as_str()).cmp(&(b["name"].as_str(), b["id"].as_str()))
+    });
+    Ok((
+        StatusCode::OK,
+        json!({
+            "success":true,
+            "generated_at":now.with_timezone(&timezone).to_rfc3339(),
+            "currency":currency,
+            "accounts":items,
+        }),
+    ))
 }
 
 async fn calculate(
