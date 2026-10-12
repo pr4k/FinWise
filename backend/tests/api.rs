@@ -584,6 +584,36 @@ async fn investment_initial_principal_and_value_calculate_gain_or_loss() {
 }
 
 #[tokio::test]
+async fn investment_movements_debit_account_without_becoming_expenses() {
+    let (client, _) = setup().await;
+    let account = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let account_id = account["id"].as_str().unwrap();
+    let holding = client.create("investments", json!({"name":"Index fund","type":"investment","currency":"INR","initial_record":{"month":"2026-09","principal":"200.00","current_value":"205.00","account_id":account_id,"transaction_date":"2026-09-15"}})).await;
+    let id = holding["id"].as_str().unwrap();
+    let list = client.call("GET", "transactions?event_type=investment", json!({}), None, None).await;
+    assert_eq!(list.0, StatusCode::OK, "{}", list.1);
+    assert_eq!(list.1["data"][0]["movements"][0]["amount"], "-200.00");
+    assert_eq!(list.1["data"][0]["investment_id"], id);
+    let summary = client.call("GET", "analytics/summary?from=2026-09-01&to=2026-10-01&scope=personal&currency=INR", json!({}), None, None).await;
+    assert_eq!(summary.1["net_spending"], "0.00");
+    let balance = client.call("GET", &format!("accounts/{account_id}/balance-at?as_of=2026-09-30T23%3A59%3A00%2B05%3A30"), json!({}), None, None).await;
+    assert_eq!(balance.1["amount"], "800.00");
+    let corrected = client.call("PUT", &format!("investments/{id}/months/2026-09"), json!({"contribution":"150.00","withdrawal":"0","value":"155.00","account_id":account_id,"transaction_date":"2026-09-15"}), None, Some(holding["revision"].as_i64().unwrap())).await;
+    assert_eq!(corrected.0, StatusCode::OK, "{}", corrected.1);
+    let list = client.call("GET", "transactions?event_type=investment", json!({}), None, None).await;
+    assert_eq!(list.1["data"].as_array().unwrap().len(), 1);
+    assert_eq!(list.1["data"][0]["amount"], "150.00");
+    let withdrawal = client.call("PUT", &format!("investments/{id}/months/2026-10"), json!({"contribution":"0","withdrawal":"50.00","value":"105.00","account_id":account_id,"transaction_date":"2026-10-12"}), None, Some(corrected.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(withdrawal.0, StatusCode::OK, "{}", withdrawal.1);
+    let credits = client.call("GET", "transactions?event_type=investment_withdrawal", json!({}), None, None).await;
+    assert_eq!(credits.1["data"][0]["movements"][0]["amount"], "50.00");
+    let removed = client.call("DELETE", &format!("investments/{id}/months/2026-10"), json!({}), None, Some(withdrawal.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(removed.0, StatusCode::NO_CONTENT);
+    let credits = client.call("GET", "transactions?event_type=investment_withdrawal", json!({}), None, None).await;
+    assert!(credits.1["data"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn split_paid_by_another_person_records_only_my_payable() {
     let (client, _) = setup().await;
     let split=client.create("settle-ups/splits",json!({"description":"Trip","date":"2026-10-08","currency":"INR","total":"1200.00","my_share":"400.00","paid_by":"Alex","shares":[{"person":"Alex","amount":"500.00"},{"person":"Sam","amount":"300.00"}]})).await;

@@ -11799,7 +11799,9 @@
               "expense",
               "income",
               "refund",
-              "transfer"
+              "transfer",
+              "investment",
+              "investment_withdrawal"
             ]
           },
           "amount": {
@@ -11864,6 +11866,12 @@
               "properties": {},
               "required": []
             }
+          },
+          "investment_id": {
+            "type": "string"
+          },
+          "investment_month": {
+            "type": "string"
           },
           "reconciliation_state": {
             "type": "string"
@@ -13532,6 +13540,13 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal money; never a JSON number."
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "transaction_date": {
+            "type": "string",
+            "format": "date"
           }
         },
         "required": [
@@ -13613,6 +13628,13 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal money; never a JSON number."
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "transaction_date": {
+            "type": "string",
+            "format": "date"
           },
           "expected_revision": {
             "type": "integer"

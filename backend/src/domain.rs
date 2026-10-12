@@ -84,7 +84,7 @@ pub fn validate_transaction(v: &Value) -> Result<()> {
     choice(
         v,
         "event_type",
-        &["expense", "income", "refund", "transfer"],
+        &["expense", "income", "refund", "transfer", "investment", "investment_withdrawal"],
     )?;
     let currency = text(v, "currency")?;
     let amount = money(text(v, "amount")?, currency)?;
@@ -133,11 +133,17 @@ pub fn validate_transaction(v: &Value) -> Result<()> {
             ));
         }
     } else {
-        let expected = if kind == "expense" { -amount } else { amount };
+        let expected = if kind == "expense" || kind == "investment" { -amount } else { amount };
         if movements.len() != 1 || money(text(&movements[0], "amount")?, currency)? != expected {
             return Err(ApiError::invalid(
                 "Movement direction or magnitude does not match the event.",
             ));
+        }
+        if kind == "investment" || kind == "investment_withdrawal" {
+            if !allocations.is_empty() || text(v, "investment_id").is_err() {
+                return Err(ApiError::invalid("Investment movements require a holding and no expense allocations."));
+            }
+            return Ok(());
         }
         let mut total = 0;
         for allocation in allocations {

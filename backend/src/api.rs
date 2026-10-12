@@ -886,6 +886,9 @@ pub(crate) async fn route(
                 }
                 "transactions" => {
                     value["voided"] = json!(false);
+                    if ["investment", "investment_withdrawal"].contains(&value["event_type"].as_str().unwrap_or("")) {
+                        return Err(ApiError::invalid("Record investment movements through Investments."));
+                    }
                     value["entered_by"] = json!(p.user_id);
                     if value.get("paid_by_user_id").is_none() && (value["event_type"] == "expense" || value["event_type"] == "refund") {
                         value["paid_by_user_id"] = json!(p.user_id);
@@ -977,6 +980,9 @@ pub(crate) async fn route(
                     if before["voided"] == true {
                         return Err(ApiError::conflict("Voided transactions cannot be edited."));
                     }
+                    if !before["investment_id"].is_null() {
+                        return Err(ApiError::conflict("Edit this movement from its investment month."));
+                    }
                     if after["effective_at"].is_null() {
                         after.as_object_mut().unwrap().remove("effective_at");
                     }
@@ -1017,6 +1023,9 @@ pub(crate) async fn route(
             allowed_body(body, &["reason"])?;
             let before = storage::get(db, p, "transactions", id).await?;
             revision(headers, body, &before)?;
+            if !before["investment_id"].is_null() {
+                return Err(ApiError::conflict("Remove this movement from its investment month."));
+            }
             if before["voided"] == true {
                 return Err(ApiError::conflict("Transaction is already voided."));
             }
@@ -1593,7 +1602,7 @@ fn validate_transaction_query(q: &Query) -> Result<()> {
         return Err(ApiError::invalid("Invalid account_type."));
     }
     if let Some(event_type) = q.get("event_type")
-        && !["expense", "income", "refund", "transfer"].contains(&event_type.as_str())
+        && !["expense", "income", "refund", "transfer", "investment", "investment_withdrawal"].contains(&event_type.as_str())
     {
         return Err(ApiError::invalid("Invalid event_type."));
     }
@@ -1689,7 +1698,7 @@ fn retain_scope(values: &mut Vec<Value>, scope: &str, p: &Principal, category: O
     }
     values.retain(|v| {
         v["allocations"].as_array().is_some_and(|a| !a.is_empty())
-            || (v["event_type"] == "transfer"
+            || (["transfer", "investment", "investment_withdrawal"].contains(&v["event_type"].as_str().unwrap_or(""))
                 && category.is_none()
                 && (scope != "personal" || v["entered_by"] == p.user_id))
     });
@@ -2154,7 +2163,7 @@ async fn analytics_result(
                 std::collections::BTreeMap::new();
             for v in &values {
                 let entry = groups.entry(text(v, "event_type")?.to_owned()).or_default();
-                let scoped_amount = if v["event_type"] == "transfer" {
+                let scoped_amount = if ["transfer", "investment", "investment_withdrawal"].contains(&v["event_type"].as_str().unwrap_or("")) {
                     money(text(v, "amount")?, &currency)?
                 } else {
                     v["allocations"]

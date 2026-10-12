@@ -61,7 +61,7 @@ for name in ["Account", "Category", "Transaction", "Budget"]:
     source = schemas[name + "Input"]
     props = dict(source["properties"], id=S, revision=I, owner_id=S, created_at=S)
     if name == "Transaction":
-        props.update(voided=B, entered_by=S, source_refs=arr(obj({})), reconciliation_state=S, reconciliation_evidence=arr(obj({})), amendment=obj({"id":S,"original_amount":M,"original_date":D,"reason":S,"status":S}), money_manager_synced_at=S, money_manager_manual_edit=obj({"updated_at":S}), reconciliation_created=obj({"action":S,"reason":S}))
+        props.update(event_type=enum("expense", "income", "refund", "transfer", "investment", "investment_withdrawal"), voided=B, entered_by=S, source_refs=arr(obj({})), investment_id=S, investment_month=S, reconciliation_state=S, reconciliation_evidence=arr(obj({})), amendment=obj({"id":S,"original_amount":M,"original_date":D,"reason":S,"status":S}), money_manager_synced_at=S, money_manager_manual_edit=obj({"updated_at":S}), reconciliation_created=obj({"action":S,"reason":S}))
     if name == "Category":
         props.update(archived=B)
     if name == "Budget":
@@ -275,9 +275,9 @@ schemas["SettlementInput"] = obj({"person":S,"direction":enum("owed_to_me","i_ow
 schemas["SplitInput"] = obj({"description":S,"date":D,"currency":S,"total":M,"my_share":M,"paid_by":S,"transaction_id":S,"shares":arr(obj({"person":S,"amount":M},("person","amount")))},("description","date","currency","total","my_share","shares"))
 schemas["RepaymentInput"] = obj({"amount":M,"date":D,"note":S,"expected_revision":I},("amount","date"))
 schemas["SipSchedule"] = obj({"amount":M,"day":{"type":"integer","minimum":1,"maximum":31},"start_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"end_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"status":enum("active","paused")},("amount","day","start_month","status"))
-schemas["InitialInvestmentRecord"] = obj({"month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"principal":M,"current_value":M},("month","principal","current_value"))
+schemas["InitialInvestmentRecord"] = obj({"month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"principal":M,"current_value":M,"account_id":S,"transaction_date":D},("month","principal","current_value"))
 schemas["InvestmentInput"] = obj({"name":S,"type":enum("investment","emergency_fund"),"currency":S,"target":M,"monthly_goal":M,"notes":S,"visibility":enum("private","shared"),"sip":{"oneOf":[ref("SipSchedule"),{"type":"null"}]},"initial_record":ref("InitialInvestmentRecord")},("name","type","currency"))
-schemas["InvestmentMonthInput"] = obj({"contribution":M,"withdrawal":M,"value":M,"expected_revision":I},("contribution","withdrawal","value"))
+schemas["InvestmentMonthInput"] = obj({"contribution":M,"withdrawal":M,"value":M,"account_id":S,"transaction_date":D,"expected_revision":I},("contribution","withdrawal","value"))
 for path, method, request, revision, params in [
     ("/settle-ups","get",None,False,["status","cursor","limit"]),
     ("/settle-ups","post","SettlementInput",False,[]),

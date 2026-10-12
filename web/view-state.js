@@ -3,7 +3,7 @@
   const validMonth = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
   const validScope = value => ['personal','family','combined'].includes(value);
   const accountTypes = ['bank','credit_card','cash','settle_up'];
-  const eventTypes = ['expense','income','refund','transfer'];
+  const eventTypes = ['expense','income','refund','transfer','investment','investment_withdrawal'];
   function readFilters(search) {
     const params=new URLSearchParams(search);
     return {
