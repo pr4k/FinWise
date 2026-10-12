@@ -544,6 +544,27 @@ async fn investment_months_calculate_net_additions_and_value_change() {
 }
 
 #[tokio::test]
+async fn investment_sip_schedule_is_validated_and_does_not_record_contributions() {
+    let (client, _) = setup().await;
+    let created = client.create("investments", json!({"name":"Index fund","type":"investment","currency":"INR","sip":{"amount":"1500.00","day":31,"start_month":"2026-10","status":"active"}})).await;
+    let path = format!("investments/{}", created["id"].as_str().unwrap());
+    assert_eq!(created["sip"]["amount"], "1500.00");
+    assert_eq!(created["net_contributions"], "0.00");
+    assert_eq!(created["current_value"], Value::Null);
+
+    let paused = client.call("PATCH", &path, json!({"sip":{"amount":"2000.00","day":15,"start_month":"2026-10","end_month":"2027-03","status":"paused"}}), None, Some(1)).await;
+    assert_eq!(paused.0, StatusCode::OK, "{}", paused.1);
+    assert_eq!(paused.1["sip"]["status"], "paused");
+    let invalid = client.call("PATCH", &path, json!({"sip":{"amount":"2000.00","day":15,"start_month":"2026-10","end_month":"2026-09","status":"active"}}), None, Some(2)).await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+    let removed = client.call("PATCH", &path, json!({"sip":null}), None, Some(2)).await;
+    assert_eq!(removed.0, StatusCode::OK, "{}", removed.1);
+    assert_eq!(removed.1["sip"], Value::Null);
+    let fund = client.call("POST", "investments", json!({"name":"Reserve","type":"emergency_fund","currency":"INR","sip":{"amount":"100.00","day":1,"start_month":"2026-10","status":"active"}}), Some("sip-fund-invalid"), None).await;
+    assert_eq!(fund.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn split_paid_by_another_person_records_only_my_payable() {
     let (client, _) = setup().await;
     let split=client.create("settle-ups/splits",json!({"description":"Trip","date":"2026-10-08","currency":"INR","total":"1200.00","my_share":"400.00","paid_by":"Alex","shares":[{"person":"Alex","amount":"500.00"},{"person":"Sam","amount":"300.00"}]})).await;
@@ -3124,6 +3145,37 @@ async fn api_namespace_root_does_not_serve_the_spa() {
             response.headers()["content-type"],
             "application/json; charset=utf-8"
         );
+    }
+}
+
+#[tokio::test]
+async fn web_app_assets_support_home_screen_installation() {
+    let (client, _) = setup().await;
+    let get = |path| Request::builder().uri(path).body(Body::empty()).unwrap();
+    let page = client.app.clone().oneshot(get("/")).await.unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = String::from_utf8(page.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(html.contains("apple-mobile-web-app-capable"));
+    assert!(html.contains("/manifest.webmanifest"));
+    assert!(html.contains("/apple-touch-icon.png"));
+    assert!(html.contains("navigator.serviceWorker.register('/service-worker.js')"));
+    let manifest = client.app.clone().oneshot(get("/manifest.webmanifest")).await.unwrap();
+    assert_eq!(manifest.status(), StatusCode::OK);
+    let body = manifest.into_body().collect().await.unwrap().to_bytes();
+    let manifest: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(manifest["display"], "standalone");
+    assert_eq!(manifest["start_url"], "/");
+    assert_eq!(manifest["icons"][0]["sizes"], "192x192");
+    assert_eq!(manifest["icons"][1]["sizes"], "512x512");
+    for path in ["/service-worker.js", "/offline.html"] {
+        let asset = client.app.clone().oneshot(get(path)).await.unwrap();
+        assert_eq!(asset.status(), StatusCode::OK, "{path}");
+    }
+    for path in ["/apple-touch-icon.png", "/icon-192.png", "/icon-512.png"] {
+        let icon = client.app.clone().oneshot(get(path)).await.unwrap();
+        assert_eq!(icon.status(), StatusCode::OK, "{path}");
+        let bytes = icon.into_body().collect().await.unwrap().to_bytes();
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{path}");
     }
 }
 

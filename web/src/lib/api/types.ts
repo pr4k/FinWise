@@ -78,5 +78,6 @@ export type RejectMatchInput = { "expected_revision"?: number; "match_revision":
 export type SettlementInput = { "person": string; "direction": "owed_to_me" | "i_owe"; "kind": "loan" | "split" | "other"; "amount": string; "currency": string; "date": string; "description": string };
 export type SplitInput = { "description": string; "date": string; "currency": string; "total": string; "my_share": string; "paid_by"?: string; "transaction_id"?: string; "shares": Array<{ "person": string; "amount": string }> };
 export type RepaymentInput = { "amount": string; "date": string; "note"?: string; "expected_revision"?: number };
-export type InvestmentInput = { "name": string; "type": "investment" | "emergency_fund"; "currency": string; "target"?: string; "monthly_goal"?: string; "notes"?: string; "visibility"?: "private" | "shared" };
+export type SipSchedule = { "amount": string; "day": number; "start_month": string; "end_month"?: string; "status": "active" | "paused" };
+export type InvestmentInput = { "name": string; "type": "investment" | "emergency_fund"; "currency": string; "target"?: string; "monthly_goal"?: string; "notes"?: string; "visibility"?: "private" | "shared"; "sip"?: SipSchedule | null };
 export type InvestmentMonthInput = { "contribution": string; "withdrawal": string; "value": string; "expected_revision"?: number };

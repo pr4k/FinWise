@@ -302,6 +302,7 @@ h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
 .reconcile-choice #transfer-option {background:#f1f3ed;border-color:#dce3d7;color:#6d718f}
 .reconcile-choice #transfer-option:hover {background:#eaece5}
 .ledger-filters,.ledger-workspace .activity-table th {background:#f8faf4}
+.ledger-filter-toggle {display:none}
 .activity-table .activity-title strong,.activity-table .activity-account-name {color:#344332}
 .activity-table .transaction-indicator.amended,.activity-table .transaction-indicator.created {color:#887faa}
 .activity-table .activity-marker-row,.activity-table .activity-marker-row:hover {background:#f5f8ed}
@@ -311,8 +312,8 @@ h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
   .scope-segments button {padding-inline:10px}
 }
 @media (max-width:760px) {
-  .topbar {flex-wrap:wrap;gap:8px;padding:10px 16px}
-  .topbar .breadcrumb {display:flex;width:100%;font-size:11px}
+  .topbar {flex-wrap:wrap;gap:8px;padding:8px 16px}
+  .topbar .breadcrumb {display:none}
   .topbar .mobile-menu {display:none}
   .topbar-actions {width:100%;margin:0;display:flex;justify-content:space-between;gap:8px}
   .scope-segments {flex:1;justify-content:space-around}
@@ -320,6 +321,25 @@ h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
   .topbar .month-filter {flex:none;padding-left:7px}
   .topbar .month-filter>span {display:none}
   .topbar .month-filter input {width:125px;min-width:0;max-width:125px}
+  .transaction-page .page-heading {margin-bottom:10px;gap:8px}
+  .transaction-page .page-heading .eyebrow,.transaction-page .page-heading p,.transaction-page .analytics-scope-note,.transaction-page .analytics-scope-tabs {display:none}
+  .transaction-page .page-heading h1 {font-size:25px;margin:0}
+  .transaction-page .heading-actions {gap:6px}
+  .transaction-page .heading-actions .primary-button {display:none}
+  .transaction-page .heading-actions .outline-button {min-height:34px;padding:7px 10px;font-size:11px;flex:0 1 auto}
+  .transaction-page .ledger-heading {padding:12px 14px;gap:4px}
+  .transaction-page .ledger-heading h2 {font-size:15px}
+  .transaction-page .ledger-heading p {font-size:11px;margin-top:3px}
+  .transaction-page .ledger-view-actions {gap:8px}
+  .transaction-page .ledger-view-actions .outline-button {min-height:28px;padding:2px 0;font-size:11px}
+  .transaction-page .ledger-view-actions [data-view="changes"] {display:none}
+  .ledger-filter-toggle {display:flex;align-items:center;gap:7px;width:100%;min-height:38px;padding:7px 14px;border:0;border-top:1px solid var(--line);background:#f8faf4;color:#356c4d;text-align:left;font-size:12px;font-weight:700;cursor:pointer}
+  .ledger-filter-toggle .record-count {font-size:10px;background:#e9f2df;color:#356c4d}
+  .ledger-filter-toggle .filter-chevron {margin-left:auto;font-size:19px;line-height:1;transition:transform .15s}
+  .ledger-filter-toggle[aria-expanded="true"] .filter-chevron {transform:rotate(180deg)}
+  .ledger-workspace .ledger-filters {display:none;border-top:0}
+  .ledger-workspace .ledger-filters.is-open {display:grid}
+  .transaction-page .ledger-caption {display:none}
 }
 @media (max-width:360px) {
   .topbar {padding-inline:12px}

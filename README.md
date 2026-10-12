@@ -8,6 +8,8 @@ An open-source, self-hosted personal and household budgeting app in development:
 - [HTTP API specification](docs/api-spec.md): versioned REST routes, request/response conventions, permissions, imports, ledger, reconciliation, analytics, budgets, and AI settings.
 - [Apple Shortcuts quick expenses](docs/quick-expense-shortcuts.md): opt-in LAN/private-VPN expense entry without a login cookie or API token.
 - [Widget spending API](docs/widgets-api.md): opt-in, read-only LAN/private-VPN spending summary without a login cookie or API token.
+- [iPhone Home Screen app](docs/ios-home-screen.md): install FinWise from Safari as a standalone web app.
+- [Android PWA installation](docs/android-pwa.md): private HTTPS setup and Chrome installation steps.
 - [Analytics and budget tracking](docs/analytics-and-budgets.md): dashboard views, metrics, coverage, monthly plans, revisions, contributions, and alerts.
 - [Money Manager import and categories](docs/money-manager-import-and-categories.md): observed XLSX format, event/category mapping, and category management.
 - [Implementation plan](docs/implementation-plan.md): ordered milestones, account and multi-statement workflows, side-by-side reconciliation, end-of-day balance checks, acceptance criteria, validation, and release scope.

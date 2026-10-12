@@ -39,6 +39,28 @@ fn month(s: &str) -> Result<()> {
     api::month_bounds(s)?;
     Ok(())
 }
+fn validate_sip(sip: &Value, currency: &str) -> Result<()> {
+    let fields = sip.as_object().ok_or_else(|| ApiError::invalid("SIP must be an object."))?;
+    if fields.keys().any(|key| !["amount", "day", "start_month", "end_month", "status"].contains(&key.as_str())) {
+        return Err(ApiError::invalid("Unknown SIP field."));
+    }
+    positive(sip, "amount", currency)?;
+    let day = sip["day"].as_u64().ok_or_else(|| ApiError::invalid("SIP day must be an integer from 1 to 31."))?;
+    if !(1..=31).contains(&day) {
+        return Err(ApiError::invalid("SIP day must be an integer from 1 to 31."));
+    }
+    let start = text(sip, "start_month")?;
+    month(start)?;
+    if let Some(end) = sip.get("end_month") {
+        let end = end.as_str().ok_or_else(|| ApiError::invalid("SIP end month must be YYYY-MM."))?;
+        month(end)?;
+        if end < start {
+            return Err(ApiError::invalid("SIP end month cannot precede its start month."));
+        }
+    }
+    domain::choice(sip, "status", &["active", "paused"])?;
+    Ok(())
+}
 fn owner(p: &Principal, v: &Value) -> Result<()> {
     if v["owner_id"] == p.user_id {
         Ok(())
@@ -392,6 +414,7 @@ pub async fn route(
                     "monthly_goal",
                     "notes",
                     "visibility",
+                    "sip",
                 ],
             )?;
             domain::choice(body, "type", &["investment", "emergency_fund"])?;
@@ -409,6 +432,12 @@ pub async fn route(
             }
             if body.get("monthly_goal").is_some() {
                 nonnegative(body, "monthly_goal", currency)?;
+            }
+            if let Some(sip) = body.get("sip") {
+                if body["type"] != "investment" {
+                    return Err(ApiError::invalid("SIPs are available for investments only."));
+                }
+                validate_sip(sip, currency)?;
             }
             let mut v = body.clone();
             if v.get("visibility").is_none() {
@@ -441,7 +470,7 @@ pub async fn route(
         ("PATCH", ["investments", id]) => {
             api::allowed_body(
                 body,
-                &["name", "target", "monthly_goal", "notes", "visibility"],
+                &["name", "target", "monthly_goal", "notes", "visibility", "sip"],
             )?;
             let before = storage::get(db, p, "investments", id).await?;
             owner(p, &before)?;
@@ -451,7 +480,7 @@ pub async fn route(
             if after.get("visibility").is_none() {
                 after["visibility"] = json!("private");
             }
-            for key in ["name", "target", "monthly_goal", "notes", "visibility"] {
+            for key in ["name", "target", "monthly_goal", "notes", "visibility", "sip"] {
                 if let Some(v) = body.get(key) {
                     after[key] = v.clone();
                 }
@@ -465,6 +494,12 @@ pub async fn route(
             }
             if after.get("monthly_goal").is_some() {
                 nonnegative(&after, "monthly_goal", text(&after, "currency")?)?;
+            }
+            if !after["sip"].is_null() {
+                if after["type"] != "investment" {
+                    return Err(ApiError::invalid("SIPs are available for investments only."));
+                }
+                validate_sip(&after["sip"], text(&after, "currency")?)?;
             }
             let mut saved = storage::update(db, p, &before, after, "update").await?;
             decorate_investment(&mut saved)?;
