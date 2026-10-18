@@ -614,6 +614,33 @@ async fn investment_movements_debit_account_without_becoming_expenses() {
 }
 
 #[tokio::test]
+async fn investment_shortcut_adds_separate_contributions_and_stock_holdings() {
+    let (client, _) = setup().await;
+    let bank=client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"200.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let fund=client.create("investments",json!({"name":"Index fund","type":"investment","asset_class":"mutual_fund","currency":"INR","initial_record":{"month":"2026-09","principal":"50.00","account_id":bank["id"],"transaction_date":"2026-09-05"}})).await;
+    assert_eq!(client.call("GET",&format!("investments/{}",fund["id"].as_str().unwrap()),json!({}),None,None).await.0,StatusCode::OK);
+    assert_eq!(fund["current_value"],Value::Null);
+    let mut revision=fund["revision"].as_i64().unwrap();
+    for (date,amount) in [("2026-09-10","20.00"),("2026-09-20","30.00")] {
+        let response=client.call("POST",&format!("investments/{}/contributions",fund["id"].as_str().unwrap()),json!({"amount":amount,"account_id":bank["id"],"transaction_date":date}),Some(&format!("contribution-{date}")),Some(revision)).await;
+        assert_eq!(response.0,StatusCode::OK,"{}",response.1);
+        revision=response.1["revision"].as_i64().unwrap();
+        assert_eq!(response.1["records"][0]["transaction_ids"].as_array().unwrap().len(),if date=="2026-09-10" {2} else {3});
+    }
+    let holding=client.call("GET",&format!("investments/{}",fund["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(holding["records"][0]["contribution"],"100.00");
+    assert_eq!(holding["net_contributions"],"100.00");
+    let stock=client.create("investments",json!({"name":"Example shares","type":"investment","asset_class":"stock_market","currency":"INR"})).await;
+    assert_eq!(stock["asset_class"],"stock_market");
+    let transactions=client.call("GET","transactions?event_type=investment",json!({}),None,None).await.1;
+    assert_eq!(transactions["data"].as_array().unwrap().len(),3);
+    let summary=client.call("GET","analytics/summary?from=2026-09-01&to=2026-10-01&currency=INR",json!({}),None,None).await.1;
+    assert_eq!(summary["net_spending"],"0.00");
+    let balance=client.call("GET",&format!("accounts/{}",bank["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(balance["balance"]["amount"],"100.00");
+}
+
+#[tokio::test]
 async fn opening_portfolio_value_is_baseline_and_sip_is_processed_once() {
     let (client, _) = setup().await;
     let bank = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"2000.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
@@ -3285,6 +3312,28 @@ async fn card_purchases_increase_debt_and_unknown_openings_remain_unknown() {
     assert_eq!(unknown.1["calculated"], Value::Null);
     assert_eq!(unknown.1["variance"], Value::Null);
     assert_eq!(unknown.1["complete"], false);
+}
+
+#[tokio::test]
+async fn partial_and_full_card_payments_reduce_debt_without_new_spending() {
+    let (client, _) = setup().await;
+    let bank=client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let card=client.create("accounts",json!({"name":"Card","subtype":"credit_card","currency":"INR","opening_balance":{"amount":"0.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let category=client.category("Groceries","expense").await;
+    client.transaction("expense","300.00",&card,&category,"personal").await;
+    for (date,amount) in [("2026-10-05","100.00"),("2026-10-10","200.00")] {
+        let payment=client.call("POST","transactions",json!({"event_type":"transfer","amount":amount,"currency":"INR","effective_date":date,"description":"Credit card payment","movements":[{"account_id":bank["id"],"amount":format!("-{amount}")},{"account_id":card["id"],"amount":amount}],"allocations":[]}),Some(&format!("card-payment-{date}")),None).await;
+        assert_eq!(payment.0,StatusCode::CREATED,"{}",payment.1);
+    }
+    let september=client.call("GET","analytics/summary?from=2026-09-01&to=2026-10-01&currency=INR",json!({}),None,None).await.1;
+    let october=client.call("GET","analytics/summary?from=2026-10-01&to=2026-11-01&currency=INR",json!({}),None,None).await.1;
+    assert_eq!(september["net_spending"],"300.00");
+    assert_eq!(october["net_spending"],"0.00");
+    assert_eq!(october["transfer_volume"],"300.00");
+    let card_now=client.call("GET",&format!("accounts/{}",card["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    let bank_now=client.call("GET",&format!("accounts/{}",bank["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(card_now["balance"]["amount"],"0.00");
+    assert_eq!(bank_now["balance"]["amount"],"700.00");
 }
 
 #[tokio::test]

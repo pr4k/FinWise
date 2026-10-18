@@ -465,6 +465,7 @@ pub async fn route(
                 &[
                     "name",
                     "type",
+                    "asset_class",
                     "currency",
                     "target",
                     "monthly_goal",
@@ -477,6 +478,10 @@ pub async fn route(
                 ],
             )?;
             domain::choice(body, "type", &["investment", "emergency_fund"])?;
+            if body.get("asset_class").is_some() {
+                domain::choice(body, "asset_class", &["mutual_fund", "stock_market"])?;
+                if body["type"] != "investment" { return Err(ApiError::invalid("Asset class is available for investments only.")); }
+            }
             if body.get("visibility").is_some() {
                 domain::choice(body, "visibility", &["private", "shared"])?;
             }
@@ -513,9 +518,9 @@ pub async fn route(
                 let record_month = text(record, "month")?;
                 month(record_month)?;
                 positive(record, "principal", currency)?;
-                nonnegative(record, "current_value", currency)?;
+                if !record["current_value"].is_null() { nonnegative(record, "current_value", currency)?; }
                 if record.get("account_id").is_some() { text(record, "account_id")?; }
-                let mut first = json!({"month":record_month,"contribution":record["principal"],"withdrawal":"0","value":record["current_value"]});
+                let mut first = json!({"month":record_month,"contribution":record["principal"],"withdrawal":"0","value":record.get("current_value").cloned().unwrap_or(Value::Null)});
                 if let Some(account) = record.get("account_id") {
                     first["account_id"] = account.clone();
                     first["transaction_date"] = json!(text(record, "transaction_date")?);
@@ -529,6 +534,7 @@ pub async fn route(
             if v.get("visibility").is_none() {
                 v["visibility"] = json!("private");
             }
+            if v["type"] == "investment" && v.get("asset_class").is_none() { v["asset_class"] = json!("mutual_fund"); }
             v["records"] = json!(initial_record.into_iter().collect::<Vec<_>>());
             let mut check = v.clone();
             decorate_investment(&mut check)?;
@@ -568,7 +574,7 @@ pub async fn route(
         ("PATCH", ["investments", id]) => {
             api::allowed_body(
                 body,
-                &["name", "target", "monthly_goal", "notes", "visibility", "sip", "opening_value", "opening_month"],
+                &["name", "asset_class", "target", "monthly_goal", "notes", "visibility", "sip", "opening_value", "opening_month"],
             )?;
             let before = storage::get(db, p, "investments", id).await?;
             owner(p, &before)?;
@@ -578,12 +584,16 @@ pub async fn route(
             if after.get("visibility").is_none() {
                 after["visibility"] = json!("private");
             }
-            for key in ["name", "target", "monthly_goal", "notes", "visibility", "sip", "opening_value", "opening_month"] {
+            for key in ["name", "asset_class", "target", "monthly_goal", "notes", "visibility", "sip", "opening_value", "opening_month"] {
                 if let Some(v) = body.get(key) {
                     after[key] = v.clone();
                 }
             }
             domain::choice(&after, "visibility", &["private", "shared"])?;
+            if after.get("asset_class").is_some() {
+                domain::choice(&after, "asset_class", &["mutual_fund", "stock_market"])?;
+                if after["type"] != "investment" { return Err(ApiError::invalid("Asset class is available for investments only.")); }
+            }
             if text(&after, "name")?.len() > 100 {
                 return Err(ApiError::invalid("Name is too long."));
             }
@@ -605,6 +615,46 @@ pub async fn route(
             let mut check = after.clone();
             decorate_investment(&mut check)?;
             let mut saved = storage::update(db, p, &before, after, "update").await?;
+            decorate_investment(&mut saved)?;
+            ok(saved)
+        }
+        ("POST", ["investments", id, "contributions"]) => {
+            api::allowed_body(body, &["amount", "account_id", "transaction_date", "value"])?;
+            let before = storage::get(db, p, "investments", id).await?;
+            owner(p, &before)?;
+            active(&before)?;
+            api::revision(headers, body, &before)?;
+            let currency = text(&before, "currency")?;
+            let addition = positive(body, "amount", currency)?;
+            let account_id = text(body, "account_id")?;
+            let account = storage::get(db, p, "accounts", account_id).await?;
+            if account["active"] == false || account["currency"] != currency || account["subtype"] == "settle_up" {
+                return Err(ApiError::invalid("Choose an active funding account in the investment currency."));
+            }
+            let date = text(body, "transaction_date")?;
+            domain::date(date)?;
+            if !body["value"].is_null() { nonnegative(body, "value", currency)?; }
+            let record_month = &date[..7];
+            let mut after = before.clone();
+            let records = after["records"].as_array_mut().ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
+            let position = records.iter().position(|record| record["month"] == record_month);
+            let old = position.map(|index| records[index].clone());
+            let old_amount = old.as_ref().map(|record| nonnegative(record, "contribution", currency)).transpose()?.unwrap_or(0);
+            let total = add(old_amount, addition)?;
+            let signed = format_money(-addition, currency)?;
+            let transaction = json!({"event_type":"investment","investment_id":before["id"],"investment_month":record_month,"amount":body["amount"],"currency":currency,"effective_date":date,"description":format!("Invested in {}",text(&before,"name")?),"movements":[{"account_id":account_id,"amount":signed}],"allocations":[],"entered_by":p.user_id,"voided":false,"source_refs":[],"reconciliation_state":"unmatched"});
+            api::validate_ledger(db, p, &transaction).await?;
+            let posted = storage::create(db, p, "transactions", transaction).await?;
+            let mut record = old.unwrap_or_else(||json!({"month":record_month,"contribution":"0","withdrawal":"0","value":Value::Null}));
+            record["contribution"] = json!(format_money(total,currency)?);
+            if !body["value"].is_null() { record["value"] = body["value"].clone(); }
+            if record["account_id"].is_null() { record["account_id"] = json!(account_id); record["transaction_date"] = json!(date); }
+            if !record["transaction_ids"].is_array() { record["transaction_ids"] = json!([]); }
+            record["transaction_ids"].as_array_mut().unwrap().push(posted["id"].clone());
+            if let Some(index) = position { records[index] = record; } else { records.push(record); }
+            let mut check = after.clone();
+            decorate_investment(&mut check)?;
+            let mut saved = storage::update(db, p, &before, after, "investment_contribution").await?;
             decorate_investment(&mut saved)?;
             ok(saved)
         }
