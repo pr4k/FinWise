@@ -311,6 +311,15 @@ body{background:#f6f7fb}
 .transaction-quick-panel .field{max-width:none}
 .transaction-quick-actions{display:flex;justify-content:flex-end;gap:8px}
 #transaction-form>[data-action="quick-account-open"],#allocation-fields>[data-action="quick-category-open"],#transfer-target>[data-action="quick-account-open"]{justify-self:start;margin-top:-10px}
+.transaction-drawer{position:fixed;inset:0 0 0 auto;z-index:10;width:440px;max-width:100vw;padding:20px 22px;background:#fff;border-left:1px solid #dce1e9;box-shadow:-12px 0 34px #18203320;overflow-y:auto;color:var(--ink)}
+.transaction-drawer .dialog-head{position:sticky;top:-20px;z-index:2;margin:-20px -22px 0;padding:20px 22px 16px;background:#fff;border-bottom:1px solid var(--line)}
+.transaction-drawer form{display:grid;gap:15px;padding-top:16px}
+.transaction-drawer .field input,.transaction-drawer .field select{min-height:44px}
+.transaction-drawer .dialog-actions{position:sticky;bottom:-20px;display:flex;gap:8px;margin:0 -22px -20px;padding:14px 22px 20px;background:#fff;border-top:1px solid var(--line)}
+.transaction-drawer .dialog-actions button{flex:1;min-height:42px}
+.transaction-drawer-open .main-area{margin-right:440px}
+.transaction-drawer .transaction-category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1349px){.transaction-drawer{display:none}.transaction-drawer-open .main-area{margin-right:0}}
 @media(max-width:520px){.transaction-quick-fields{grid-template-columns:1fr}.live-dialog #transaction-form .dialog-actions{display:grid;grid-template-columns:1fr 1fr}.live-dialog #transaction-form .dialog-actions button{width:100%;padding:8px}.live-dialog #transaction-form .dialog-actions button:last-child{grid-column:1/-1}}
 
 /* Recorded activity keeps the transaction readable before showing ledger detail. */

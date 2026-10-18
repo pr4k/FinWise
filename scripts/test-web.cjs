@@ -102,6 +102,8 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByRole('heading',{name:'Browser cash',exact:true}).waitFor();
     await open('transactions');
     await page.locator('#view-root').getByRole('button',{name:'Add transaction',exact:true}).click();
+    await page.locator('#transaction-drawer:visible').waitFor();
+    assert.ok(await page.locator('#view-root .activity-table').isVisible());
     const cashAccount=await page.locator('#transaction-form [name="account_id"]').evaluate(select=>[...select.options].find(option=>option.textContent.startsWith('Browser cash ·'))?.value);
     await page.getByLabel('Account / transfer source',{exact:true}).selectOption(cashAccount);
     await page.getByLabel('Description',{exact:true}).fill('Browser smoke entry');
@@ -133,8 +135,10 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByLabel('Date',{exact:true}).fill(`${first.month}-05`);
     await page.getByRole('button',{name:'Save',exact:true}).click();
     await page.getByRole('cell',{name:'Browser smoke entry',exact:false}).waitFor();
+    assert.ok(await page.locator('#transaction-drawer:visible').count());
+    assert.equal(await page.getByLabel('Description',{exact:true}).inputValue(),'');
     await page.locator('#view-root').getByRole('button',{name:'Add transaction',exact:true}).click();
-    assert.match(await page.locator('#transaction-form [name="account_id"] option:checked').textContent(),/Browser cash/);
+    assert.match(await page.locator('#transaction-form [name="account_id"] option:checked').textContent(),/Inline cash/);
     assert.equal(await page.evaluate(()=>document.activeElement?.name),'amount');
     await page.getByLabel('Description',{exact:true}).fill('Browser smoke entry');
     await page.getByLabel('Amount',{exact:true}).fill('12.34');
@@ -144,8 +148,9 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByRole('button',{name:'Save & add another'}).click();
     await page.getByRole('heading',{name:'Add transaction',exact:true}).waitFor();
     assert.equal(await page.getByLabel('Date',{exact:true}).inputValue(),`${first.month}-05`);
-    assert.match(await page.locator('#transaction-form [name="account_id"] option:checked').textContent(),/Browser cash/);
+    assert.match(await page.locator('#transaction-form [name="account_id"] option:checked').textContent(),/Inline cash/);
     await page.getByRole('button',{name:'Cancel',exact:true}).click();
+    assert.equal(await page.locator('#transaction-drawer:visible').count(),0);
     await page.setViewportSize({width:390,height:844});
     await page.locator('.bottom-add').click();
     await page.getByRole('heading',{name:'Add transaction',exact:true}).waitFor();
