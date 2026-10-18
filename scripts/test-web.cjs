@@ -104,6 +104,13 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.locator('#view-root').getByRole('button',{name:'Add transaction',exact:true}).click();
     const cashAccount=await page.locator('#transaction-form [name="account_id"]').evaluate(select=>[...select.options].find(option=>option.textContent.startsWith('Browser cash ·'))?.value);
     await page.getByLabel('Account / transfer source',{exact:true}).selectOption(cashAccount);
+    await page.getByLabel('Description',{exact:true}).fill('Browser smoke entry');
+    await page.locator('#transaction-form [data-action="quick-account-open"][data-target="account_id"]').click();
+    await page.getByLabel('Account name',{exact:true}).fill('Inline cash');
+    await page.getByLabel('Account type',{exact:true}).selectOption('cash');
+    await page.getByRole('button',{name:'Create account',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#transaction-form [name="account_id"]')?.selectedOptions[0]?.textContent.startsWith('Inline cash'));
+    assert.equal(await page.getByLabel('Description',{exact:true}).inputValue(),'Browser smoke entry');
     const expenseCategory=await page.evaluate(async()=> (await window.finwiseAPI.collection('categories')).data.find(category=>category.kind==='expense' && !category.archived)?.name);
     if(expenseCategory) {
       assert.ok(await page.locator('#transaction-category-results .transaction-category-group').count()>0);
@@ -117,7 +124,11 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
       await page.locator('#transaction-category-results .uncategorized').click();
       assert.equal(await page.locator('#transaction-category').inputValue(),'');
     }
-    await page.getByLabel('Description',{exact:true}).fill('Browser smoke entry');
+    await page.locator('#transaction-form [data-action="quick-category-open"]').click();
+    await page.getByLabel('Category name',{exact:true}).fill('Inline snacks');
+    await page.getByRole('button',{name:'Create category',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#transaction-category')?.selectedOptions[0]?.textContent==='Inline snacks');
+    assert.equal(await page.getByLabel('Description',{exact:true}).inputValue(),'Browser smoke entry');
     await page.getByLabel('Amount',{exact:true}).fill('12.34');
     await page.getByLabel('Date',{exact:true}).fill(`${first.month}-05`);
     await page.getByRole('button',{name:'Save',exact:true}).click();

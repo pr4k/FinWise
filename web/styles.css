@@ -306,6 +306,11 @@ body{background:#f6f7fb}
 .transaction-category-tile.selected{border-color:#7565d8;background:#f1efff;color:#47359e;box-shadow:0 0 0 1px #7565d8}
 .transaction-category-tile:focus-visible{outline:3px solid #bcb3f2;outline-offset:2px}
 .transaction-category-tile.uncategorized{justify-self:start;min-height:36px}
+.transaction-quick-panel{display:grid;gap:12px;padding:14px;border:1px solid #dcd7f5;border-radius:10px;background:#faf9ff}
+.transaction-quick-panel>strong{font-size:13px}
+.transaction-quick-panel .field{max-width:none}
+.transaction-quick-actions{display:flex;justify-content:flex-end;gap:8px}
+#transaction-form>[data-action="quick-account-open"],#allocation-fields>[data-action="quick-category-open"],#transfer-target>[data-action="quick-account-open"]{justify-self:start;margin-top:-10px}
 @media(max-width:520px){.transaction-quick-fields{grid-template-columns:1fr}.live-dialog #transaction-form .dialog-actions{display:grid;grid-template-columns:1fr 1fr}.live-dialog #transaction-form .dialog-actions button{width:100%;padding:8px}.live-dialog #transaction-form .dialog-actions button:last-child{grid-column:1/-1}}
 
 /* Recorded activity keeps the transaction readable before showing ledger detail. */

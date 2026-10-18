@@ -972,9 +972,8 @@ function categoryEditor(key=null,parentKey=null) {
     'category-form',current?'Save category':'Create category');
 }
 function transactionEditor({accountId=null,date=localDate(),categoryId=null}={}) {
-  if(!state.accounts.some(a=>a.active!==false)) { notify('Add an active account first.'); return; }
   const chosen=state.accounts.find(a=>a.id===(accountId||lastTransactionAccount()) && a.active!==false)?.id;
-  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}<p id="transfer-help" class="helper"></p></div><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name or parent" autocomplete="off"'))}<div class="transaction-category-heading"><strong>Category</strong><span id="transaction-category-hint" class="helper"></span></div><div id="transaction-category-results" class="transaction-category-results" role="group" aria-label="Choose category"></div><select name="category_id" id="transaction-category" class="sr-only" aria-label="Category"></select>${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
+  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+button('+ New account','quick-account-open',`data-target="account_id"`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}${button('+ New destination account','quick-account-open',`data-target="destination"`)}<p id="transfer-help" class="helper"></p></div><section id="transaction-quick-account" class="transaction-quick-panel" aria-label="Create account" hidden><strong>New account</strong>${field('Account name',input('quick_account_name','maxlength="100"'))}${field('Account type',`<select name="quick_account_subtype">${['bank','credit_card','cash','settle_up'].map(v=>option(v,v.replace('_',' '))).join('')}</select>`)}${field('Currency',input('quick_account_currency',`value="${h(state.me.household.base_currency)}" pattern="[A-Z]{3}"`))}${familyMode()?input('quick_account_visibility','type="hidden" value="shared"'):field('Access',`<select name="quick_account_visibility">${option('private','Private')}${option('shared','Shared household')}</select>`)}<div class="transaction-quick-actions">${button('Cancel','quick-create-cancel')}${button('Create account','quick-account-save')}</div></section><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name or parent" autocomplete="off"'))}<div class="transaction-category-heading"><strong>Category</strong><span id="transaction-category-hint" class="helper"></span></div><div id="transaction-category-results" class="transaction-category-results" role="group" aria-label="Choose category"></div><select name="category_id" id="transaction-category" class="sr-only" aria-label="Category"></select>${button('+ New category','quick-category-open','')}<section id="transaction-quick-category" class="transaction-quick-panel" aria-label="Create category" hidden><strong>New category</strong>${field('Category name',input('quick_category_name','maxlength="100"'))}${field('Under',`<select name="quick_category_parent"></select>`)}${familyMode()?input('quick_category_visibility','type="hidden" value="shared"'):field('Access',`<select name="quick_category_visibility">${option('private','Private',state.me.membership.role==='member')}${option('shared','Shared household',state.me.membership.role!=='member')}</select>`)}<div class="transaction-quick-actions">${button('Cancel','quick-create-cancel')}${button('Create category','quick-category-save')}</div></section>${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
   const form=dialog.querySelector('#transaction-form');
   const byId=new Map(state.categories.map(category=>[category.id,category]));
   const paths=new Map();
@@ -1035,6 +1034,63 @@ function renderTransactionCategoryGrid(form) {
     [...groups.values()].map(group=>`<section class="transaction-category-group"><h3>${h(group.name)}</h3><div class="transaction-category-grid">${group.choices.map(tile).join('')}</div></section>`).join('')+
     (search && !choices.length?'<p class="helper">No categories match your search.</p>':'');
   form.querySelector('#transaction-category-hint').textContent=search?`${choices.length} match${choices.length===1?'':'es'}`:`${choices.length} categories · select a group or subcategory`;
+}
+function quickPanel(form,kind,open=false) {
+  const panel=form.querySelector(`#transaction-quick-${kind}`);
+  panel.hidden=!open;
+  panel.querySelector(`[name="quick_${kind}_name"]`).required=open;
+  if(kind==='account')panel.querySelector('[name="quick_account_currency"]').required=open;
+  panel.querySelector('.live-error')?.remove();
+  if(open)panel.querySelector(`[name="quick_${kind}_name"]`).focus();
+}
+function openQuickCreate(kind,target='account_id') {
+  const form=dialog.querySelector('#transaction-form');if(!form)return;
+  quickPanel(form,kind==='account'?'category':'account');
+  form.quickAccountTarget=target;
+  if(kind==='account') {
+    const source=state.accounts.find(a=>a.id===form.elements.account_id.value);
+    form.elements.quick_account_currency.value=source?.currency||state.me.household.base_currency;
+  } else {
+    const categoryKind=form.elements.event_type.value==='income'?'income':'expense';
+    form.elements.quick_category_parent.innerHTML=option('','Top level')+form.categoryChoices.filter(choice=>choice.kind===categoryKind).map(choice=>option(choice.id,choice.path)).join('');
+    const source=state.accounts.find(a=>a.id===form.elements.account_id.value);
+    form.elements.quick_category_visibility.value=familyMode()||source?.visibility==='shared'||form.elements.scope?.value==='family'?'shared':'private';
+  }
+  quickPanel(form,kind,true);
+}
+async function saveQuickCreate(kind) {
+  const form=dialog.querySelector('#transaction-form');if(!form)return;
+  const panel=form.querySelector(`#transaction-quick-${kind}`);
+  for(const control of panel.querySelectorAll('input,select'))if(!control.checkValidity()) {control.reportValidity();return;}
+  if(!panel.querySelector(`[name="quick_${kind}_name"]`).value.trim()) {panel.querySelector(`[name="quick_${kind}_name"]`).setCustomValidity('Enter a name.');panel.querySelector(`[name="quick_${kind}_name"]`).reportValidity();panel.querySelector(`[name="quick_${kind}_name"]`).setCustomValidity('');return;}
+  try {
+    if(kind==='account') {
+      const created=await api.request('accounts',{method:'POST',body:{name:form.elements.quick_account_name.value.trim(),subtype:form.elements.quick_account_subtype.value,currency:form.elements.quick_account_currency.value.trim().toUpperCase(),visibility:form.elements.quick_account_visibility.value}});
+      state.accounts.push(created);
+      const source=form.elements.account_id.value,destination=form.elements.destination.value;
+      form.elements.account_id.innerHTML=accountOptions(form.quickAccountTarget==='account_id'?created.id:source);
+      form.elements.destination.innerHTML=accountOptions(form.quickAccountTarget==='destination'?created.id:destination);
+      updateCategories();
+      if(form.quickAccountTarget==='destination')form.elements.destination.value=created.id;
+      form.elements.quick_account_name.value='';
+      notify(`${created.name} added and selected.`);
+    } else {
+      const parentId=form.elements.quick_category_parent.value;
+      const kind=form.elements.event_type.value==='income'?'income':'expense';
+      const created=await api.request('categories',{method:'POST',body:{name:form.elements.quick_category_name.value.trim(),kind,parent_id:parentId||null,visibility:form.elements.quick_category_visibility.value}});
+      state.categories.push(created);
+      const parent=form.categoryChoices.find(choice=>choice.id===parentId);
+      form.categoryChoices.push({id:created.id,kind,name:created.name,path:parent?`${parent.path} › ${created.name}`:created.name,rootId:parent?.rootId||created.id,rootName:parent?.rootName||created.name,depth:parent?parent.depth+1:0});
+      updateCategories();
+      form.elements.category_id.value=created.id;
+      form.elements.category_id.dataset.manual='true';
+      form.elements.quick_category_name.value='';
+      renderTransactionCategoryGrid(form);
+      notify(`${created.name} added and selected.`);
+    }
+    quickPanel(form,kind);
+    updateTransactionPreview();
+  } catch(error) {failure(error,panel);}
 }
 function updateCategories() {
   const form=dialog.querySelector('#transaction-form');if(!form)return;
@@ -1314,7 +1370,7 @@ const actions = {
   refresh:()=>renderRoute(), 'select-month':el=>{setMonth(el.dataset.month);renderRoute();}, 'transaction-period':()=>navigate('transactions',location.hash.slice(1)==='transactions/all'?[]:['all']), 'clear-transaction-filters':()=>{state.transactionFilters={account:'',accountType:'',eventType:''};saveView();renderRoute();}, 'copy-invite-link':async()=>{await navigator.clipboard.writeText(state.inviteLink);notify('Invitation link copied.');}, logout:async()=>{await api.request('auth/logout',{method:'POST',body:{}});resetSession();},
   'reset-add-month':async()=>{const month=document.querySelector('#reset-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('Choose a valid month.');if(state.resetMonths.length>=24)throw new Error('Select at most 24 months.');state.resetMonths=[...new Set([...state.resetMonths,month])].sort();state.resetPreview=null;await renderRoute();},
   'reset-remove-month':async el=>{state.resetMonths=state.resetMonths.filter(month=>month!==el.dataset.month);state.resetPreview=null;await renderRoute();},
-  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});}, 'choose-transaction-category':el=>{const form=dialog.querySelector('#transaction-form');if(!form)return;form.elements.category_id.value=el.dataset.category;form.elements.category_id.dataset.manual='true';delete form.elements.category_id.dataset.suggested;renderTransactionCategoryGrid(form);updateTransactionPreview();},
+  'close-editor':()=>dialog.close(), 'quick-account-open':el=>openQuickCreate('account',el.dataset.target), 'quick-category-open':()=>openQuickCreate('category'), 'quick-create-cancel':el=>quickPanel(dialog.querySelector('#transaction-form'),el.closest('.transaction-quick-panel').id.endsWith('account')?'account':'category'), 'quick-account-save':()=>saveQuickCreate('account'), 'quick-category-save':()=>saveQuickCreate('category'), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});}, 'choose-transaction-category':el=>{const form=dialog.querySelector('#transaction-form');if(!form)return;form.elements.category_id.value=el.dataset.category;form.elements.category_id.dataset.manual='true';delete form.elements.category_id.dataset.suggested;renderTransactionCategoryGrid(form);updateTransactionPreview();},
   settlement:settlementEditor, split:splitEditor, repayment:el=>repaymentEditor(el.dataset.id), 'settlement-edit':el=>settlementEditEditor(el.dataset.id),
   'settlement-filter':el=>{state.settlementFilter=el.dataset.filter;renderRoute();}, 'investment-filter':el=>{state.investmentFilter=el.dataset.filter;renderRoute();},
   'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;syncScopeControl();saveView();renderRoute();},
@@ -1366,6 +1422,10 @@ document.addEventListener('click',async event=>{
   try { await action(el); } catch(e) { if(state.me) failure(e,dialog.open?dialog:root); } finally { el.disabled=false; }
 });
 document.addEventListener('change',async event=>{
+  if(event.target.name==='quick_category_parent') {
+    const parent=state.categories.find(category=>category.id===event.target.value);
+    if(parent?.visibility==='private')event.target.form.elements.quick_category_visibility.value='private';
+  }
   if(event.target.id==='investment-type') syncInvestmentType();
   if(event.target.id==='quick-user-select') { state.quickSettingsUser=event.target.value; await renderRoute(); return; }
   if(event.target.id==='transfer-destination') updateTransferCounterparts();
@@ -1410,6 +1470,12 @@ document.addEventListener('input',event=>{
   if(event.target.name==='category_search')updateCategories();
   if(event.target.name==='description')suggestTransactionCategory();
   updateTransactionPreview();
+});
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Enter' || !event.target.closest?.('.transaction-quick-panel'))return;
+  if(event.target.tagName==='BUTTON')return;
+  event.preventDefault();
+  event.target.closest('.transaction-quick-panel').querySelector('[data-action$="-save"]').click();
 });
 document.addEventListener('submit',async event=>{
   const form=event.target; if(!(form instanceof HTMLFormElement)) return;
