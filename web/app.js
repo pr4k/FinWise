@@ -974,7 +974,7 @@ function categoryEditor(key=null,parentKey=null) {
 function transactionEditor({accountId=null,date=localDate(),categoryId=null}={}) {
   if(!state.accounts.some(a=>a.active!==false)) { notify('Add an active account first.'); return; }
   const chosen=state.accounts.find(a=>a.id===(accountId||lastTransactionAccount()) && a.active!==false)?.id;
-  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}<p id="transfer-help" class="helper"></p></div><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name" autocomplete="off"'))}<div id="transaction-category-results" class="transaction-category-results" aria-live="polite"></div>${field('Category','<select name="category_id" id="transaction-category"></select>')}<p id="transaction-category-hint" class="helper"></p>${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
+  editor('Add transaction',`<div class="transaction-quick-fields">${field('Amount',moneyInput('amount'))}${field('Description',input('description','required maxlength="240" autocomplete="off"'))}</div>`+field('Account / transfer source',`<select name="account_id" required>${accountOptions(chosen)}</select>`)+field('Type','<select name="event_type" id="event-type"><option value="expense">Expense</option><option value="income">Income</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select>')+field('Date',input('effective_date',`type="date" required value="${h(date)}"`))+`<div id="transfer-target" hidden>${field('Transfer destination',`<select name="destination">${accountOptions()}</select>`)}<p id="transfer-help" class="helper"></p></div><div id="allocation-fields">${field('Search categories',input('category_search','id="transaction-category-search" type="search" placeholder="Search by name or parent" autocomplete="off"'))}<div class="transaction-category-heading"><strong>Category</strong><span id="transaction-category-hint" class="helper"></span></div><div id="transaction-category-results" class="transaction-category-results" role="group" aria-label="Choose category"></div><select name="category_id" id="transaction-category" class="sr-only" aria-label="Category"></select>${scopeField()}<div id="paid-by-field">${field('Paid by',`<select name="paid_by_user_id">${state.members.map(m=>option(m.user_id,m.name,m.user_id===state.me.user.id)).join('')}</select>`)}</div></div><p id="transaction-summary" class="transaction-summary" aria-live="polite"></p><p id="transaction-duplicate" class="transaction-duplicate" role="status" hidden></p>`,'transaction-form');
   const form=dialog.querySelector('#transaction-form');
   const byId=new Map(state.categories.map(category=>[category.id,category]));
   const paths=new Map();
@@ -987,10 +987,14 @@ function transactionEditor({accountId=null,date=localDate(),categoryId=null}={})
     paths.set(category.id,path);
     return path;
   };
-  form.categoryChoices=categoryView.ordered(state.categories).filter(({category})=>category.archived!==true).map(({category})=>({id:category.id,kind:category.kind,path:pathFor(category)}));
+  form.categoryChoices=categoryView.ordered(state.categories).filter(({category})=>category.archived!==true).map(({category,depth})=>{
+    let root=category;const seen=new Set();
+    while(root.parent_id && byId.has(root.parent_id) && !seen.has(root.id)) {seen.add(root.id);root=byId.get(root.parent_id);}
+    return {id:category.id,kind:category.kind,name:category.name,path:pathFor(category),rootId:root.id,rootName:root.name,depth};
+  });
   form.querySelector('.dialog-actions').insertAdjacentHTML('beforeend','<button class="outline-button" type="submit" name="save_action" value="another">Save & add another</button>');
   updateCategories();
-  if(categoryId && [...form.elements.category_id.options].some(o=>o.value===categoryId)) { form.elements.category_id.value=categoryId; form.elements.category_id.dataset.manual='true'; }
+  if(categoryId && [...form.elements.category_id.options].some(o=>o.value===categoryId)) { form.elements.category_id.value=categoryId; form.elements.category_id.dataset.manual='true'; renderTransactionCategoryGrid(form); }
   updateTransactionPreview();
   form.elements.amount.focus();
   api.request('transactions?limit=100').then(result=>{
@@ -1016,6 +1020,22 @@ function planEditor(key=null) {
     `<p class="helper">Household plans can use only household accounts. A plan does not post money movement.</p>`,
     'plan-form',item?'Save plan':'Add plan');
 }
+function renderTransactionCategoryGrid(form) {
+  const selected=form.elements.category_id.value;
+  const search=form.elements.category_search.value.trim().toLocaleLowerCase();
+  const kind=form.elements.event_type.value==='income'?'income':'expense';
+  const choices=form.categoryChoices.filter(choice=>choice.kind===kind && (!search || choice.path.toLocaleLowerCase().includes(search)));
+  const groups=new Map();
+  for(const choice of choices) {
+    if(!groups.has(choice.rootId))groups.set(choice.rootId,{name:choice.rootName,choices:[]});
+    groups.get(choice.rootId).choices.push(choice);
+  }
+  const tile=choice=>`<button type="button" class="transaction-category-tile${choice.id===selected?' selected':''}" data-action="choose-transaction-category" data-category="${h(choice.id)}" aria-pressed="${choice.id===selected}" title="${h(choice.path)}"><span>${h(choice.name)}</span>${choice.depth?`<small>${h(choice.path.slice(0,-choice.name.length-3))}</small>`:''}</button>`;
+  form.querySelector('#transaction-category-results').innerHTML=`<button type="button" class="transaction-category-tile uncategorized${selected?'':' selected'}" data-action="choose-transaction-category" data-category="" aria-pressed="${!selected}">Uncategorized</button>`+
+    [...groups.values()].map(group=>`<section class="transaction-category-group"><h3>${h(group.name)}</h3><div class="transaction-category-grid">${group.choices.map(tile).join('')}</div></section>`).join('')+
+    (search && !choices.length?'<p class="helper">No categories match your search.</p>':'');
+  form.querySelector('#transaction-category-hint').textContent=search?`${choices.length} match${choices.length===1?'':'es'}`:`${choices.length} categories · select a group or subcategory`;
+}
 function updateCategories() {
   const form=dialog.querySelector('#transaction-form');if(!form)return;
   const kind=form.elements.event_type.value,transfer=kind==='transfer';
@@ -1031,17 +1051,10 @@ function updateCategories() {
     form.elements.destination.required=true;
   } else form.elements.destination.required=false;
   const selected=form.elements.category_id.value;
-  const search=form.elements.category_search.value.trim().toLocaleLowerCase();
-  const choices=form.categoryChoices.filter(choice=>choice.kind===(kind==='income'?'income':'expense') && (!search || choice.path.toLocaleLowerCase().includes(search)));
-  const shown=choices.slice(0,30);
-  if(selected && !shown.some(choice=>choice.id===selected)) {
-    const current=form.categoryChoices.find(choice=>choice.id===selected);
-    if(current && current.kind===(kind==='income'?'income':'expense'))shown.unshift(current);
-  }
-  form.elements.category_id.innerHTML=option('','Uncategorized')+shown.map(choice=>option(choice.id,choice.path,choice.id===selected)).join('');
-  if(selected && shown.some(choice=>choice.id===selected)) form.elements.category_id.value=selected;
-  form.querySelector('#transaction-category-hint').textContent=search?`${choices.length} matching categor${choices.length===1?'y':'ies'}${choices.length>30?' · first 30 shown in the menu':''}`:`Type to search all ${form.categoryChoices.filter(choice=>choice.kind===(kind==='income'?'income':'expense')).length} categories. The menu shows 30 at a time.`;
-  form.querySelector('#transaction-category-results').innerHTML=search?choices.slice(0,8).map(choice=>button(choice.path,'choose-transaction-category',`data-category="${h(choice.id)}"`)).join(''):'';
+  const choices=form.categoryChoices.filter(choice=>choice.kind===(kind==='income'?'income':'expense'));
+  form.elements.category_id.innerHTML=option('','Uncategorized')+choices.map(choice=>option(choice.id,choice.path,choice.id===selected)).join('');
+  if(selected && choices.some(choice=>choice.id===selected))form.elements.category_id.value=selected;
+  renderTransactionCategoryGrid(form);
 }
 function suggestTransactionCategory() {
   const form=dialog.querySelector('#transaction-form');if(!form || form.elements.category_id.dataset.manual)return;
@@ -1049,8 +1062,8 @@ function suggestTransactionCategory() {
   const match=description && form.elements.event_type.value!=='transfer' && recentTransactions.find(t=>t.description?.trim().toLocaleLowerCase()===description && t.event_type===form.elements.event_type.value && t.movements?.[0]?.account_id===form.elements.account_id.value);
   const categoryId=match?.allocations?.[0]?.category_id;
   const select=form.elements.category_id;
-  if(categoryId && [...select.options].some(o=>o.value===categoryId)) { select.value=categoryId; select.dataset.suggested=categoryId; }
-  else if(select.dataset.suggested) { select.value=''; delete select.dataset.suggested; }
+  if(categoryId && [...select.options].some(o=>o.value===categoryId)) { select.value=categoryId; select.dataset.suggested=categoryId; renderTransactionCategoryGrid(form); }
+  else if(select.dataset.suggested) { select.value=''; delete select.dataset.suggested; renderTransactionCategoryGrid(form); }
 }
 function updateTransactionPreview() {
   const form=dialog.querySelector('#transaction-form');if(!form)return;
@@ -1301,7 +1314,7 @@ const actions = {
   refresh:()=>renderRoute(), 'select-month':el=>{setMonth(el.dataset.month);renderRoute();}, 'transaction-period':()=>navigate('transactions',location.hash.slice(1)==='transactions/all'?[]:['all']), 'clear-transaction-filters':()=>{state.transactionFilters={account:'',accountType:'',eventType:''};saveView();renderRoute();}, 'copy-invite-link':async()=>{await navigator.clipboard.writeText(state.inviteLink);notify('Invitation link copied.');}, logout:async()=>{await api.request('auth/logout',{method:'POST',body:{}});resetSession();},
   'reset-add-month':async()=>{const month=document.querySelector('#reset-month').value;if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('Choose a valid month.');if(state.resetMonths.length>=24)throw new Error('Select at most 24 months.');state.resetMonths=[...new Set([...state.resetMonths,month])].sort();state.resetPreview=null;await renderRoute();},
   'reset-remove-month':async el=>{state.resetMonths=state.resetMonths.filter(month=>month!==el.dataset.month);state.resetPreview=null;await renderRoute();},
-  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});}, 'choose-transaction-category':el=>{const form=dialog.querySelector('#transaction-form');if(!form)return;const choice=form.categoryChoices.find(choice=>choice.id===el.dataset.category);if(!choice)return;form.elements.category_search.value=choice.path;updateCategories();form.elements.category_id.value=choice.id;form.elements.category_id.dataset.manual='true';updateTransactionPreview();},
+  'close-editor':()=>dialog.close(), 'use-budget-average':el=>{const control=dialog.querySelector(`[name="category-${CSS.escape(el.dataset.averageFor)}"]`);if(control){control.value=el.dataset.value;control.focus();}}, 'apply-budget-averages':()=>{dialog.querySelectorAll('[data-average-for]').forEach(chip=>{const control=dialog.querySelector(`[name="category-${CSS.escape(chip.dataset.averageFor)}"]`);if(control && !control.value)control.value=chip.dataset.value;});}, account:accountEditor, category:()=>categoryEditor(), 'add-subcategory':el=>categoryEditor(null,el.dataset.parent), 'edit-category':el=>categoryEditor(el.dataset.id), transaction:()=>transactionEditor({accountId:state.view==='transactions'?state.transactionFilters.account:null}), 'transaction-account':el=>transactionEditor({accountId:el.dataset.account}), 'transaction-category-context':el=>{dialog.close();transactionEditor({categoryId:el.dataset.category});}, 'choose-transaction-category':el=>{const form=dialog.querySelector('#transaction-form');if(!form)return;form.elements.category_id.value=el.dataset.category;form.elements.category_id.dataset.manual='true';delete form.elements.category_id.dataset.suggested;renderTransactionCategoryGrid(form);updateTransactionPreview();},
   settlement:settlementEditor, split:splitEditor, repayment:el=>repaymentEditor(el.dataset.id), 'settlement-edit':el=>settlementEditEditor(el.dataset.id),
   'settlement-filter':el=>{state.settlementFilter=el.dataset.filter;renderRoute();}, 'investment-filter':el=>{state.investmentFilter=el.dataset.filter;renderRoute();},
   'analytics-scope':el=>{if(el.dataset.scope===state.scope)return;state.scope=el.dataset.scope;syncScopeControl();saveView();renderRoute();},
@@ -1373,7 +1386,7 @@ document.addEventListener('change',async event=>{
   if(event.target.id==='compare-month' && /^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)) { const chosen=event.target.value;state.compareMonth=chosen===state.month?new Date(Date.UTC(Number(chosen.slice(0,4)),Number(chosen.slice(5,7))-2,1)).toISOString().slice(0,7):chosen;if(chosen===state.month)notify(`Comparison moved to ${state.compareMonth} so the periods differ.`);const url=new URL(location.href);url.searchParams.set('compare',state.compareMonth);history.replaceState(null,'',url.pathname+url.search+url.hash);renderRoute(); }
   if(event.target.id==='event-type' || event.target.form?.id==='transaction-form' && event.target.name==='account_id') updateCategories();
   if(event.target.form?.id==='transaction-form') {
-    if(event.target.name==='category_id') event.target.dataset.manual='true';
+    if(event.target.name==='category_id') {event.target.dataset.manual='true';renderTransactionCategoryGrid(event.target.form);}
     if(['description','account_id','event_type'].includes(event.target.name)) suggestTransactionCategory();
     updateTransactionPreview();
   }

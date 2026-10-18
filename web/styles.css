@@ -295,8 +295,17 @@ body{background:#f6f7fb}
 .transaction-quick-fields{display:grid;grid-template-columns:minmax(120px,.75fr) minmax(0,1.25fr);gap:12px}
 .transaction-summary{padding:12px;border-radius:8px;background:#f3f1ff;color:#39315f;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
 .transaction-duplicate{padding:10px 12px;border-radius:8px;background:#fff4dc;color:#754a11;font-size:12px;line-height:1.5}
-.transaction-category-results{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
-.transaction-category-results button{min-height:36px;text-align:left;font-size:12px;white-space:normal}
+.transaction-category-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px}
+.transaction-category-results{display:grid;gap:12px;max-height:340px;overflow-y:auto;padding:10px;margin:-8px 0 4px;border:1px solid #e5e7ed;border-radius:10px;background:#fafbfe}
+.transaction-category-group{display:grid;gap:7px}
+.transaction-category-group h3{margin:0;color:#606a7d;font-size:11px;font-weight:700}
+.transaction-category-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:7px}
+.transaction-category-tile{display:grid;align-content:center;gap:3px;min-height:46px;padding:8px 10px;border:1px solid #e3e6ed;border-radius:8px;background:#fff;text-align:left;font-size:12px;line-height:1.3;cursor:pointer;overflow-wrap:anywhere}
+.transaction-category-tile small{color:#7c8596;font-size:10px}
+.transaction-category-tile:hover{border-color:#a99ee9;background:#f8f6ff}
+.transaction-category-tile.selected{border-color:#7565d8;background:#f1efff;color:#47359e;box-shadow:0 0 0 1px #7565d8}
+.transaction-category-tile:focus-visible{outline:3px solid #bcb3f2;outline-offset:2px}
+.transaction-category-tile.uncategorized{justify-self:start;min-height:36px}
 @media(max-width:520px){.transaction-quick-fields{grid-template-columns:1fr}.live-dialog #transaction-form .dialog-actions{display:grid;grid-template-columns:1fr 1fr}.live-dialog #transaction-form .dialog-actions button{width:100%;padding:8px}.live-dialog #transaction-form .dialog-actions button:last-child{grid-column:1/-1}}
 
 /* Recorded activity keeps the transaction readable before showing ledger detail. */
