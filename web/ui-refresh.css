@@ -1,0 +1,177 @@
+/* Shared FinWise interface layer. Keep financial state colors explicit and consistent. */
+:root {
+  --bg:#f4f7f3;
+  --surface:#fff;
+  --ink:#1c2a22;
+  --muted:#607166;
+  --line:#dfe8df;
+  --dark:#14251c;
+  --purple:#286b48;
+  --purple-soft:#e9f4e8;
+  --green:#176f50;
+  --red:#aa5842;
+  --shadow:0 12px 34px rgba(20,47,31,.055);
+  --display:'Avenir Next',Manrope,ui-sans-serif,system-ui,sans-serif;
+  --font:'Avenir Next','DM Sans',ui-sans-serif,system-ui,sans-serif;
+  color-scheme:light;
+}
+html {scroll-behavior:smooth}
+body {background:radial-gradient(circle at 68% -20%,#e8f2e5 0,transparent 36%),var(--bg);color:var(--ink);font:14px/1.55 var(--font)}
+button,input,select,textarea {font:inherit}
+button,a,summary,input,select,textarea {touch-action:manipulation}
+button,a {transition:background-color .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease,transform .18s ease}
+button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible {outline:3px solid #7fb890;outline-offset:3px}
+::selection {background:#c5e8bf;color:#163921}
+
+/* Navigation is a stable frame around every workspace. */
+.sidebar {background:linear-gradient(180deg,#192e22 0%,#17271f 55%,#14231c 100%);border-right:1px solid #334a39;box-shadow:8px 0 26px #122b1b0a}
+.brand {color:#f7fbf4;letter-spacing:-.045em}
+.brand-mark {background:#d4f5a4;color:#173521;box-shadow:0 4px 16px #c6f28b22}
+.brand-dot {color:#c5ee8d}
+.household-card {background:#ffffff0c;border-color:#ffffff18;border-radius:12px}
+.household-card strong,.profile strong {color:#f0f6ed}
+.household-card span,.profile span {color:#a9c3af}
+.workspace-label {color:#83a28b;font-size:10px;letter-spacing:.14em}
+.nav-item {min-height:42px;border-radius:10px;color:#bdcfc0;font-size:13px;font-weight:550;transition:transform .18s ease}
+.nav-item svg {color:#91ae99}
+.nav-item:hover {background:#ffffff12;color:#fff;transform:translateX(2px)}
+.nav-item:hover svg {color:#d6efbf}
+.nav-item.active {background:#d8f3b2;color:#203d29;box-shadow:0 7px 18px #071b0e2a;font-weight:750}
+.nav-item.active svg {color:#315634}
+.settings-link {border-color:#ffffff20}
+.profile {border-color:#ffffff20}
+.profile button:hover {color:#fff}
+.topbar {background:#ffffffed;border-bottom:1px solid var(--line);box-shadow:0 5px 20px #162f1e0a;backdrop-filter:blur(18px)}
+.breadcrumb {color:#77887a;font-size:12px}
+.breadcrumb strong {color:#2a4834;font-weight:750}
+.scope-segments {background:#edf3ea;border-color:#e1eadc;border-radius:10px}
+.scope-segments button {color:#526854;border-radius:7px;font-weight:600}
+.scope-segments button.selected {color:#214b31;box-shadow:0 2px 8px #17392118}
+.topbar .month-filter {border-color:#d7e4d5;border-radius:10px;box-shadow:0 2px 8px #1c3e2509}
+.topbar .month-filter input {color:#274933}
+.content {max-width:1560px;padding-top:36px}
+.content:focus {outline:none}
+
+/* Shared hierarchy, surfaces and actions. */
+.page-heading {align-items:end;gap:18px;margin-bottom:25px}
+.page-heading .eyebrow {display:block;color:#6d8a6c;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
+.page-heading h1 {font:760 clamp(27px,2.6vw,38px)/1.13 var(--display);letter-spacing:-.05em;color:#1c3022;margin:0 0 9px}
+.page-heading p {max-width:62ch;color:var(--muted);font-size:13px;line-height:1.6}
+.section-kicker {color:#668a6a;font-size:10px;font-weight:800;letter-spacing:.12em}
+.section-heading h2,.overview-panel-heading h2,.live-panel h2 {color:#253b2a;letter-spacing:-.035em}
+.section-heading p,.helper,.coverage-note {color:var(--muted);font-size:12px;line-height:1.6}
+.card,.panel,.completed-changes,.account-card,.finance-card,.recurring-card,.statement-month-card {border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--shadow)}
+.live-panel {padding:24px;margin-bottom:18px}
+.panel:hover,.card:hover {border-color:#d2dfcf}
+.stat-card,.overview-metric,.account-detail-metric {box-shadow:var(--shadow)}
+.money-figure.positive,.stat-value.positive {color:#176f50}
+.money-figure.debt,.stat-value.debt,.account-detail-metric strong.debt {color:#a9633e}
+.money-figure.negative,.stat-value.negative,.balance-variance.negative,.account-detail-metric strong.negative {color:#aa4050}
+.money-figure.unknown,.stat-value.unknown {color:#65736b}
+.account-detail-position .money-figure.unknown {color:#e1f0dc}
+.primary-button,.outline-button,.select-button {min-height:40px;padding:9px 15px;border-radius:10px;font-size:12px;font-weight:700;line-height:1.25}
+.primary-button {background:#214e34;border-color:#214e34;color:#fff;box-shadow:0 4px 12px #244d3526}
+.primary-button:hover {background:#326f49;border-color:#326f49;box-shadow:0 7px 18px #244d3530;transform:translateY(-1px)}
+.outline-button,.select-button {background:#fff;border-color:#d5e2d3;color:#355c3e}
+.outline-button:hover,.select-button:hover {background:#eff6eb;border-color:#a9c9a8;color:#214f35;transform:translateY(-1px)}
+.danger-button {color:#9d493d;border-color:#eaccc4}
+.danger-button:hover {background:#fff1ed;border-color:#d9a79c;color:#92382e}
+button:disabled {transform:none!important;box-shadow:none!important}
+.field {gap:7px;color:#425b45;font-size:12px;font-weight:700}
+.field input,.field select,.field textarea,.live-table select {border:1px solid #cfddcf;border-radius:10px;background:#fff;color:var(--ink);box-shadow:0 1px 3px #1e3a2308}
+.field input:hover,.field select:hover,.field textarea:hover,.live-table select:hover {border-color:#9dbd9e}
+.field input:focus,.field select:focus,.field textarea:focus {border-color:#62a36e;box-shadow:0 0 0 3px #bce1bb77;outline:none}
+.field input::placeholder,.field textarea::placeholder {color:#91a093}
+.live-table {font-size:12px}
+.live-table th {background:#f4f8f2;color:#526d55;font-size:11px;font-weight:800;letter-spacing:.02em}
+.live-table td {border-color:#e8eee6;line-height:1.5}
+.live-table tbody tr:hover {background:#f7faf5}
+.live-table td small {font-size:11px}
+.empty-state {padding:23px;border:1px dashed #cfdfcc;border-radius:11px;background:#f8fbf6;color:#667969;font-size:12px;line-height:1.6}
+.coverage-note {margin-top:20px}
+.live-error {border-color:#eac8c2;border-radius:11px;background:#fff4f0;color:#8e3e35}
+.transaction-indicator,.finance-badge,.recurring-status {font-weight:700}
+
+/* Clear actions and readable rows wherever lists appear. */
+.recent-item,.overview-balances li,.compact-item,.category-tree-row,.insight-line {border-color:#e7ede5}
+.recent-item:hover {background:#f6faf4}
+.recent-copy strong,.compact-item-copy strong,.account-card-name h3 {color:#253b2a}
+.account-card,.finance-card,.recurring-card,.household-person {transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.account-card:hover,.finance-card:hover,.recurring-card:hover,.household-person:hover {transform:translateY(-2px);border-color:#b6d2b1;box-shadow:0 16px 34px #1a3d2918}
+.account-card:focus-within,.finance-card:focus-within,.recurring-card:focus-within {border-color:#8bbb8e;box-shadow:0 0 0 3px #a1d4a353}
+.account-card-name h3 {font-size:18px}
+.account-card-balance .money-figure {font-size:clamp(23px,2.1vw,29px)}
+.recurring-card-title h2 {font-size:18px}
+.recurring-card-price strong {font-size:clamp(18px,2vw,25px)}
+.recurring-tabs,.finance-tabs {border-color:#dfe9db;border-radius:10px;background:#eef4ea}
+.recurring-tabs button,.finance-tabs button {font-size:12px;font-weight:700}
+.recurring-tabs button.active,.finance-tabs button.active {background:#fff;color:#245b38;box-shadow:0 2px 8px #20422a13}
+.analytics-tabs {border-color:#dde8dc}
+.analytics-tab {font-size:12px;font-weight:700;color:#57715b}
+.analytics-tab.active {color:#286b48;border-bottom-color:#3d8c57}
+.ledger-workspace {border-radius:16px;box-shadow:var(--shadow)}
+.ledger-heading h2 {letter-spacing:-.035em}
+.ledger-filters,.ledger-workspace .activity-table th {background:#f5f9f3}
+.activity-table .activity-title strong {font-size:13px}
+.reconcile-side,.reconcile-attachment {border-color:var(--line);border-radius:13px;box-shadow:0 4px 18px #1c40250b}
+.recon-pick:hover,.compare-row:hover {background:#f6faf4}
+.attention-panel {border-color:#dce8d8;border-radius:15px;background:#f9fcf6;box-shadow:0 5px 19px #25412b0a}
+.overview-metric .metric-caption,.recent-copy small,.recent-value small,.overview-panel-heading .helper {font-size:11px}
+.mobile-more-index .more-section {border-radius:15px;box-shadow:var(--shadow)}
+.mobile-more-index .mobile-more .outline-button {background:#f7fbf5;border-color:#dbe8d8;color:#355d3c}
+.mobile-more-index .mobile-more .outline-button:hover {background:#ebf5e7}
+
+/* Dialogs, feedback and route loading. */
+.live-dialog {border:1px solid #dce9db;border-radius:18px;background:#fff;box-shadow:0 30px 90px #0d271c48}
+.live-dialog::backdrop {background:#0d241bb0;backdrop-filter:blur(7px)}
+.live-dialog .dialog-actions {position:sticky;bottom:-27px;z-index:2;margin:18px -27px -27px;padding:14px 27px 27px;background:#fff;border-top:1px solid var(--line)}
+.dialog-head h2 {font-size:23px;color:#203b29}
+.auth-root {background:radial-gradient(circle at 18% 12%,#dcebd8 0,transparent 38%),radial-gradient(circle at 85% 85%,#e8f4de 0,transparent 36%),#f3f7f1}
+.auth-card {border:1px solid #dce8d9;border-radius:20px;box-shadow:0 25px 80px #1e432b1c;padding:34px}
+.auth-card h1 {color:#203a29;letter-spacing:-.04em}
+.auth-card .brand-mark {background:#d4f5a4;color:#173521}
+.toast {border-radius:11px;box-shadow:0 12px 35px #132c1f36}
+.route-loading {display:grid;gap:15px;max-width:1200px;padding-top:8px}
+.route-loading-copy {margin:0;color:#53705a;font-size:13px;font-weight:700}
+.route-loading-head,.route-loading-card {position:relative;overflow:hidden;border-radius:15px;background:#e6eee4}
+.route-loading-head {width:min(430px,60%);height:37px;margin-bottom:8px}
+.route-loading-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.route-loading-card {height:150px}
+.route-loading-card::after,.route-loading-head::after {content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,#ffffffa8,transparent);animation:finwise-shimmer 1.5s infinite}
+@keyframes finwise-shimmer {to {transform:translateX(100%)}}
+
+@media (max-width:1100px) {
+  .content {padding-left:24px;padding-right:24px}
+  .route-loading-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:760px) {
+  .topbar {background:#fffffff2}
+  .topbar .mobile-brand {color:#23412e}
+  .topbar .mobile-brand .brand-mark {background:#255539;color:#f7fbf3}
+  .topbar .breadcrumb strong {color:#45674a}
+  .content {padding:23px 16px calc(106px + env(safe-area-inset-bottom))}
+  .page-heading {gap:12px;margin-bottom:19px}
+  .page-heading h1 {font-size:29px}
+  .page-heading p {font-size:12px}
+  .heading-actions {gap:7px}
+  .heading-actions .outline-button,.heading-actions .primary-button {min-height:42px}
+  .bottom-nav {background:#17291f;border-top:1px solid #34503c;box-shadow:0 -8px 25px #0b291724}
+  .bottom-item {color:#bed2bf}
+  .bottom-item.active {color:#d7f6ae}
+  .bottom-add {background:#d7f6ae;color:#1d3a27;box-shadow:0 7px 18px #0e241c48}
+  .bottom-add:hover {background:#e2ffbd}
+  .live-dialog {border-radius:18px 18px 0 0;padding:22px 18px}
+  .live-dialog .dialog-actions {bottom:-22px;margin:18px -18px -22px;padding:12px 18px calc(18px + env(safe-area-inset-bottom))}
+  .route-loading-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:480px) {
+  .content {padding-inline:14px}
+  .page-heading h1 {font-size:27px}
+  .route-loading-card {height:124px}
+  .route-loading-grid .route-loading-card:last-child {display:none}
+  .account-card,.recurring-card {box-shadow:0 6px 20px #1736210c}
+}
+@media (prefers-reduced-motion:reduce) {
+  html {scroll-behavior:auto}
+  *,*::before,*::after {animation-duration:.01ms!important;transition-duration:.01ms!important}
+}

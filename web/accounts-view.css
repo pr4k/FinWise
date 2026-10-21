@@ -1,0 +1,74 @@
+.account-card-link{color:inherit;text-decoration:none}
+.account-card-link:hover{color:var(--purple);text-decoration:underline;text-underline-offset:3px}
+.account-card-actions .outline-button{color:var(--purple);font-weight:700}
+.account-subscription-count{align-self:start;margin:-5px 0 13px;padding:5px 9px;border-radius:99px;background:#f0f4e9;color:#527049;font-size:10px;font-weight:700}
+.account-detail-page{display:grid;gap:18px}
+.account-detail-back .outline-button{border:0;background:transparent;padding-left:0;color:var(--purple);font-weight:700}
+.account-detail-hero{display:flex;justify-content:space-between;align-items:end;gap:24px;padding:30px 34px;border-radius:19px;background:linear-gradient(115deg,#1d3327,#294c36 65%,#3a6542);color:#f8fbf5;box-shadow:0 20px 42px #203b2c1c}
+.account-detail-hero h1{font-size:clamp(27px,3vw,39px);letter-spacing:-.04em;line-height:1.12;margin:10px 0 8px;overflow-wrap:anywhere}
+.account-detail-hero p,.account-detail-position small{margin:0;color:#c1d2c1;font-size:12px}
+.account-detail-hero .eyebrow{color:#d5e7c6;font-size:11px;text-transform:capitalize;letter-spacing:.08em}
+.account-detail-position{display:grid;gap:2px;text-align:right;flex:none}
+.account-detail-position>span{font-size:11px;color:#d7e5d0}
+.account-detail-position .money-figure{font-size:clamp(25px,2.8vw,37px);line-height:1.2;color:#fff;letter-spacing:-.05em}
+.account-detail-position .money-figure.debt{color:#ffe0b7}
+.account-detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:-5px}
+.account-detail-actions .outline-button{background:#fff;min-height:37px}
+.account-detail-actions .outline-button:first-child{background:#d5f5a5;border-color:#c6e895;color:#28472b;font-weight:700}
+.account-detail-period{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-top:8px}
+.account-detail-period h2,.account-panel-heading h2,.account-basis-panel h2{font-size:20px;line-height:1.25;letter-spacing:-.035em;margin:4px 0}
+.account-detail-period p,.account-panel-heading p,.account-basis-panel p{font-size:12px;color:var(--muted);margin:3px 0 0}
+.account-detail-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.account-detail-metric{display:grid;align-content:start;gap:6px;min-width:0;padding:18px;border:1px solid var(--line);border-radius:13px;background:#fff}
+.account-detail-metric>span{color:var(--muted);font-size:11px;font-weight:700}
+.account-detail-metric strong{font:750 clamp(18px,2vw,26px)/1.2 var(--display);letter-spacing:-.04em;overflow-wrap:anywhere}
+.account-detail-metric strong.positive{color:var(--green)}
+.account-detail-metric strong.debt,.account-detail-metric strong.negative{color:var(--red)}
+.account-detail-metric small{font-size:10px;color:var(--muted);line-height:1.35}
+.account-detail-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:14px}
+.account-spend-panel,.account-basis-panel,.account-ledger-panel{padding:22px;min-width:0}
+.account-subscription-panel{padding:22px;min-width:0}
+.account-subscription-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.account-subscription{display:flex;justify-content:space-between;align-items:center;gap:14px;min-width:0;padding:14px;border:1px solid var(--line);border-radius:11px;background:#fafbf8}
+.account-subscription-name{display:flex;align-items:center;gap:11px;min-width:0}
+.account-subscription-name>div,.account-subscription-value{display:grid;gap:3px;min-width:0}
+.account-subscription-name strong,.account-subscription-value strong{font-size:12px;overflow-wrap:anywhere}
+.account-subscription-name small,.account-subscription-value small{font-size:10px;color:var(--muted);line-height:1.35}
+.account-subscription-value{text-align:right}
+.account-subscription .subscription-avatar{width:39px;height:39px;border-radius:10px;font-size:17px}
+.account-subscription .subscription-avatar img{width:24px;height:24px}
+.account-panel-heading{display:flex;justify-content:space-between;align-items:end;gap:12px;margin-bottom:12px}
+.account-panel-heading>small{color:var(--muted);font-size:11px}
+.account-top-spends{list-style:none;margin:0;padding:0}
+.account-top-spends li{display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+.account-top-spends .spend-rank{display:grid;place-items:center;width:25px;height:25px;border-radius:7px;background:#f3f5ef;color:#678166;font-size:11px;font-weight:800}
+.account-top-spends li strong,.account-top-spends li small{display:block;overflow-wrap:anywhere}
+.account-top-spends li strong{font-size:12px}
+.account-top-spends li small{font-size:10px;color:var(--muted);margin-top:2px}
+.account-top-spends li b{font-size:12px;color:var(--red);white-space:nowrap}
+.account-spend-panel>.helper{font-size:10px;margin:12px 0 0;color:var(--muted)}
+.account-basis-panel>strong{display:block;font:750 19px var(--display);margin-top:14px}
+.account-basis-divider{height:1px;background:var(--line);margin:19px 0}
+.account-checks{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+.account-checks summary{cursor:pointer;color:var(--purple);font-size:12px;font-weight:700}
+.account-check-row{display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding:12px 0}
+.account-check-row:first-of-type{margin-top:12px}
+.account-check-row>div{display:grid;gap:2px}
+.account-check-row strong{font-size:11px}
+.account-check-row small{font-size:10px;color:var(--muted)}
+.account-check-actions{display:flex!important;gap:5px}
+.account-check-actions .outline-button{min-height:29px;font-size:10px;padding:3px 8px}
+.account-ledger-panel{padding-bottom:8px}
+.account-ledger-list{margin:0 -22px}
+.account-ledger-row{display:grid;grid-template-columns:115px minmax(0,1fr) minmax(155px,auto) auto;align-items:center;gap:16px;padding:15px 22px;border-top:1px solid var(--line)}
+.account-ledger-row.is-anchor{background:#f7faf4}
+.account-ledger-date,.account-ledger-copy,.account-ledger-values{display:grid;gap:3px;min-width:0}
+.account-ledger-date time,.account-ledger-copy strong,.account-ledger-values strong{font-size:12px;font-weight:700}
+.account-ledger-date small,.account-ledger-copy small,.account-ledger-values small{font-size:10px;color:var(--muted);line-height:1.35}
+.account-ledger-copy strong,.account-ledger-copy small{overflow-wrap:anywhere}
+.account-ledger-values{text-align:right}
+.account-ledger-values strong.in{color:var(--green)}
+.account-ledger-values strong.out{color:var(--red)}
+.account-ledger-row>.outline-button{font-size:10px;min-height:30px;padding:4px 9px}
+@media(max-width:1050px){.account-detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.account-detail-grid,.account-subscription-list{grid-template-columns:1fr}.account-ledger-row{grid-template-columns:95px minmax(0,1fr) minmax(130px,auto)}.account-ledger-row>.outline-button{grid-column:2/-1;justify-self:end}}
+@media(max-width:650px){.account-detail-page{gap:14px}.account-detail-hero{padding:23px;align-items:start;flex-direction:column;gap:19px}.account-detail-position{text-align:left}.account-detail-actions .outline-button{flex:1 1 auto}.account-detail-period{align-items:start;flex-direction:column}.account-detail-metrics{gap:8px}.account-detail-metric{padding:13px}.account-detail-metric strong{font-size:18px}.account-spend-panel,.account-basis-panel,.account-ledger-panel,.account-subscription-panel{padding:17px}.account-subscription{align-items:start;flex-direction:column}.account-subscription-value{text-align:left;padding-left:50px}.account-top-spends li{grid-template-columns:24px minmax(0,1fr);gap:9px}.account-top-spends li b{grid-column:2;justify-self:start}.account-ledger-list{margin:0 -17px}.account-ledger-row{grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;padding:13px 17px}.account-ledger-date{grid-column:1/-1;display:flex;gap:8px}.account-ledger-copy{grid-column:1}.account-ledger-values{grid-column:2;grid-row:2;max-width:150px}.account-ledger-row>.outline-button{grid-column:1/-1;justify-self:start;margin-top:4px}}

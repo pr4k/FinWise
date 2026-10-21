@@ -74,8 +74,8 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 
 **Goal:** Review detected repeating payments and maintain subscription tags.
 
-- Summary counts and tabs: **To review**, **Subscriptions**, and **Ignored**, each with its own empty state. Each pattern card shows name, account, observed amount or range, frequency, payment count, first/latest dates, and expandable occurrence history with source.
-- A pattern can be marked as a subscription, have its tag removed, be ignored, or be restored to review. The status is saved. Detection uses visible Money Manager transactions and bank statement rows; bank evidence already linked to a ledger entry counts once.
+- Summary counts and tabs: **To review**, **Subscriptions**, and **Ignored**, each with its own empty state. Each pattern card shows a local logo for recognized services or the first character of its name, plus name, account, observed amount or range, frequency, payment count, first/latest dates, and expandable occurrence history with source. The Analytics subscription cards use the same visual identity.
+- A pattern can be marked as a subscription, have its tag removed, be ignored, or be restored to review. The status is saved. Amazon Prime, Prime Video, Netflix, Backblaze, Vultr, and Azure payment names default to subscription after one observed payment; an explicit tag removal or ignore overrides the default. Detection uses visible Money Manager transactions and bank statement rows; bank evidence already linked to a ledger entry counts once.
 - This is observed payment history, not a future billing schedule or an automatic cancellation tool. The Analytics subscription panel uses the tagged patterns.
 
 ### 5. Transactions (`#transactions`, `#transactions/all`)
@@ -104,10 +104,10 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 
 **Goal:** Manage account identity, liability context, anchors, and per account balance history.
 
-- Account groups: Bank and cash; Credit cards; optional Settlements. Each card shows name, type, currency, visibility, balance or amount owed, anchor source, optional card payment due/date, and actions. Credit cards have a **Pay card** action for partial or full payment from a bank or cash account.
+- Account groups: Bank and cash; Credit cards; optional Settlements. Each card shows name, type, currency, visibility, balance or amount owed, anchor source, and optional card payment due/date. Opening a card navigates to a dedicated account page. Credit cards have a **Pay card** action for partial or full payment from a bank or cash account on that page.
 - **Add account**: name, bank/card/cash/settle up type, currency, private/shared visibility, optional known balance and its date/time; card adds optional statement payment amount and due date. New account balances may remain unknown.
 - Owner actions: edit name/type/card due; set or edit known opening balance. A bank/card/cash account can record an observed balance check; settle up accounts cannot.
-- Selected account subview: known balance, selected month's chronological ledger with signed movement, computed balance from start, displayed balance and anchor basis; manual balance checks with observed amount, computed amount, variance, stale/current/removed status. Checks can be corrected or removed while audit history remains.
+- Selected account subview: current balance or amount owed, month or all dates activity summary (money in, money out, net movement and count), five largest expense movements, account subscriptions with selected-month observed totals, known starting balance, balance checks, and newest-first account history with signed movement, displayed balance and anchor basis. The account list shows subscription counts. A transaction opens its full details. Transfers affect movement totals but are excluded from top spends. Checks can be corrected or removed while audit history remains.
 - **Balance check** editor: actual amount, basis (cash count for cash; posted/current/statement closing for others), precise browser local date/time. Changing time previews the calculated balance at that instant. The check does not create a transaction.
 
 ### 8. Budgets (`#budgets`)

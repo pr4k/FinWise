@@ -292,6 +292,28 @@ async fn recurring_payments_combine_ledger_and_bank_evidence_and_keep_subscripti
 }
 
 #[tokio::test]
+async fn named_subscription_payments_appear_after_one_observation_and_can_be_removed() {
+    let (client, _) = setup().await;
+    let account = client.account("Card", "credit_card").await;
+    let category = client.category("Services", "expense").await;
+    for (index, name) in ["Amazon Prime", "Netflix", "Backblaze", "Vultr", "Microsoft Azure"].iter().enumerate() {
+        let mut value = transaction("expense", "100.00", &account, &category, "personal");
+        value["effective_date"] = json!(format!("2026-01-{:02}", index + 5));
+        value["description"] = json!(name);
+        client.create("transactions", value).await;
+    }
+    let listed = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    let rows = listed["data"].as_array().unwrap();
+    assert_eq!(rows.len(), 5);
+    assert!(rows.iter().all(|row| row["subscription"] == true && row["count"] == 1));
+    let path = format!("recurring-transactions/{}", rows[0]["key"].as_str().unwrap());
+    let removed = client.call("PUT", &path, json!({"subscription":false}), None, None).await;
+    assert_eq!(removed.0, StatusCode::OK);
+    let again = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    assert_eq!(again["data"].as_array().unwrap().iter().filter(|row| row["subscription"] == true).count(), 4);
+}
+
+#[tokio::test]
 async fn bulk_scope_moves_selected_allocations_and_preserves_ledger() {
     let (client, _) = setup().await;
     let account = client.account("Bank", "bank").await;

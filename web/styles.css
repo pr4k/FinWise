@@ -416,6 +416,12 @@ body{background:#f6f7fb}
 .recurring-card.is-subscription{border-left-color:#785fcb}
 .recurring-card.is-ignored{border-left-color:#b7bdc8;background:#fbfbfc}
 .recurring-card-main{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+.recurring-card-identity,.analytics-subscription-identity{display:flex;align-items:flex-start;gap:13px;min-width:0}
+.subscription-avatar{display:grid;place-items:center;flex:none;width:48px;height:48px;border:1px solid rgba(30,37,55,.07);border-radius:13px;background:var(--avatar-bg);color:#34394b;font-size:21px;font-weight:750;line-height:1;overflow:hidden}
+.subscription-avatar>*{grid-area:1/1}
+.subscription-avatar img{width:27px;height:27px;object-fit:contain;opacity:0}
+.subscription-avatar.has-logo img{opacity:1}
+.subscription-avatar.has-logo .subscription-initial{opacity:0}
 .recurring-card-title{min-width:0}
 .recurring-status{display:inline-block;width:max-content;padding:5px 9px;border-radius:99px;background:#f1efff;color:#6653bc;font-size:10px;font-weight:750;letter-spacing:.02em}
 .is-subscription .recurring-status,.analytics-subscription .recurring-status{background:#e9f5ef;color:#207354}
@@ -447,6 +453,10 @@ body{background:#f6f7fb}
 .subscription-total-empty strong{font-size:16px}
 .analytics-subscription-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .analytics-subscription{display:flex;justify-content:space-between;gap:15px;padding:15px;border:1px solid #e8e9f0;border-radius:11px;background:#fafbfe}
+.analytics-subscription-identity{flex:1}
+.analytics-subscription .subscription-avatar{width:42px;height:42px;border-radius:11px;font-size:19px}
+.analytics-subscription .subscription-avatar img{width:25px;height:25px}
+.analytics-subscription-identity>div{min-width:0}
 .analytics-subscription h3{margin:8px 0 3px;font-size:14px;overflow-wrap:anywhere}
 .analytics-subscription p,.analytics-subscription small{margin:0;color:#788290;font-size:11px}
 .analytics-subscription-amount{text-align:right;flex:none}

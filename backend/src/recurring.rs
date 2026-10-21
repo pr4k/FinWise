@@ -37,6 +37,13 @@ fn normalize(raw: &str) -> String {
     words.join(" ")
 }
 
+fn known_subscription(raw: &str) -> bool {
+    let name = normalize(raw);
+    name.contains("amazon prime")
+        || name.contains("prime video")
+        || name.split_whitespace().any(|word| matches!(word, "netflix" | "backblaze" | "vultr" | "azure"))
+}
+
 fn key(p: &Payment) -> String {
     auth::hash(&format!(
         "{}\u{1f}{}\u{1f}{}",
@@ -185,11 +192,14 @@ pub async fn list(db: &mut SqliteConnection, p: &Principal) -> Result<Value> {
     for (key, mut items) in groups {
         items.sort_by_key(|p| p.date);
         let cadence = frequency(&items);
-        let (subscription, ignored) = labels.get(&key).copied().unwrap_or((false, false));
+        let latest = items.last().unwrap();
+        let (subscription, ignored) = labels
+            .get(&key)
+            .copied()
+            .unwrap_or((known_subscription(&latest.name), false));
         if cadence.is_none() && !subscription && !ignored {
             continue;
         }
-        let latest = items.last().unwrap();
         let currency = &latest.currency;
         let amounts: Vec<i64> = items.iter().map(|p| p.amount).collect();
         let min = *amounts.iter().min().unwrap();
