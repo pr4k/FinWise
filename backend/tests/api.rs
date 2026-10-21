@@ -641,6 +641,34 @@ async fn investment_shortcut_adds_separate_contributions_and_stock_holdings() {
 }
 
 #[tokio::test]
+async fn correcting_one_investment_movement_preserves_other_dates() {
+    let (client, _) = setup().await;
+    let bank = client.account("Investment bank", "bank").await;
+    let fund = client.create("investments",json!({"name":"Index fund","type":"investment","currency":"INR","initial_record":{"month":"2026-09","principal":"50.00","account_id":bank["id"],"transaction_date":"2026-09-05"}})).await;
+    let id = fund["id"].as_str().unwrap();
+    let first_id = fund["records"][0]["transaction_ids"][0].as_str().unwrap().to_owned();
+    let added = client.call("POST",&format!("investments/{id}/contributions"),json!({"amount":"20.00","account_id":bank["id"],"transaction_date":"2026-09-10"}),Some("extra-contribution"),Some(fund["revision"].as_i64().unwrap())).await;
+    assert_eq!(added.0,StatusCode::OK,"{}",added.1);
+    let second_id = added.1["records"][0]["transaction_ids"][1].as_str().unwrap().to_owned();
+    let valuation = client.call("PUT",&format!("investments/{id}/months/2026-09"),json!({"contribution":"70.00","withdrawal":"0","value":"75.00","account_id":bank["id"],"transaction_date":"2026-09-05"}),None,Some(added.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(valuation.0,StatusCode::OK,"{}",valuation.1);
+    assert_eq!(valuation.1["records"][0]["transaction_ids"].as_array().unwrap().len(),2);
+    let replace = client.call("PUT",&format!("investments/{id}/months/2026-09"),json!({"contribution":"80.00","withdrawal":"0","value":"80.00","account_id":bank["id"],"transaction_date":"2026-09-05"}),None,Some(valuation.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(replace.0,StatusCode::CONFLICT);
+    let corrected = client.call("PATCH",&format!("investments/{id}/movements/{first_id}"),json!({"amount":"60.00","account_id":bank["id"],"transaction_date":"2026-09-06"}),None,Some(valuation.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(corrected.0,StatusCode::OK,"{}",corrected.1);
+    assert_eq!(corrected.1["records"][0]["contribution"],"80.00");
+    assert_eq!(corrected.1["records"][0]["transaction_ids"].as_array().unwrap().len(),2);
+    let second = client.call("GET",&format!("transactions/{second_id}"),json!({}),None,None).await.1;
+    assert_eq!(second["effective_date"],"2026-09-10");
+    assert_eq!(second["amount"],"20.00");
+    let deleted = client.call("DELETE",&format!("investments/{id}/movements/{second_id}"),json!({}),None,Some(corrected.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(deleted.0,StatusCode::OK,"{}",deleted.1);
+    assert_eq!(deleted.1["records"][0]["contribution"],"60.00");
+    assert_eq!(deleted.1["records"][0]["transaction_ids"].as_array().unwrap().len(),1);
+}
+
+#[tokio::test]
 async fn opening_portfolio_value_is_baseline_and_sip_is_processed_once() {
     let (client, _) = setup().await;
     let bank = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"2000.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
@@ -1653,6 +1681,45 @@ async fn transaction_edit_and_delete_keep_revision_history() {
     );
 }
 
+#[tokio::test]
+async fn transaction_type_can_change_from_expense_to_transfer_and_income() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let cash = client.account("Cash", "cash").await;
+    let food = client.category("Food", "expense").await;
+    let salary = client.category("Salary", "income").await;
+    let created = client.create("transactions", transaction("expense", "10.00", &bank, &food, "personal")).await;
+    let path = format!("transactions/{}", created["id"].as_str().unwrap());
+    let transferred = client.call("PATCH", &path, json!({"event_type":"transfer","movements":[{"account_id":bank["id"],"amount":"-10.00"},{"account_id":cash["id"],"amount":"10.00"}],"allocations":[]}), None, Some(1)).await;
+    assert_eq!(transferred.0, StatusCode::OK, "{}", transferred.1);
+    assert_eq!(transferred.1["event_type"], "transfer");
+    assert!(transferred.1.get("paid_by_user_id").is_none());
+    let income = client.call("PATCH", &path, json!({"event_type":"income","movements":[{"account_id":cash["id"],"amount":"10.00"}],"allocations":[{"category_id":salary["id"],"amount":"10.00","scope":"personal"}]}), None, Some(2)).await;
+    assert_eq!(income.0, StatusCode::OK, "{}", income.1);
+    assert_eq!(income.1["event_type"], "income");
+    let summary = client.call("GET", "analytics/summary?from=2026-09-01&to=2026-10-01", json!({}), None, None).await;
+    assert_eq!(summary.1["income"], "10.00");
+    assert_eq!(summary.1["net_spending"], "0.00");
+    let revisions = client.call("GET", &format!("{path}/revisions"), json!({}), None, None).await;
+    assert_eq!(revisions.1["data"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn historical_transaction_can_be_corrected_after_category_and_account_archive() {
+    let (client, _) = setup().await;
+    let bank = client.account("Old bank", "bank").await;
+    let food = client.category("Old food", "expense").await;
+    let created = client.create("transactions", transaction("expense", "10.00", &bank, &food, "personal")).await;
+    let category_path = format!("categories/{}/archive", food["id"].as_str().unwrap());
+    assert_eq!(client.call("POST", &category_path, json!({}), Some("archive-old-category"), Some(1)).await.0, StatusCode::OK);
+    let account_path = format!("accounts/{}", bank["id"].as_str().unwrap());
+    assert_eq!(client.call("PATCH", &account_path, json!({"active":false}), None, Some(1)).await.0, StatusCode::OK);
+    let path = format!("transactions/{}", created["id"].as_str().unwrap());
+    let updated = client.call("PATCH", &path, json!({"description":"Corrected old entry"}), None, Some(1)).await;
+    assert_eq!(updated.0, StatusCode::OK, "{}", updated.1);
+    assert_eq!(updated.1["description"], "Corrected old entry");
+}
+
 async fn partner(owner: &Client) -> (Client, Value) {
     let me = owner.call("GET", "me", json!({}), None, None).await.1;
     let token = finwise_api::auth::token();
@@ -2588,7 +2655,7 @@ async fn budgets_refunds_reporting_periods_and_revision_history() {
     client
         .transaction("refund", "500.00", &bank, &category, "family")
         .await;
-    let plan=client.create("budgets",json!({"month":"2026-09","scope":"family","currency":"INR","expected_income":"20000.00","lines":[{"category_id":category["id"],"amount":"10000.00"}]})).await;
+    let plan=client.create("budgets",json!({"month":"2026-09","scope":"family","currency":"INR","expected_income":"20000.00","savings_goal":"3000.00","lines":[{"category_id":category["id"],"amount":"10000.00"}]})).await;
     let path = format!("budgets/{}", plan["id"].as_str().unwrap());
     let tracking = client
         .call("GET", &format!("{path}/tracking"), json!({}), None, None)
@@ -2670,6 +2737,7 @@ async fn budgets_refunds_reporting_periods_and_revision_history() {
         .await;
     assert_eq!(copied.0, StatusCode::CREATED);
     assert_eq!(copied.1["state"], "draft");
+    assert_eq!(copied.1["savings_goal"], "3000.00");
     assert_ne!(copied.1["id"], plan["id"]);
 }
 

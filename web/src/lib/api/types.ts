@@ -84,4 +84,5 @@ export type InitialInvestmentRecord = { "month": string; "principal": string; "c
 export type InvestmentInput = { "name": string; "type": "investment" | "emergency_fund"; "asset_class"?: "mutual_fund" | "stock_market"; "currency": string; "target"?: string; "monthly_goal"?: string; "notes"?: string; "visibility"?: "private" | "shared"; "sip"?: SipSchedule | null; "opening_value"?: string; "opening_month"?: string; "initial_record"?: InitialInvestmentRecord };
 export type InvestmentMonthInput = { "contribution": string; "withdrawal": string; "value"?: string | null; "account_id"?: string; "transaction_date"?: string; "expected_revision"?: number };
 export type InvestmentContributionInput = { "amount": string; "account_id": string; "transaction_date": string; "value"?: string; "expected_revision"?: number };
+export type InvestmentMovementPatch = { "amount": string; "account_id": string; "transaction_date": string; "expected_revision"?: number };
 export type ProcessSipInput = { "account_id": string; "transaction_date"?: string; "value"?: string; "expected_revision"?: number };

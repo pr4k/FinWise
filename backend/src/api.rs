@@ -986,7 +986,12 @@ pub(crate) async fn route(
                     if after["effective_at"].is_null() {
                         after.as_object_mut().unwrap().remove("effective_at");
                     }
-                    validate_ledger(db, p, &after).await?;
+                    if !["expense", "refund"].contains(&after["event_type"].as_str().unwrap_or("")) {
+                        after.as_object_mut().unwrap().remove("paid_by_user_id");
+                    } else if after["paid_by_user_id"].is_null() {
+                        after["paid_by_user_id"] = json!(p.user_id);
+                    }
+                    validate_ledger_with_history(db, p, &after, Some(&before)).await?;
                 }
                 "budgets" => {
                     budget_write(p, &before)?;
@@ -1244,6 +1249,7 @@ pub(crate) async fn route(
                                 "scope",
                                 "currency",
                                 "expected_income",
+                                "savings_goal",
                                 "lines",
                                 "targets",
                                 "state",
@@ -1486,6 +1492,14 @@ pub(crate) async fn validate_ledger(
     p: &Principal,
     v: &Value,
 ) -> Result<()> {
+    validate_ledger_with_history(db, p, v, None).await
+}
+pub(crate) async fn validate_ledger_with_history(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    v: &Value,
+    before: Option<&Value>,
+) -> Result<()> {
     domain::validate_transaction(v)?;
     if let Some(payer) = v.get("paid_by_user_id") {
         let payer = payer.as_str().ok_or_else(|| ApiError::invalid("Paid by must be a household member."))?;
@@ -1511,7 +1525,8 @@ pub(crate) async fn validate_ledger(
     }
     for movement in v["movements"].as_array().unwrap() {
         let a = storage::get(db, p, "accounts", text(movement, "account_id")?).await?;
-        if a["active"] == false || a["currency"] != v["currency"] {
+        let previously_used = before.is_some_and(|old| old["movements"].as_array().is_some_and(|legs| legs.iter().any(|leg| leg["account_id"] == a["id"])));
+        if (a["active"] == false && !previously_used) || a["currency"] != v["currency"] {
             return Err(ApiError::invalid(
                 "Movements require active accounts in the transaction currency.",
             ));
@@ -1533,7 +1548,8 @@ pub(crate) async fn validate_ledger(
             } else {
                 "expense"
             };
-            if c["archived"] == true || c["kind"] != expected {
+            let previously_used = before.is_some_and(|old| old["allocations"].as_array().is_some_and(|items| items.iter().any(|item| item["category_id"] == c["id"])));
+            if (c["archived"] == true && !previously_used) || c["kind"] != expected {
                 return Err(ApiError::invalid(
                     "Allocation category must be active and match the event kind.",
                 ));
@@ -1763,9 +1779,8 @@ pub(crate) fn month_bounds(month: &str) -> Result<(String, String)> {
     Ok((from.to_string(), to.to_string()))
 }
 fn budget_write(p: &Principal, v: &Value) -> Result<()> {
-    if v["owner_id"] == p.user_id
-        || (v["scope"] == "family" && ["owner", "admin"].contains(&p.role.as_str()))
-    {
+    if (v["scope"] == "family" && ["owner", "admin"].contains(&p.role.as_str()))
+        || (v["scope"] == "personal" && v["owner_id"] == p.user_id) {
         Ok(())
     } else {
         Err(ApiError::forbidden())

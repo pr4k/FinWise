@@ -169,7 +169,7 @@ async fn post_investment_movements(db: &mut SqliteConnection, p: &Principal, hol
     let Some(account_id) = record["account_id"].as_str() else { return Ok(()); };
     let account = storage::get(db, p, "accounts", account_id).await?;
     let currency = text(holding, "currency")?;
-    if account["active"] == false || account["currency"] != currency {
+    if account["active"] == false || account["currency"] != currency || account["subtype"] == "settle_up" {
         return Err(ApiError::invalid("Choose an active account in the investment currency."));
     }
     let date = text(record, "transaction_date")?;
@@ -709,6 +709,77 @@ pub async fn route(
             decorate_investment(&mut saved)?;
             ok(saved)
         }
+        ("PATCH", ["investments", id, "movements", movement_id])
+        | ("DELETE", ["investments", id, "movements", movement_id]) => {
+            if method == "PATCH" { api::allowed_body(body, &["amount", "account_id", "transaction_date"])?; }
+            else { api::allowed_body(body, &[])?; }
+            let before = storage::get(db, p, "investments", id).await?;
+            owner(p, &before)?;
+            active(&before)?;
+            api::revision(headers, body, &before)?;
+            let currency = text(&before, "currency")?;
+            let mut after = before.clone();
+            let records = after["records"].as_array_mut().ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
+            let record = records.iter_mut().find(|record| record["transaction_ids"].as_array().is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(*movement_id)))).ok_or_else(ApiError::missing)?;
+            let transaction = storage::get(db, p, "transactions", movement_id).await?;
+            if transaction["voided"] == true || transaction["investment_id"] != before["id"] {
+                return Err(ApiError::conflict("Investment movement is no longer active."));
+            }
+            let kind = text(&transaction, "event_type")?;
+            if !["investment", "investment_withdrawal"].contains(&kind) {
+                return Err(ApiError::invalid("Invalid investment movement type."));
+            }
+            let field = if kind == "investment" { "contribution" } else { "withdrawal" };
+            let prior_amount = positive(&transaction, "amount", currency)?;
+            let changed_amount = if method == "PATCH" { positive(body, "amount", currency)? } else { 0 };
+            let total = nonnegative(record, field, currency)?
+                .checked_sub(prior_amount)
+                .and_then(|n| n.checked_add(changed_amount))
+                .ok_or_else(|| ApiError::invalid("Investment month amount is out of range."))?;
+            record[field] = json!(format_money(total, currency)?);
+            let ids = record["transaction_ids"].as_array_mut().ok_or_else(|| ApiError::invalid("Invalid investment movements."))?;
+            let first = ids.first() == Some(&json!(movement_id));
+            if method == "DELETE" { ids.retain(|value| value.as_str() != Some(*movement_id)); }
+            let no_movements = ids.is_empty();
+            if first {
+                if let Some(next_id) = ids.first().and_then(Value::as_str).filter(|_| method == "DELETE") {
+                    let next = storage::get(db, p, "transactions", next_id).await?;
+                    record["account_id"] = next["movements"][0]["account_id"].clone();
+                    record["transaction_date"] = next["effective_date"].clone();
+                } else if method == "DELETE" {
+                    record.as_object_mut().unwrap().remove("account_id");
+                    record.as_object_mut().unwrap().remove("transaction_date");
+                } else {
+                    record["account_id"] = body["account_id"].clone();
+                    record["transaction_date"] = body["transaction_date"].clone();
+                }
+            }
+            if method == "DELETE" && no_movements { record["sip_processed"] = json!(false); }
+            let record_month = text(record, "month")?.to_owned();
+            let mut check = after.clone();
+            decorate_investment(&mut check)?;
+            if method == "PATCH" {
+                let date = text(body, "transaction_date")?;
+                domain::date(date)?;
+                if !date.starts_with(&record_month) { return Err(ApiError::invalid("Movement date must be in its investment month.")); }
+                let account_id = text(body, "account_id")?;
+                let account = storage::get(db, p, "accounts", account_id).await?;
+                if account["subtype"] == "settle_up" { return Err(ApiError::invalid("Choose a bank, card, or cash funding account.")); }
+                let signed = format_money(if kind == "investment" { -changed_amount } else { changed_amount }, currency)?;
+                let mut changed = transaction.clone();
+                changed["amount"] = body["amount"].clone();
+                changed["effective_date"] = json!(date);
+                changed["movements"] = json!([{"account_id":account_id,"amount":signed}]);
+                api::validate_ledger_with_history(db, p, &changed, Some(&transaction)).await?;
+                reconciliation::invalidate(db, p, movement_id).await?;
+                storage::update(db, p, &transaction, changed, "investment_movement_corrected").await?;
+            } else {
+                retire_investment_movements(db, p, &json!({"transaction_ids":[movement_id]})).await?;
+            }
+            let mut saved = storage::update(db, p, &before, after, if method == "PATCH" { "investment_movement_corrected" } else { "investment_movement_removed" }).await?;
+            decorate_investment(&mut saved)?;
+            ok(saved)
+        }
         ("PUT", ["investments", id, "months", record_month]) => {
             api::allowed_body(body, &["contribution", "withdrawal", "value", "account_id", "transaction_date"])?;
             month(record_month)?;
@@ -758,6 +829,9 @@ pub async fn route(
             if same_movement {
                 record["transaction_ids"] = old_record.as_ref().unwrap()["transaction_ids"].clone();
             } else {
+                if old_record.as_ref().is_some_and(|old| old["transaction_ids"].as_array().is_some_and(|ids| ids.len() > 1)) {
+                    return Err(ApiError::conflict("This month has separate investment movements. Correct them individually."));
+                }
                 if let Some(old) = &old_record { retire_investment_movements(db, p, old).await?; }
                 post_investment_movements(db, p, &before, &mut record).await?;
             }

@@ -9175,6 +9175,143 @@
         }
       }
     },
+    "/investments/{id}/movements/{movement_id}": {
+      "patch": {
+        "operationId": "patch_investments_id_movements_movement_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "movement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestmentMovementPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_investments_id_movements_movement_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "movement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Success"
+          }
+        }
+      }
+    },
     "/investments/{id}/months/{month}": {
       "put": {
         "operationId": "put_investments_id_months_month",
@@ -13852,6 +13989,31 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal money; never a JSON number."
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "amount",
+          "account_id",
+          "transaction_date"
+        ]
+      },
+      "InvestmentMovementPatch": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "transaction_date": {
+            "type": "string",
+            "format": "date"
           },
           "expected_revision": {
             "type": "integer"
