@@ -4676,6 +4676,13 @@
             }
           },
           {
+            "name": "line_category_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "destination",
             "in": "query",
             "schema": {
@@ -4741,6 +4748,13 @@
           },
           {
             "name": "category_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "line_category_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -11461,6 +11475,13 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal money; never a JSON number."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "pooled"
+            ]
           }
         },
         "required": [
@@ -13917,6 +13938,20 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal money; never a JSON number."
+          },
+          "before_mode": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "pooled"
+            ]
+          },
+          "after_mode": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "pooled"
+            ]
           }
         },
         "required": [

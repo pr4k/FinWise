@@ -1979,25 +1979,25 @@ async fn preview_budget_change(db: &mut SqliteConnection, p: &Principal, before:
     let before_gap = money(text(&before_summary, "funding_gap")?, currency)?;
     let after_gap = money(text(&after_summary, "funding_gap")?, currency)?;
     let changes = |key: &str| -> Result<Vec<Value>> {
-        let mut old = HashMap::<String,i64>::new();
-        let mut new = HashMap::<String,i64>::new();
+        let mut old = HashMap::<String,(i64,String)>::new();
+        let mut new = HashMap::<String,(i64,String)>::new();
         for line in before[key].as_array().into_iter().flatten() {
             let name = if key == "lines" { "category_id" } else { "destination" };
-            old.insert(text(line, name)?.to_owned(), money(text(line, "amount")?, currency)?);
+            old.insert(text(line, name)?.to_owned(), (money(text(line, "amount")?, currency)?, line["mode"].as_str().unwrap_or("exact").to_owned()));
         }
         for line in after[key].as_array().into_iter().flatten() {
             let name = if key == "lines" { "category_id" } else { "destination" };
-            new.insert(text(line, name)?.to_owned(), money(text(line, "amount")?, currency)?);
+            new.insert(text(line, name)?.to_owned(), (money(text(line, "amount")?, currency)?, line["mode"].as_str().unwrap_or("exact").to_owned()));
         }
         let mut ids: Vec<String> = old.keys().chain(new.keys()).cloned().collect();
         ids.sort(); ids.dedup();
         ids.into_iter().filter_map(|id| {
-            let from = *old.get(&id).unwrap_or(&0);
-            let to = *new.get(&id).unwrap_or(&0);
-            (from != to).then_some((id, from, to))
-        }).map(|(id, from, to)| {
+            let (from, before_mode) = old.get(&id).cloned().unwrap_or((0,"exact".into()));
+            let (to, after_mode) = new.get(&id).cloned().unwrap_or((0,"exact".into()));
+            (from != to || key == "lines" && before_mode != after_mode).then_some((id, from, to, before_mode, after_mode))
+        }).map(|(id, from, to, before_mode, after_mode)| {
             let delta = to.checked_sub(from).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
-            Ok(json!({"id":id,"before":format_money(from,currency)?,"after":format_money(to,currency)?,"delta":format_money(delta,currency)?}))
+            Ok(json!({"id":id,"before":format_money(from,currency)?,"after":format_money(to,currency)?,"delta":format_money(delta,currency)?,"before_mode":before_mode,"after_mode":after_mode}))
         }).collect()
     };
     let category_changes = changes("lines")?;
@@ -2042,6 +2042,7 @@ async fn validate_budget(
         .ok_or_else(|| ApiError::invalid("lines must be an array."))?;
     let mut seen = std::collections::HashSet::new();
     let mut sum = 0;
+    let mut pooled = Vec::new();
     for line in lines {
         let category = text(line, "category_id")?;
         if !seen.insert(category) {
@@ -2056,11 +2057,24 @@ async fn validate_budget(
         if v["scope"] == "family" && c["visibility"] == "private" {
             return Err(ApiError::invalid("Family budgets require household categories."));
         }
+        match line.get("mode").map(|value| value.as_str()).unwrap_or(Some("exact")) {
+            Some("exact") => {},
+            Some("pooled") => pooled.push(category.to_owned()),
+            _ => return Err(ApiError::invalid("Budget line mode must be exact or pooled.")),
+        }
         let limit = money(text(line, "amount")?, currency)?;
         if limit < 0 {
             return Err(ApiError::invalid("Budget limits cannot be negative."));
         }
         sum = add(sum, limit)?;
+    }
+    if !pooled.is_empty() {
+        let parents = budget_category_parents(db, p).await?;
+        for root in &pooled {
+            if seen.iter().any(|category| category != root && category_within(category, root, &parents)) {
+                return Err(ApiError::invalid("A pooled category cannot have a separate descendant limit."));
+            }
+        }
     }
     if let Some(limits) = v.get("people_limits") {
         let limits = limits.as_array().ok_or_else(|| ApiError::invalid("people_limits must be an array."))?;
@@ -2107,6 +2121,30 @@ async fn validate_budget(
         }
     }
     Ok(())
+}
+
+async fn budget_category_parents(db: &mut SqliteConnection, p: &Principal) -> Result<HashMap<String, String>> {
+    let categories = storage::list(db, p, "categories").await?;
+    Ok(categories.into_iter().filter_map(|category| {
+        Some((category["id"].as_str()?.to_owned(), category["parent_id"].as_str()?.to_owned()))
+    }).collect())
+}
+
+fn category_within(category: &str, root: &str, parents: &HashMap<String, String>) -> bool {
+    let mut current = category;
+    for _ in 0..=parents.len() {
+        if current == root { return true; }
+        match parents.get(current) { Some(parent) => current = parent, None => return false }
+    }
+    false
+}
+
+fn budget_line_for_category<'a>(category: &str, lines: &'a [Value], parents: &HashMap<String, String>) -> Option<&'a str> {
+    if let Some(line) = lines.iter().find(|line| line["category_id"] == category) {
+        return line["category_id"].as_str();
+    }
+    lines.iter().find(|line| line["mode"] == "pooled" && line["category_id"].as_str().is_some_and(|root| category_within(category, root, parents)))
+        .and_then(|line| line["category_id"].as_str())
 }
 
 async fn report_inputs(
@@ -2595,9 +2633,36 @@ fn budget_destination(transaction: &Value, allocation: &Value, p: &Principal) ->
     }
 }
 
+async fn budget_drilldown_line_filter(db: &mut SqliteConnection, p: &Principal, budget: &Value, q: &Query) -> Result<Option<HashSet<String>>> {
+    let Some(root) = q.get("line_category_id") else { return Ok(None); };
+    if q.contains_key("category_id") {
+        return Err(ApiError::invalid("Choose either category_id or line_category_id."));
+    }
+    let line = budget["lines"].as_array().into_iter().flatten()
+        .find(|line| line["category_id"] == *root)
+        .ok_or_else(|| ApiError::invalid("line_category_id must be a budget line."))?;
+    if line["mode"] != "pooled" { return Ok(Some(HashSet::from([root.clone()]))); }
+    let parents = budget_category_parents(db, p).await?;
+    let mut categories = HashSet::from([root.clone()]);
+    for category in parents.keys() {
+        if budget_line_for_category(category, budget["lines"].as_array().unwrap(), &parents) == Some(root.as_str()) {
+            categories.insert(category.clone());
+        }
+    }
+    Ok(Some(categories))
+}
+
+fn budget_drilldown_category_matches(category: Option<&str>, filter: &Option<HashSet<String>>) -> bool {
+    match filter {
+        None => true,
+        Some(categories) => category.is_some_and(|category| categories.contains(category)),
+    }
+}
+
 async fn budget_allocations(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Query) -> Result<Reply> {
-    allowed_query(q, &["category_id", "destination", "cursor", "limit"])?;
+    allowed_query(q, &["category_id", "line_category_id", "destination", "cursor", "limit"])?;
     let budget = storage::get(db, p, "budgets", id).await?;
+    let line_filter = budget_drilldown_line_filter(db, p, &budget, q).await?;
     let (from, to) = month_bounds(text(&budget, "month")?)?;
     let mut report_query = Query::from([
         ("from".into(), from), ("to".into(), to),
@@ -2616,6 +2681,7 @@ async fn budget_allocations(db: &mut SqliteConnection, p: &Principal, id: &str, 
         let transaction_id = text(&transaction, "id")?;
         for (index, allocation) in transaction["allocations"].as_array().into_iter().flatten().enumerate() {
             if q.get("category_id").is_some_and(|filter| filter == "uncategorized" && !allocation["category_id"].is_null()) { continue; }
+            if !budget_drilldown_category_matches(allocation["category_id"].as_str(), &line_filter) { continue; }
             let destination = budget_destination(&transaction, allocation, p);
             if q.get("destination").is_some_and(|filter| filter != &destination) { continue; }
             let value = money(text(allocation, "amount")?, &currency)?.checked_mul(sign)
@@ -2631,8 +2697,9 @@ async fn budget_allocations(db: &mut SqliteConnection, p: &Principal, id: &str, 
 }
 
 async fn budget_matrix(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Query) -> Result<Reply> {
-    allowed_query(q, &["category_id", "destination"])?;
+    allowed_query(q, &["category_id", "line_category_id", "destination"])?;
     let budget = storage::get(db, p, "budgets", id).await?;
+    let line_filter = budget_drilldown_line_filter(db, p, &budget, q).await?;
     let (from, to) = month_bounds(text(&budget, "month")?)?;
     let mut report_query = Query::from([
         ("from".into(), from), ("to".into(), to),
@@ -2651,6 +2718,7 @@ async fn budget_matrix(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Q
         for allocation in transaction["allocations"].as_array().into_iter().flatten() {
             let category_id = allocation["category_id"].as_str().map(str::to_owned);
             if q.get("category_id").is_some_and(|filter| filter == "uncategorized" && category_id.is_some()) { continue; }
+            if !budget_drilldown_category_matches(category_id.as_deref(), &line_filter) { continue; }
             let destination = budget_destination(&transaction, allocation, p);
             if q.get("destination").is_some_and(|filter| filter != &destination) { continue; }
             let value = money(text(allocation, "amount")?, &currency)?.checked_mul(sign)
@@ -2666,7 +2734,7 @@ async fn budget_matrix(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Q
         rows.push(json!({"category_id":category_id,"destination":destination,"spent":format_money(spent,&currency)?}));
     }
     meta["plan_revision"] = budget["revision"].clone();
-    meta["filters"] = json!({"category_id":q.get("category_id"),"destination":q.get("destination")});
+    meta["filters"] = json!({"category_id":q.get("category_id"),"line_category_id":q.get("line_category_id"),"destination":q.get("destination")});
     ok(json!({"data":rows,"total_spent":format_money(total,&currency)?,"meta":meta}))
 }
 
@@ -2816,28 +2884,49 @@ async fn budget_tracking(
             );
         }
     }
+    let budget_lines = budget["lines"].as_array().unwrap();
+    let parents = budget_category_parents(db, p).await?;
+    let mut line_actuals: HashMap<String, i64> = HashMap::new();
+    let mut line_commitments: HashMap<String, i64> = HashMap::new();
+    let mut unbudgeted_actuals: HashMap<String, i64> = HashMap::new();
+    let mut unbudgeted_commitments: HashMap<String, i64> = HashMap::new();
+    for (category, value) in actuals {
+        let target = match budget_line_for_category(&category, budget_lines, &parents) {
+            Some(line) => line_actuals.entry(line.to_owned()).or_insert(0),
+            None => unbudgeted_actuals.entry(category).or_insert(0),
+        };
+        *target = add(*target, value)?;
+    }
+    for (category, value) in commitments_by_category {
+        let target = match budget_line_for_category(&category, budget_lines, &parents) {
+            Some(line) => line_commitments.entry(line.to_owned()).or_insert(0),
+            None => unbudgeted_commitments.entry(category).or_insert(0),
+        };
+        *target = add(*target, value)?;
+    }
     let mut lines = vec![];
     let mut planned_total = 0_i64;
     let mut spent_in_lines = 0_i64;
-    for line in budget["lines"].as_array().unwrap() {
+    for line in budget_lines {
         let category = text(line, "category_id")?;
         let planned = money(text(line, "amount")?, &currency)?;
-        let actual = actuals.remove(category).unwrap_or(0);
-        let committed = commitments_by_category.remove(category).unwrap_or(0);
+        let actual = line_actuals.remove(category).unwrap_or(0);
+        let committed = line_commitments.remove(category).unwrap_or(0);
         planned_total = add(planned_total, planned)?;
         spent_in_lines = add(spent_in_lines, actual)?;
         let remaining = planned
             .checked_sub(actual)
             .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
         let available = remaining.checked_sub(committed).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
-        lines.push(json!({"category_id":category,"planned":format_money(planned,&currency)?,"actual":format_money(actual,&currency)?,"committed":format_money(committed,&currency)?,"remaining":format_money(remaining,&currency)?,"available_after_commitments":format_money(available,&currency)?,"utilization":if planned==0{None}else{Some(actual as f64/planned as f64)},"coverage":"unknown","transactions_url":format!("/api/v1/analytics/transactions?scope={}&from={from}&to={to}&currency={currency}&category_id={category}",text(&budget,"scope")?)}));
+        let pooled = line["mode"] == "pooled";
+        lines.push(json!({"category_id":category,"mode":if pooled {"pooled"} else {"exact"},"planned":format_money(planned,&currency)?,"actual":format_money(actual,&currency)?,"committed":format_money(committed,&currency)?,"remaining":format_money(remaining,&currency)?,"available_after_commitments":format_money(available,&currency)?,"utilization":if planned==0{None}else{Some(actual as f64/planned as f64)},"coverage":"unknown","transactions_url":if pooled {format!("/api/v1/budgets/{id}/allocations?line_category_id={category}")} else {format!("/api/v1/budgets/{id}/allocations?category_id={category}")}}));
     }
-    let unbudgeted = actuals.values().try_fold(0, |a, b| add(a, *b))?;
-    let unbudgeted_committed = commitments_by_category.values().try_fold(0, |a, b| add(a, *b))?;
+    let unbudgeted = unbudgeted_actuals.values().try_fold(0, |a, b| add(a, *b))?;
+    let unbudgeted_committed = unbudgeted_commitments.values().try_fold(0, |a, b| add(a, *b))?;
     let total_spent = add(spent_in_lines, unbudgeted)?;
     let available = planned_total.checked_sub(total_spent).and_then(|value| value.checked_sub(total_committed)).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
     let mut unbudgeted_lines = vec![];
-    for (category_id, amount) in actuals {
+    for (category_id, amount) in unbudgeted_actuals {
         unbudgeted_lines
             .push(json!({"category_id":category_id,"actual":format_money(amount,&currency)?}));
     }

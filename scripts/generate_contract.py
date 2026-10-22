@@ -36,7 +36,7 @@ schemas = {
     "Movement": obj({"account_id": S, "amount": M}, ("account_id", "amount")),
     "Allocation": obj({"category_id": {"type": ["string", "null"]}, "amount": M, "scope": enum("personal", "family"), "beneficiary_id": S, "budget_destination": S}, ("amount", "scope")),
     "TransactionInput": obj({"event_type": enum("expense", "income", "refund", "transfer"), "amount": M, "currency": S, "effective_date": D, "effective_at": {"type":"string","format":"date-time"}, "description": S, "merchant": S, "movements": arr(ref("Movement")), "allocations": arr(ref("Allocation")), "paid_by_user_id": S}, ("event_type", "amount", "currency", "effective_date", "movements", "allocations")),
-    "BudgetLine": obj({"category_id": S, "amount": M}, ("category_id", "amount")),
+    "BudgetLine": obj({"category_id": S, "amount": M, "mode": enum("exact", "pooled")}, ("category_id", "amount")),
     "BudgetPersonLimit": obj({"destination":S,"amount":M}, ("destination","amount")),
     "BudgetInput": obj({"name": S, "month": {"type": "string", "pattern": r"^\d{4}-\d{2}$"}, "scope": enum("personal", "family"), "currency": S, "expected_income": M, "savings_goal": M, "lines": arr(ref("BudgetLine")), "people_limits": arr(ref("BudgetPersonLimit")), "targets": obj({})}, ("month", "scope", "currency", "expected_income", "lines")),
     "Revision": obj({"expected_revision": I}),
@@ -168,13 +168,13 @@ for action in ["activate", "archive", "copy"]:
 route("/budgets/{id}/tracking", "get", parameters=["from", "to"])
 schemas["BudgetAllocation"] = obj({"id":S,"transaction_id":S,"effective_date":D,"description":{"type":["string","null"]},"event_type":enum("expense","refund"),"category_id":{"type":["string","null"]},"destination":S,"amount":M,"currency":S,"paid_by_user_id":{"type":["string","null"]},"entered_by":S}, ("id","transaction_id","effective_date","event_type","category_id","destination","amount","currency","entered_by"))
 schemas["BudgetAllocationCollection"] = obj({"data":arr(ref("BudgetAllocation")),"page":obj({"next_cursor":S}),"meta":obj({})}, ("data","page","meta"))
-route("/budgets/{id}/allocations", "get", "BudgetAllocationCollection", parameters=["category_id","destination","cursor","limit"])
+route("/budgets/{id}/allocations", "get", "BudgetAllocationCollection", parameters=["category_id","line_category_id","destination","cursor","limit"])
 schemas["BudgetMatrixCell"] = obj({"category_id":{"type":["string","null"]},"destination":S,"spent":M}, ("category_id","destination","spent"))
 schemas["BudgetMatrix"] = obj({"data":arr(ref("BudgetMatrixCell")),"total_spent":M,"meta":obj({})}, ("data","total_spent","meta"))
-route("/budgets/{id}/matrix", "get", "BudgetMatrix", parameters=["category_id","destination"])
+route("/budgets/{id}/matrix", "get", "BudgetMatrix", parameters=["category_id","line_category_id","destination"])
 schemas["BudgetChangeProposal"] = obj({"name":S,"expected_income":M,"savings_goal":M,"lines":arr(ref("BudgetLine")),"people_limits":arr(ref("BudgetPersonLimit"))})
 schemas["BudgetChangeSummary"] = obj({"total_allowance":M,"expected_income":M,"savings_goal":M,"funding_gap":M}, ("total_allowance","expected_income","savings_goal","funding_gap"))
-schemas["BudgetChangeLine"] = obj({"id":S,"before":M,"after":M,"delta":M}, ("id","before","after","delta"))
+schemas["BudgetChangeLine"] = obj({"id":S,"before":M,"after":M,"delta":M,"before_mode":enum("exact","pooled"),"after_mode":enum("exact","pooled")}, ("id","before","after","delta"))
 schemas["BudgetPlanPreview"] = obj({"budget_id":S,"base_revision":I,"currency":S,"before_name":S,"after_name":S,"proposal":ref("BudgetChangeProposal"),"preview_hash":S,"before":ref("BudgetChangeSummary"),"after":ref("BudgetChangeSummary"),"total_allowance_delta":M,"category_changes":arr(ref("BudgetChangeLine")),"people_changes":arr(ref("BudgetChangeLine")),"unfunded_warning":B}, ("budget_id","base_revision","currency","before_name","after_name","proposal","preview_hash","before","after","total_allowance_delta","category_changes","people_changes","unfunded_warning"))
 schemas["BudgetAmendmentInput"] = obj({"proposal":ref("BudgetChangeProposal"),"preview_hash":S,"reason":S,"accept_unfunded":B,"expected_revision":I}, ("proposal","preview_hash","reason"))
 route("/budgets/{id}/plan-preview", "post", "BudgetPlanPreview", "BudgetChangeProposal", revision=True)

@@ -2992,6 +2992,51 @@ async fn personal_budget_people_uses_the_existing_plan_limit() {
 }
 
 #[tokio::test]
+async fn pooled_budget_line_counts_descendants_once_and_previews_mode_changes() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let food = client.category("Food", "expense").await;
+    let groceries = client.create("categories",json!({"name":"Groceries","kind":"expense","parent_id":food["id"]})).await;
+    let produce = client.create("categories",json!({"name":"Produce","kind":"expense","parent_id":groceries["id"]})).await;
+    let plan = client.create("budgets",json!({"month":"2026-09","scope":"personal","currency":"INR","expected_income":"1000.00","lines":[{"category_id":food["id"],"amount":"1000.00"}]})).await;
+    for (kind, amount, category) in [("expense","50.00",&food),("expense","500.00",&groceries),("expense","250.00",&produce),("refund","100.00",&groceries)] {
+        client.create("transactions",transaction(kind,amount,&account,category,"personal")).await;
+    }
+    client.create("planned-items",json!({"title":"Produce order","due_date":"2026-09-20","amount":"200.00","currency":"INR","category_id":produce["id"],"visibility":"private","budget_commitment":true})).await;
+    let root = format!("budgets/{}",plan["id"].as_str().unwrap());
+    let before = client.call("GET",&format!("{root}/tracking"),json!({}),None,None).await.1;
+    assert_eq!(before["data"][0]["actual"],"50.00");
+    assert_eq!(before["unbudgeted"],"650.00");
+    assert_eq!(before["unbudgeted_committed"],"200.00");
+    let proposal = json!({"lines":[{"category_id":food["id"],"amount":"1000.00","mode":"pooled"}]});
+    let preview = client.call("POST",&format!("{root}/plan-preview"),proposal,Some("pool-preview"),Some(1)).await;
+    assert_eq!(preview.0,StatusCode::OK,"{}",preview.1);
+    assert_eq!(preview.1["total_allowance_delta"],"0.00");
+    assert_eq!(preview.1["category_changes"][0]["before_mode"],"exact");
+    assert_eq!(preview.1["category_changes"][0]["after_mode"],"pooled");
+    let amended = client.call("POST",&format!("{root}/amendments"),json!({"proposal":preview.1["proposal"],"preview_hash":preview.1["preview_hash"],"reason":"Pool food subcategories"}),Some("pool-amendment"),Some(1)).await;
+    assert_eq!(amended.0,StatusCode::OK,"{}",amended.1);
+    let tracking = client.call("GET",&format!("{root}/tracking"),json!({}),None,None).await.1;
+    assert_eq!(tracking["data"][0]["mode"],"pooled");
+    assert_eq!(tracking["data"][0]["actual"],"700.00");
+    assert_eq!(tracking["data"][0]["committed"],"200.00");
+    assert_eq!(tracking["data"][0]["available_after_commitments"],"100.00");
+    assert_eq!(tracking["unbudgeted"],"0.00");
+    assert_eq!(tracking["unbudgeted_committed"],"0.00");
+    let pool_query = format!("line_category_id={}",food["id"].as_str().unwrap());
+    let allocations = client.call("GET",&format!("{root}/allocations?{pool_query}"),json!({}),None,None).await.1;
+    assert_eq!(allocations["data"].as_array().unwrap().len(),4);
+    let matrix = client.call("GET",&format!("{root}/matrix?{pool_query}"),json!({}),None,None).await.1;
+    assert_eq!(matrix["total_spent"],tracking["data"][0]["actual"]);
+    assert_eq!(matrix["data"].as_array().unwrap().len(),3);
+    assert_eq!(client.call("GET",&format!("{root}/matrix?{pool_query}&category_id={}",produce["id"].as_str().unwrap()),json!({}),None,None).await.0,StatusCode::BAD_REQUEST);
+    let conflict = client.call("POST",&format!("{root}/plan-preview"),json!({"lines":[{"category_id":food["id"],"amount":"900.00","mode":"pooled"},{"category_id":groceries["id"],"amount":"100.00"}]}),Some("overlap-preview"),Some(2)).await;
+    assert_eq!(conflict.0,StatusCode::BAD_REQUEST);
+    assert_eq!(client.call("POST","budgets",json!({"month":"2026-10","scope":"personal","currency":"INR","expected_income":"1000.00","lines":[{"category_id":food["id"],"amount":"900.00","mode":"pooled"},{"category_id":groceries["id"],"amount":"100.00"}]}),Some("overlap-create"),None).await.0,StatusCode::BAD_REQUEST);
+    assert_eq!(client.call("POST","budgets",json!({"month":"2026-11","scope":"personal","currency":"INR","expected_income":"1000.00","lines":[{"category_id":food["id"],"amount":"1000.00","mode":12}]}),Some("invalid-pool-mode"),None).await.0,StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn posted_commitment_replaces_planned_amount_and_unmatch_restores_it() {
     let (client, _) = setup().await;
     let account = client.account("Bank", "bank").await;
