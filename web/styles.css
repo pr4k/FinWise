@@ -319,7 +319,22 @@ body{background:#f6f7fb}
 .transaction-drawer .dialog-actions button{flex:1;min-height:42px}
 .transaction-drawer-open .main-area{margin-right:440px}
 .transaction-drawer .transaction-category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(max-width:1349px){.transaction-drawer{display:none}.transaction-drawer-open .main-area{margin-right:0}}
+#transaction-detail-form .dialog-actions .outline-button{display:none}
+.transaction-drawer #transaction-detail-form{gap:14px}
+.transaction-drawer #transaction-detail-form h3{margin:10px 0 0;font-size:13px}
+.transaction-drawer #transaction-detail-form .table-scroll{overflow:visible}
+.transaction-drawer #transaction-detail-form .live-table{display:block;min-width:0}
+.transaction-drawer #transaction-detail-form .live-table thead{display:none}
+.transaction-drawer #transaction-detail-form .live-table tbody{display:grid;gap:8px}
+.transaction-drawer #transaction-detail-form .live-table tr{display:grid;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfe}
+.transaction-drawer #transaction-detail-form .live-table td{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border:0;text-align:right;overflow-wrap:anywhere}
+.transaction-drawer #transaction-detail-form .live-table td::before{content:attr(data-label);flex:0 0 38%;color:#758092;text-align:left;font-size:11px}
+.transaction-drawer #transaction-detail-form .live-table .cell-value{min-width:0}
+.activity-table tr[data-action="transaction-detail"]{cursor:pointer}
+.activity-table tr[data-action="transaction-detail"]:hover{background:#f8f7ff}
+.activity-table tr[data-action="transaction-detail"]:focus-visible{outline:3px solid #a99ee9;outline-offset:-3px}
+@media(max-width:1349px){.transaction-drawer-open .main-area{margin-right:0}}
+@media(max-width:760px){.transaction-drawer{display:none}}
 .transaction-mobile-actions{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 12px}
 .transaction-mobile-actions button{min-height:40px}
 #investment-transaction-new:not([hidden]){display:grid;gap:12px}
