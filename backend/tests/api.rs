@@ -3,6 +3,7 @@ use axum::{
     body::Body,
     http::{HeaderMap, Request, StatusCode},
 };
+use chrono::{Datelike, Utc};
 use finwise_api::{AppState, connect, router};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -1310,7 +1311,7 @@ impl Client {
         } else {
             serde_json::from_slice(&bytes).unwrap()
         };
-        assert_eq!(headers["cache-control"], if (path.starts_with("widgets/spending") || path.starts_with("widgets/accounts")) && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
+        assert_eq!(headers["cache-control"], if (path.starts_with("widgets/spending") || path.starts_with("widgets/accounts") || path.starts_with("widgets/expense-calendar")) && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
         assert_eq!(headers["x-request-id"], "integration-test");
         (status, value, headers)
     }
@@ -1980,6 +1981,86 @@ async fn widget_daily_spending_covers_seven_calendar_days_with_refunds_and_zeroe
     assert_eq!(filtered.0, StatusCode::OK, "{}", filtered.1);
     assert_eq!(filtered.1["daily_spending"][0]["spent"], "15.00");
     assert_eq!(filtered.1["daily_spending"][6]["spent"], filtered.1["summary"]["today"]["spent"]);
+}
+
+#[tokio::test]
+async fn widget_expense_calendar_covers_elapsed_dates_and_deduplicates_family_spending() {
+    let (owner, _) = setup().await;
+    let anonymous = Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() };
+    assert_eq!(anonymous.call("GET", "widgets/expense-calendar?scope=family&month=2026-10", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    let account = owner.account("Calendar cash", "cash").await;
+    let other = owner.account("Calendar bank", "bank").await;
+    let food = owner.category("Calendar food", "expense").await;
+    let bills = owner.category("Calendar bills", "expense").await;
+    let settlement = owner.category("Credit card repayment", "expense").await;
+    let me = owner.call("GET", "me", json!({}), None, None).await.1;
+    owner.call("PATCH", "settings/widgets", json!({"enabled":true,"user_id":me["user"]["id"]}), None, Some(0)).await;
+    assert_eq!(anonymous.call("GET", "widgets/expense-calendar?scope=family&month=2026-10", json!({}), None, None).await.0, StatusCode::FORBIDDEN);
+    owner.call("PATCH", "settings/widgets", json!({"enabled":true,"user_id":me["user"]["id"],"family_enabled":true}), None, Some(1)).await;
+    let today = chrono::Utc::now().with_timezone(&chrono_tz::Asia::Kolkata).date_naive();
+    let first = today.with_day(1).unwrap();
+    let month = first.format("%Y-%m").to_string();
+    let make = |kind: &str, amount: &str, category: &Value| {
+        let mut entry = transaction(kind, amount, &account, category, "family");
+        entry["effective_date"] = json!(first.to_string());
+        entry["effective_at"] = json!(format!("{first}T00:00:00+05:30"));
+        entry
+    };
+    let mut split = make("expense", "20.00", &food);
+    split["allocations"] = json!([
+        {"category_id":food["id"],"scope":"family","amount":"12.00"},
+        {"category_id":bills["id"],"scope":"family","amount":"8.00"}
+    ]);
+    owner.create("transactions", split).await;
+    owner.create("transactions", make("refund", "5.00", &food)).await;
+    owner.create("transactions", make("expense", "9.00", &settlement)).await;
+    let mut second_account_expense = make("expense", "7.00", &food);
+    second_account_expense["movements"][0]["account_id"] = other["id"].clone();
+    owner.create("transactions", second_account_expense).await;
+    owner.create("transactions", json!({"event_type":"transfer","amount":"3.00","currency":"INR","effective_date":first.to_string(),"allocations":[],"movements":[{"account_id":account["id"],"amount":"-3.00"},{"account_id":other["id"],"amount":"3.00"}]})).await;
+    let mut personal = make("expense", "4.00", &food);
+    personal["allocations"][0]["scope"] = json!("personal");
+    owner.create("transactions", personal).await;
+    let path = format!("widgets/expense-calendar?scope=family&month={month}");
+    let result = anonymous.call("GET", &path, json!({}), None, None).await;
+    assert_eq!(result.0, StatusCode::OK, "{}", result.1);
+    assert_eq!(result.2["cache-control"], "private, max-age=300");
+    assert_eq!(result.1["month"], month);
+    assert_eq!(result.1["currency"], "INR");
+    assert_eq!(result.1["complete"], true);
+    let days = result.1["days"].as_array().unwrap();
+    assert_eq!(days.len(), today.day() as usize);
+    assert_eq!(days[0]["date"], first.to_string());
+    assert_eq!(days[0]["expense"], 22.0);
+    assert!(days[1..].iter().all(|day| day["expense"].as_f64() == Some(0.0)));
+    assert_eq!(anonymous.call("GET", &format!("widgets/expense-calendar?scope=combined&month={month}"), json!({}), None, None).await.1["days"][0]["expense"], 26.0);
+    let filtered = anonymous.call("GET", &format!("{path}&account_id={}", account["id"].as_str().unwrap()), json!({}), None, None).await;
+    assert_eq!(filtered.0, StatusCode::OK, "{}", filtered.1);
+    assert_eq!(filtered.1["days"][0]["expense"], 15.0);
+    assert_eq!(anonymous.call("GET", &format!("{path}&account_id=unknown"), json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    let widget_settings = owner.call("GET", "settings/widgets", json!({}), None, None).await.1;
+    assert!(widget_settings["accounts"].as_array().unwrap().iter().any(|entry| entry["id"] == account["id"]));
+    let (partner, _) = partner(&owner).await;
+    let partner_private = partner.account("Partner private", "bank").await;
+    let shared = owner.create("accounts", json!({"name":"Shared calendar bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let partner_id = partner.call("GET", "me", json!({}), None, None).await.1["user"]["id"].as_str().unwrap().to_owned();
+    let selected = owner.call("GET", &format!("settings/widgets?user_id={partner_id}"), json!({}), None, None).await;
+    assert_eq!(selected.0, StatusCode::OK, "{}", selected.1);
+    let selected_accounts = selected.1["accounts"].as_array().unwrap();
+    assert!(selected_accounts.iter().any(|entry| entry["id"] == shared["id"]));
+    assert!(!selected_accounts.iter().any(|entry| entry["id"] == partner_private["id"] || entry["id"] == account["id"]));
+    let previous = first - chrono::Duration::days(1);
+    let previous_month = previous.format("%Y-%m").to_string();
+    let past = anonymous.call("GET", &format!("widgets/expense-calendar?scope=family&month={previous_month}"), json!({}), None, None).await.1;
+    assert_eq!(past["complete"], true);
+    assert_eq!(past["days"].as_array().unwrap().len(), previous.day() as usize);
+    let next = first.checked_add_months(chrono::Months::new(1)).unwrap();
+    let next_month = next.format("%Y-%m").to_string();
+    let future = anonymous.call("GET", &format!("widgets/expense-calendar?scope=family&month={next_month}"), json!({}), None, None).await.1;
+    assert_eq!(future["complete"], false);
+    assert!(future["days"].as_array().unwrap().is_empty());
+    assert_eq!(anonymous.call("GET", "widgets/expense-calendar?month=2026-13", json!({}), None, None).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(anonymous.call("GET", "widgets/expense-calendar?extra=1", json!({}), None, None).await.0, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -2730,15 +2811,19 @@ async fn budgets_refunds_reporting_periods_and_revision_history() {
             .len(),
         2
     );
-    let edited = client
+    let preview = client
         .call(
-            "PATCH",
-            &path,
+            "POST",
+            &format!("{path}/plan-preview"),
             json!({"expected_income":"22000.00","lines":[{"category_id":category["id"],"amount":"12000.00"}]}),
-            None,
+            Some("preview-budget-increase"),
             Some(2),
         )
         .await;
+    assert_eq!(preview.0,StatusCode::OK,"{}",preview.1);
+    assert_eq!(preview.1["before"]["total_allowance"],"10000.00");
+    assert_eq!(preview.1["after"]["total_allowance"],"12000.00");
+    let edited = client.call("POST",&format!("{path}/amendments"),json!({"proposal":preview.1["proposal"],"preview_hash":preview.1["preview_hash"],"reason":"Adjust grocery allowance after review"}),Some("amend-budget-increase"),Some(2)).await;
     assert_eq!(edited.0, StatusCode::OK, "{}", edited.1);
     assert_eq!(edited.1["revision"], 3);
     assert_eq!(
@@ -2761,6 +2846,234 @@ async fn budgets_refunds_reporting_periods_and_revision_history() {
     assert_eq!(copied.1["state"], "draft");
     assert_eq!(copied.1["savings_goal"], "3000.00");
     assert_ne!(copied.1["id"], plan["id"]);
+}
+
+#[tokio::test]
+async fn budget_amendment_previews_balanced_move_and_requires_reason_and_funding_review() {
+    let (client, _) = setup().await;
+    let shopping = client.category("Shopping", "expense").await;
+    let dining = client.category("Dining", "expense").await;
+    let plan = client.create("budgets",json!({"month":"2026-09","scope":"personal","currency":"INR","expected_income":"5000.00","lines":[{"category_id":shopping["id"],"amount":"4000.00"},{"category_id":dining["id"],"amount":"1000.00"}]})).await;
+    let root = format!("budgets/{}",plan["id"].as_str().unwrap());
+    assert_eq!(client.call("PATCH",&root,json!({"expected_income":"6000.00"}),None,Some(1)).await.0,StatusCode::CONFLICT);
+    assert_eq!(client.call("POST",&format!("{root}/plan-preview"),json!({"lines":[{"category_id":dining["id"],"amount":"1000"},{"category_id":shopping["id"],"amount":"4000.00"}]}),Some("unchanged-budget-preview"),Some(1)).await.0,StatusCode::BAD_REQUEST);
+    let proposal = json!({"lines":[{"category_id":shopping["id"],"amount":"2000.00"},{"category_id":dining["id"],"amount":"3000.00"}]});
+    let preview = client.call("POST",&format!("{root}/plan-preview"),proposal,Some("balanced-preview"),Some(1)).await;
+    assert_eq!(preview.0,StatusCode::OK,"{}",preview.1);
+    assert_eq!(preview.1["total_allowance_delta"],"0.00");
+    assert_eq!(preview.1["after"]["funding_gap"],"0.00");
+    assert_eq!(preview.1["category_changes"].as_array().unwrap().len(),2);
+    let path = format!("{root}/amendments");
+    let body = json!({"proposal":preview.1["proposal"],"preview_hash":preview.1["preview_hash"],"reason":"Move unused shopping allowance to dining"});
+    assert_eq!(client.call("POST",&path,json!({"proposal":preview.1["proposal"],"preview_hash":"wrong","reason":"Move allowance"}),Some("wrong-amendment-preview"),Some(1)).await.0,StatusCode::CONFLICT);
+    assert_eq!(client.call("POST",&path,json!({"proposal":preview.1["proposal"],"preview_hash":preview.1["preview_hash"],"reason":""}),Some("missing-amendment-reason"),Some(1)).await.0,StatusCode::BAD_REQUEST);
+    let saved = client.call("POST",&path,body.clone(),Some("balanced-amendment"),Some(1)).await;
+    assert_eq!(saved.0,StatusCode::OK,"{}",saved.1);
+    assert_eq!(saved.1["revision"],2);
+    assert_eq!(saved.1["last_amendment"]["reason"],"Move unused shopping allowance to dining");
+    let history = client.call("GET",&format!("{root}/revisions"),json!({}),None,None).await.1;
+    assert!(history["data"].as_array().unwrap().iter().any(|entry| entry["action"]=="budget_amendment" && entry["after"]["last_amendment"]["reason"]=="Move unused shopping allowance to dining"));
+    assert_eq!(client.call("POST",&path,body,Some("stale-amendment"),Some(1)).await.0,StatusCode::CONFLICT);
+    let larger = client.call("POST",&format!("{root}/plan-preview"),json!({"lines":[{"category_id":shopping["id"],"amount":"3000.00"},{"category_id":dining["id"],"amount":"3000.00"}]}),Some("unfunded-preview"),Some(2)).await;
+    assert_eq!(larger.0,StatusCode::OK,"{}",larger.1);
+    assert_eq!(larger.1["unfunded_warning"],true);
+    let unfunded = json!({"proposal":larger.1["proposal"],"preview_hash":larger.1["preview_hash"],"reason":"Increase allowance using other funds"});
+    assert_eq!(client.call("POST",&path,unfunded.clone(),Some("unfunded-unconfirmed"),Some(2)).await.0,StatusCode::CONFLICT);
+    let mut confirmed = unfunded;
+    confirmed["accept_unfunded"] = json!(true);
+    assert_eq!(client.call("POST",&path,confirmed,Some("unfunded-confirmed"),Some(2)).await.0,StatusCode::OK);
+}
+
+#[tokio::test]
+async fn family_budget_people_reconciles_explicit_shares_and_unassigned() {
+    let (owner, _) = setup().await;
+    let (partner_client, _) = partner(&owner).await;
+    let owner_id = owner.call("GET", "me", json!({}), None, None).await.1["user"]["id"].as_str().unwrap().to_owned();
+    let partner_id = partner_client.call("GET", "me", json!({}), None, None).await.1["user"]["id"].as_str().unwrap().to_owned();
+    let account = owner.create("accounts", json!({"name":"Shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let groceries = owner.category("Groceries", "expense").await;
+    let mut purchase = transaction("expense", "4000.00", &account, &groceries, "family");
+    purchase["allocations"] = json!([
+        {"category_id":groceries["id"],"amount":"2000.00","scope":"family","budget_destination":owner_id},
+        {"category_id":groceries["id"],"amount":"2000.00","scope":"family","budget_destination":partner_id}
+    ]);
+    owner.create("transactions", purchase).await;
+    owner.transaction("expense", "300.00", &account, &groceries, "family").await;
+    let plan = owner.create("budgets", json!({"month":"2026-09","scope":"family","currency":"INR","expected_income":"5000.00","lines":[{"category_id":groceries["id"],"amount":"5000.00"}],"people_limits":[{"destination":owner_id,"amount":"2500.00"},{"destination":partner_id,"amount":"2000.00"},{"destination":"shared","amount":"500.00"}]})).await;
+    let people_path = format!("budgets/{}/people", plan["id"].as_str().unwrap());
+    let tracking_path = format!("budgets/{}/tracking", plan["id"].as_str().unwrap());
+    for client in [&owner, &partner_client] {
+        let people = client.call("GET", &people_path, json!({}), None, None).await;
+        assert_eq!(people.0, StatusCode::OK, "{}", people.1);
+        assert_eq!(people.1["total_spent"], "4300.00");
+        let rows = people.1["data"].as_array().unwrap();
+        let used = |key: &str| rows.iter().find(|row| row["destination"] == key).unwrap()["spent"].clone();
+        assert_eq!(used(&owner_id), "2000.00");
+        assert_eq!(used(&partner_id), "2000.00");
+        assert_eq!(used("unassigned"), "300.00");
+        assert_eq!(rows.iter().find(|row| row["destination"] == owner_id).unwrap()["remaining"], "500.00");
+        assert_eq!(rows.iter().find(|row| row["destination"] == partner_id).unwrap()["remaining"], "0.00");
+        assert_eq!(client.call("GET", &tracking_path, json!({}), None, None).await.1["data"][0]["actual"], people.1["total_spent"]);
+    }
+    let private_account = owner.account("Private bank", "bank").await;
+    let mut private_purchase = transaction("expense", "100.00", &private_account, &groceries, "family");
+    private_purchase["allocations"][0]["budget_destination"] = json!("shared");
+    owner.create("transactions", private_purchase).await;
+    let owner_people = owner.call("GET", &people_path, json!({}), None, None).await.1;
+    let partner_people = partner_client.call("GET", &people_path, json!({}), None, None).await.1;
+    assert_eq!(owner_people["total_spent"], "4400.00");
+    assert_eq!(partner_people["total_spent"], "4300.00");
+    assert_eq!(partner_people["meta"]["visibility"], "authorized_accounts_only");
+    assert_eq!(partner_people["data"].as_array().unwrap().iter().find(|row| row["destination"] == "shared").unwrap()["spent"], "0.00");
+    let mut refund = transaction("refund", "500.00", &account, &groceries, "family");
+    refund["allocations"][0]["budget_destination"] = json!(owner_id);
+    owner.create("transactions", refund).await;
+    let after_refund = partner_client.call("GET", &people_path, json!({}), None, None).await.1;
+    assert_eq!(after_refund["total_spent"], "3800.00");
+    assert_eq!(after_refund["data"].as_array().unwrap().iter().find(|row| row["destination"] == owner_id).unwrap()["spent"], "1500.00");
+    let allocations_path = format!("budgets/{}/allocations",plan["id"].as_str().unwrap());
+    let partner_allocations = partner_client.call("GET",&allocations_path,json!({}),None,None).await.1;
+    assert_eq!(partner_allocations["data"].as_array().unwrap().len(),4);
+    assert!(partner_allocations["data"].as_array().unwrap().iter().any(|row| row["event_type"] == "refund" && row["amount"] == "-500.00" && row["destination"] == owner_id));
+    assert!(!partner_allocations["data"].as_array().unwrap().iter().any(|row| row["destination"] == "shared"));
+    assert_eq!(owner.call("GET",&allocations_path,json!({}),None,None).await.1["data"].as_array().unwrap().len(),5);
+    let selected = partner_client.call("GET",&format!("{allocations_path}?destination={partner_id}&category_id={}",groceries["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(selected["data"].as_array().unwrap().len(),1);
+    assert_eq!(selected["data"][0]["amount"],"2000.00");
+    let matrix_path = format!("budgets/{}/matrix",plan["id"].as_str().unwrap());
+    let partner_matrix = partner_client.call("GET",&matrix_path,json!({}),None,None).await.1;
+    assert_eq!(partner_matrix["total_spent"],"3800.00");
+    assert_eq!(partner_matrix["data"].as_array().unwrap().len(),3);
+    assert_eq!(owner.call("GET",&matrix_path,json!({}),None,None).await.1["total_spent"],"3900.00");
+    let member_matrix = partner_client.call("GET",&format!("{matrix_path}?destination={partner_id}"),json!({}),None,None).await.1;
+    assert_eq!(member_matrix["total_spent"],"2000.00");
+    assert_eq!(member_matrix["data"].as_array().unwrap().len(),1);
+    assert_eq!(member_matrix["data"][0]["category_id"],groceries["id"]);
+    assert_eq!(member_matrix["data"][0]["spent"],selected["data"][0]["amount"]);
+    let category_matrix = partner_client.call("GET",&format!("{matrix_path}?category_id={}",groceries["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(category_matrix["total_spent"],partner_matrix["total_spent"]);
+    let intersection = partner_client.call("GET",&format!("{matrix_path}?destination={partner_id}&category_id={}",groceries["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(intersection["total_spent"],"2000.00");
+    let first_page = partner_client.call("GET",&format!("{allocations_path}?limit=2"),json!({}),None,None).await.1;
+    let cursor = first_page["page"]["next_cursor"].as_str().unwrap();
+    let second_page = partner_client.call("GET",&format!("{allocations_path}?limit=2&cursor={cursor}"),json!({}),None,None).await.1;
+    assert_eq!(second_page["data"].as_array().unwrap().len(),2);
+    let mut uncategorized = transaction("expense", "25.00", &account, &groceries, "family");
+    uncategorized["allocations"][0]["category_id"] = Value::Null;
+    uncategorized["allocations"][0]["budget_destination"] = json!("unassigned");
+    owner.create("transactions", uncategorized).await;
+    let unknown_matrix = partner_client.call("GET",&format!("{matrix_path}?category_id=uncategorized"),json!({}),None,None).await.1;
+    assert_eq!(unknown_matrix["total_spent"],"25.00");
+    let unknown_allocations = partner_client.call("GET",&format!("{allocations_path}?category_id=uncategorized"),json!({}),None,None).await.1;
+    assert_eq!(unknown_allocations["data"].as_array().unwrap().len(),1);
+    assert!(unknown_allocations["data"][0]["category_id"].is_null());
+    let copied = owner.call("POST", &format!("budgets/{}/copy",plan["id"].as_str().unwrap()),json!({"month":"2026-10"}),Some("copy-people-limits"),Some(1)).await;
+    assert_eq!(copied.0, StatusCode::CREATED, "{}", copied.1);
+    assert_eq!(copied.1["people_limits"], plan["people_limits"]);
+    let mismatched = owner.call("POST", "budgets", json!({"month":"2026-11","scope":"family","currency":"INR","expected_income":"100.00","lines":[{"category_id":groceries["id"],"amount":"100.00"}],"people_limits":[{"destination":"shared","amount":"99.00"}]}),Some("mismatched-people-limits"),None).await;
+    assert_eq!(mismatched.0, StatusCode::BAD_REQUEST);
+    let mut invalid = transaction("expense", "1.00", &account, &groceries, "family");
+    invalid["allocations"][0]["budget_destination"] = json!("not-a-member");
+    assert_eq!(owner.call("POST", "transactions", invalid, Some("invalid-destination"), None).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn personal_budget_people_uses_the_existing_plan_limit() {
+    let (client, _) = setup().await;
+    let account = client.account("Private bank", "bank").await;
+    let category = client.category("Food", "expense").await;
+    client.transaction("expense", "30.00", &account, &category, "personal").await;
+    let plan = client.create("budgets", json!({"month":"2026-09","scope":"personal","currency":"INR","expected_income":"100.00","lines":[{"category_id":category["id"],"amount":"50.00"}]})).await;
+    let result = client.call("GET", &format!("budgets/{}/people",plan["id"].as_str().unwrap()),json!({}),None,None).await;
+    assert_eq!(result.0, StatusCode::OK, "{}", result.1);
+    assert_eq!(result.1["total_spent"], "30.00");
+    assert_eq!(result.1["data"][0]["allowance"], "50.00");
+    assert_eq!(result.1["data"][0]["remaining"], "20.00");
+}
+
+#[tokio::test]
+async fn posted_commitment_replaces_planned_amount_and_unmatch_restores_it() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let category = client.category("Rent", "expense").await;
+    let plan = client.create("budgets", json!({"month":"2026-09","scope":"personal","currency":"INR","expected_income":"5000.00","lines":[{"category_id":category["id"],"amount":"5000.00"}]})).await;
+    let item = client.create("planned-items",json!({"title":"September rent","due_date":"2026-09-15","amount":"2000.00","currency":"INR","category_id":category["id"],"account_id":account["id"],"visibility":"private","budget_commitment":true})).await;
+    let tracking_path = format!("budgets/{}/tracking",plan["id"].as_str().unwrap());
+    let commitments_path = format!("budgets/{}/commitments",plan["id"].as_str().unwrap());
+    let before = client.call("GET",&tracking_path,json!({}),None,None).await.1;
+    assert_eq!(before["data"][0]["actual"],"0.00");
+    assert_eq!(before["data"][0]["committed"],"2000.00");
+    assert_eq!(before["available_after_commitments"],"3000.00");
+    let people_path = format!("budgets/{}/people",plan["id"].as_str().unwrap());
+    let people_before = client.call("GET",&people_path,json!({}),None,None).await.1;
+    assert_eq!(people_before["total_committed"],"2000.00");
+    assert_eq!(people_before["data"][0]["available_after_commitments"],"3000.00");
+    let transaction = client.transaction("expense","2000.00",&account,&category,"personal").await;
+    let forecast_path = format!("budgets/{}/forecast",plan["id"].as_str().unwrap());
+    let possible_duplicate = client.call("GET",&forecast_path,json!({}),None,None).await.1;
+    assert!(possible_duplicate["quality_flags"].as_array().unwrap().contains(&json!("possible_unmatched_payment")));
+    let match_path = format!("planned-items/{}/match",item["id"].as_str().unwrap());
+    let matched = client.call("POST",&match_path,json!({"transaction_id":transaction["id"],"reason":"September rent posted"}),Some("match-rent"),Some(1)).await;
+    assert_eq!(matched.0,StatusCode::OK,"{}",matched.1);
+    let after = client.call("GET",&tracking_path,json!({}),None,None).await.1;
+    assert_eq!(after["data"][0]["actual"],"2000.00");
+    assert_eq!(after["data"][0]["committed"],"0.00");
+    assert_eq!(after["available_after_commitments"],"3000.00");
+    let people_after = client.call("GET",&people_path,json!({}),None,None).await.1;
+    assert_eq!(people_after["data"][0]["spent"],"2000.00");
+    assert_eq!(people_after["total_committed"],"0.00");
+    assert_eq!(people_after["data"][0]["available_after_commitments"],"3000.00");
+    let cleared = client.call("GET",&forecast_path,json!({}),None,None).await.1;
+    assert!(!cleared["quality_flags"].as_array().unwrap().contains(&json!("possible_unmatched_payment")));
+    assert_eq!(client.call("GET",&commitments_path,json!({}),None,None).await.1["data"][0]["state"],"posted");
+    let duplicate = client.create("planned-items",json!({"title":"Second rent reminder","due_date":"2026-09-16","amount":"2000.00","currency":"INR","category_id":category["id"],"visibility":"private","budget_commitment":true})).await;
+    let duplicate_path = format!("planned-items/{}/match",duplicate["id"].as_str().unwrap());
+    assert_eq!(client.call("POST",&duplicate_path,json!({"transaction_id":transaction["id"],"reason":"Duplicate match"}),Some("duplicate-rent-match"),Some(1)).await.0,StatusCode::CONFLICT);
+    assert_eq!(client.call("GET",&tracking_path,json!({}),None,None).await.1["total_committed"],"2000.00");
+    let unmapped = client.call("DELETE",&match_path,json!({"reason":"Wrong bill"}),None,Some(2)).await;
+    assert_eq!(unmapped.0,StatusCode::NO_CONTENT,"{}",unmapped.1);
+    assert_eq!(client.call("GET",&tracking_path,json!({}),None,None).await.1["data"][0]["committed"],"4000.00");
+    assert_eq!(client.call("POST",&match_path,json!({"transaction_id":transaction["id"],"reason":"Confirmed rent payment"}),Some("rematch-rent"),Some(3)).await.0,StatusCode::OK);
+    let transaction_path = format!("transactions/{}",transaction["id"].as_str().unwrap());
+    assert_eq!(client.call("DELETE",&transaction_path,json!({"reason":"Payment was reversed"}),None,Some(transaction["revision"].as_i64().unwrap())).await.0,StatusCode::NO_CONTENT);
+    let reviewed = client.call("GET",&commitments_path,json!({}),None,None).await.1;
+    assert_eq!(reviewed["data"][0]["state"],"needs_review");
+    assert_eq!(reviewed["data"][0]["committed"],"2000.00");
+}
+
+#[tokio::test]
+async fn forecast_explains_current_rate_and_excludes_matched_bills() {
+    let (client, _) = setup().await;
+    let today = Utc::now().with_timezone(&chrono_tz::Asia::Kolkata).date_naive();
+    let month = format!("{:04}-{:02}", today.year(), today.month());
+    let first = format!("{month}-01");
+    let account = client.account("Bank", "bank").await;
+    let category = client.category("Food", "expense").await;
+    let plan = client.create("budgets", json!({"month":month,"scope":"personal","currency":"INR","expected_income":"1000.00","lines":[{"category_id":category["id"],"amount":"1000.00"}]})).await;
+    let expense = |amount: &str| {
+        let mut value = transaction("expense", amount, &account, &category, "personal");
+        value["effective_date"] = json!(first);
+        value
+    };
+    client.create("transactions", expense("100.00")).await;
+    let bill = client.create("transactions", expense("50.00")).await;
+    let item = client.create("planned-items",json!({"title":"Known bill","due_date":first,"amount":"50.00","currency":"INR","category_id":category["id"],"visibility":"private","budget_commitment":true})).await;
+    let path = format!("planned-items/{}/match",item["id"].as_str().unwrap());
+    assert_eq!(client.call("POST",&path,json!({"transaction_id":bill["id"],"reason":"Known bill posted"}),Some("forecast-match"),Some(1)).await.0,StatusCode::OK);
+    let forecast_path = format!("budgets/{}/forecast",plan["id"].as_str().unwrap());
+    let forecast = client.call("GET",&forecast_path,json!({}),None,None).await;
+    assert_eq!(forecast.0,StatusCode::OK,"{}",forecast.1);
+    assert_eq!(forecast.1["spent"],"150.00");
+    assert_eq!(forecast.1["unmatched_commitments"],"0.00");
+    assert_eq!(forecast.1["elapsed_variable_spending"],"100.00");
+    assert_eq!(forecast.1["formula_version"],"current_rate_v1");
+    if today.day() < 8 {
+        assert_eq!(forecast.1["status"],"unavailable");
+        assert!(forecast.1["forecast_headroom"].is_null());
+    } else {
+        assert_eq!(forecast.1["status"],"limited_history");
+        assert!(forecast.1["forecast_headroom"].as_str().is_some());
+    }
 }
 
 #[tokio::test]

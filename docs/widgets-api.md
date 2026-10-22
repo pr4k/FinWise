@@ -4,9 +4,11 @@
 
 `GET /api/v1/widgets/accounts` uses the same selected member and an additional **Expose accessible account balances and last transaction dates** switch. It is also unauthenticated and read-only. Anyone who can reach it while enabled can read the selected member's accessible account names, types, balances, and latest transaction dates. The accounts switch starts off, including on installations where the spending widget was already enabled.
 
+`GET /api/v1/widgets/expense-calendar` uses the spending widget's enable switch and Family scope switch. It returns one numeric net expense for every elapsed household-local date in a selected month.
+
 ## Enable on the NAS
 
-Deploy this version and sign in to that FinWise installation as the household owner. In **Settings → Widget analytics API**, choose the member whose visible ledger should feed the widget, check **Enable unauthenticated widget analytics**, and save. The setting is disabled by default and takes effect without a restart. To expose Family spending as well, check **Allow Family and Combined spending scopes**. To expose accounts, check **Expose accessible account balances and last transaction dates**. Each accounts request returns 404 while its switch is off. Uncheck the main enable switch and save to return 404 from both public endpoints. Only one household per server can enable widgets; an anonymous request cannot choose a household or user.
+Deploy this version and sign in to that FinWise installation as the household owner. In **Settings → Widget analytics API**, choose the member whose visible ledger should feed the widget, check **Enable unauthenticated widget analytics**, and save. The setting is disabled by default and takes effect without a restart. To expose Family spending as well, check **Allow Family and Combined spending scopes**. To expose accounts, check **Expose accessible account balances and last transaction dates**. Each accounts request returns 404 while its switch is off. Uncheck the main enable switch and save to return 404 from the public widget endpoints. Only one household per server can enable widgets; an anonymous request cannot choose a household or user. The **Expense calendar URL** controls let you choose Personal, Family, or Combined and either all accessible accounts or one account visible to both the owner and selected member. Copy the resulting URL for your script. These URL choices do not restrict other scopes or accounts already allowed by the widget settings.
 
 The owner-only Settings control is authenticated as usual. The widget endpoint itself is unauthenticated. If the configured member loses household access, the endpoint returns a structured 503 until the owner chooses another member.
 
@@ -78,6 +80,28 @@ curl -i -H 'Accept: application/json' \
 ```
 
 The response has `success`, `generated_at`, `currency`, and an `accounts` array. Each account has `id`, `name`, `type`, `balance`, and `last_transaction_date`. Only active accounts in the household base currency that the configured member can access are returned. Balances use the same opening balance, balance check, and ledger rules as the Accounts screen; credit card debt is negative in this response. An account without a known balance has `"balance": null`, and one without a past, nonvoided transaction has `"last_transaction_date": null`. Future transactions do not affect either field. Dates use the account timezone; `generated_at` uses the household timezone. Accounts are sorted by name, then ID. Query parameters are not supported.
+
+## Expense calendar response
+
+```sh
+curl -i 'http://YOUR_NAS_IP:3000/api/v1/widgets/expense-calendar?scope=family&month=2026-10'
+```
+
+`month` is optional and defaults to the current household-local month. `scope` defaults to `personal`; `family` and `combined` require the owner's Family scope switch. `account_id` optionally limits spending to one account accessible to the selected widget member; omit it for all accessible accounts. Unknown or inaccessible account IDs return 404. Only these three query parameters are accepted. The response is:
+
+```json
+{
+  "month": "2026-10",
+  "currency": "INR",
+  "complete": true,
+  "days": [
+    {"date": "2026-10-01", "expense": 0},
+    {"date": "2026-10-02", "expense": 1250.50}
+  ]
+}
+```
+
+The example omits later dates. A real current-month response includes each date from the first through today, including zero-expense dates; a past month includes every date. A future month returns `days: []` and `complete: false`. Here `complete` means all elapsed calendar dates are represented; it does **not** certify that every purchase has been imported or that hidden private-account activity is included. Expense values are JSON numbers in the household base currency. They are net of eligible refunds and can be negative. The endpoint applies the same transaction, allocation, settlement, currency, visibility, and future-time exclusions as the spending widget. Family allocations from one shared transaction are summed once; Combined adds the configured member's Personal allocations once.
 
 ## Calculation rules
 

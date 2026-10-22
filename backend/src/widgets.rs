@@ -105,13 +105,30 @@ pub async fn settings(
         .await?;
         return Ok((StatusCode::OK, saved));
     }
-    api::allowed_query(query, &[])?;
+    api::allowed_query(query, &["user_id"])?;
+    let selected_user = query.get("user_id").map(String::as_str).or_else(|| current["user_id"].as_str()).unwrap_or(&p.user_id);
+    let selected_member = member(db, &p.household_id, selected_user).await?;
+    let household: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id).fetch_one(&mut *db).await?;
+    let household: Value = serde_json::from_str(&household)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+    let currency = text(&household, "base_currency")?;
+    let owner_account_ids: HashSet<String> = storage::list(db, p, "accounts").await?
+        .into_iter()
+        .filter_map(|account| account["id"].as_str().map(str::to_owned))
+        .collect();
+    let mut accounts = storage::list(db, &selected_member, "accounts").await?
+        .into_iter()
+        .filter(|account| account["active"] != false && account["archived"] != true && account["currency"] == currency && account["id"].as_str().is_some_and(|id| owner_account_ids.contains(id)))
+        .map(|account| json!({"id":account["id"],"name":account["name"],"currency":account["currency"]}))
+        .collect::<Vec<_>>();
+    accounts.sort_by(|a, b| (a["name"].as_str(), a["id"].as_str()).cmp(&(b["name"].as_str(), b["id"].as_str())));
     let members=sqlx::query("SELECT u.id,u.name,u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.household_id=? AND m.active=1 ORDER BY u.name")
         .bind(&p.household_id).fetch_all(&mut *db).await?.into_iter()
         .map(|r|json!({"id":r.get::<&str,_>(0),"name":r.get::<&str,_>(1),"email":r.get::<&str,_>(2)})).collect::<Vec<_>>();
     Ok((
         StatusCode::OK,
-        json!({"enabled":current["enabled"],"user_id":current["user_id"],"family_enabled":current["family_enabled"],"accounts_enabled":current["accounts_enabled"],"revision":current["revision"],"members":members}),
+        json!({"enabled":current["enabled"],"user_id":current["user_id"],"family_enabled":current["family_enabled"],"accounts_enabled":current["accounts_enabled"],"revision":current["revision"],"members":members,"accounts":accounts}),
     ))
 }
 
@@ -152,6 +169,123 @@ pub async fn spending(state: &AppState, query: &Query) -> Result<Reply> {
         )
     })?;
     calculate(&mut db, &p, query, family_enabled, Utc::now()).await
+}
+
+pub async fn expense_calendar(state: &AppState, query: &Query) -> Result<Reply> {
+    api::allowed_query(query, &["scope", "month", "account_id"])?;
+    let mut db = state.pool.acquire().await?;
+    let row = sqlx::query(
+        "SELECT household_id,user_id,family_enabled FROM widget_settings WHERE enabled=1",
+    )
+    .fetch_optional(&mut *db)
+    .await?
+    .ok_or_else(ApiError::missing)?;
+    let household: String = row.get(0);
+    let user: String = row.get(1);
+    let family_enabled: bool = row.get(2);
+    let p = member(&mut db, &household, &user).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "widget_unavailable",
+            "Widget configuration is no longer valid.",
+        )
+    })?;
+    let scope = query.get("scope").map(String::as_str).unwrap_or("personal");
+    if !["personal", "family", "combined"].contains(&scope) {
+        return Err(ApiError::invalid("scope must be personal, family, or combined."));
+    }
+    if scope != "personal" && !family_enabled {
+        return Err(ApiError::forbidden());
+    }
+    if let Some(account_id) = query.get("account_id") {
+        storage::get(&mut db, &p, "accounts", account_id).await?;
+    }
+    let settings: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id)
+        .fetch_one(&mut *db)
+        .await?;
+    let settings: Value = serde_json::from_str(&settings)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+    let currency = text(&settings, "base_currency")?;
+    let tz: Tz = text(&settings, "timezone")?
+        .parse()
+        .map_err(|_| ApiError::invalid("Invalid household timezone."))?;
+    let now = Utc::now();
+    let today = now.with_timezone(&tz).date_naive();
+    let month = query
+        .get("month")
+        .cloned()
+        .unwrap_or_else(|| today.format("%Y-%m").to_string());
+    if month.len() != 7 || month.as_bytes()[4] != b'-' {
+        return Err(ApiError::invalid("month must be YYYY-MM."));
+    }
+    let month_start = crate::domain::date(&format!("{month}-01"))
+        .map_err(|_| ApiError::invalid("month must be YYYY-MM."))?;
+    let (_, _, _, month_end) = period_bounds(month_start)?;
+    let last = std::cmp::min(month_end, today);
+    let mut days = Vec::new();
+    if last >= month_start {
+        let categories = storage::list(&mut db, &p, "categories").await?;
+        let by_id: HashMap<String, Value> = categories
+            .into_iter()
+            .filter_map(|c| c["id"].as_str().map(|id| (id.to_owned(), c.clone())))
+            .collect();
+        let from = month_start.to_string();
+        let to = (last + Duration::days(1)).to_string();
+        let mut amounts = vec![0_i64; (last - month_start).num_days() as usize + 1];
+        for tx in storage::transactions_in_period(&mut db, &p, &from, &to, false).await? {
+            if tx["voided"] == true
+                || tx["currency"] != currency
+                || !matches!(tx["event_type"].as_str(), Some("expense" | "refund"))
+            {
+                continue;
+            }
+            if query.get("account_id").is_some_and(|id| {
+                !tx["movements"].as_array().is_some_and(|legs| {
+                    legs.iter().any(|movement| movement["account_id"] == id.as_str())
+                })
+            }) {
+                continue;
+            }
+            let at = balances::effective_at(&tx, tz)?;
+            if at > now {
+                continue;
+            }
+            let date = at.with_timezone(&tz).date_naive();
+            if date < month_start || date > last {
+                continue;
+            }
+            let mut amount = 0_i64;
+            for allocation in tx["allocations"].as_array().into_iter().flatten() {
+                if !allocation_in_scope(allocation, &tx, &p, scope)
+                    || is_card_settlement(
+                        allocation["category_id"].as_str().unwrap_or("uncategorized"),
+                        &by_id,
+                    )
+                {
+                    continue;
+                }
+                let value = money(text(allocation, "amount")?, currency)?;
+                amount = add(amount, if tx["event_type"] == "refund" { -value } else { value })?;
+            }
+            let index = (date - month_start).num_days() as usize;
+            amounts[index] = add(amounts[index], amount)?;
+        }
+        for (index, amount) in amounts.into_iter().enumerate() {
+            let expense: Value = serde_json::from_str(&format_money(amount, currency)?)
+                .map_err(|_| ApiError::invalid("Invalid money total."))?;
+            days.push(json!({
+                "date": (month_start + Duration::days(index as i64)).to_string(),
+                "expense": expense,
+            }));
+        }
+    }
+    Ok((StatusCode::OK, json!({
+        "month": month,
+        "currency": currency,
+        "complete": last >= month_start,
+        "days": days,
+    })))
 }
 
 pub async fn accounts(state: &AppState, query: &Query) -> Result<Reply> {
@@ -339,13 +473,7 @@ async fn calculate(
         let mut eligible = 0_i64;
         let mut any = false;
         for allocation in tx["allocations"].as_array().into_iter().flatten() {
-            let personal = allocation["scope"] == "personal" && tx["entered_by"] == p.user_id;
-            let family = allocation["scope"] == "family";
-            if !match scope {
-                "personal" => personal,
-                "family" => family,
-                _ => personal || family,
-            } {
+            if !allocation_in_scope(allocation, &tx, p, scope) {
                 continue;
             }
             let category_id = allocation["category_id"]
@@ -443,6 +571,16 @@ async fn calculate(
     ))
 }
 
+fn allocation_in_scope(allocation: &Value, tx: &Value, p: &Principal, scope: &str) -> bool {
+    let personal = allocation["scope"] == "personal" && tx["entered_by"] == p.user_id;
+    let family = allocation["scope"] == "family";
+    match scope {
+        "personal" => personal,
+        "family" => family,
+        _ => personal || family,
+    }
+}
+
 fn period_bounds(today: NaiveDate) -> Result<(NaiveDate, NaiveDate, NaiveDate, NaiveDate)> {
     let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
     let sunday = monday + Duration::days(6);
@@ -490,7 +628,12 @@ fn is_card_settlement(id: &str, categories: &HashMap<String, Value>) -> bool {
         if category["name"].as_str().is_some_and(|name| {
             matches!(
                 name.trim().to_ascii_lowercase().as_str(),
-                "credit card settlement" | "card settlement"
+                "credit card settlement"
+                    | "card settlement"
+                    | "credit card payment"
+                    | "card payment"
+                    | "credit card repayment"
+                    | "card repayment"
             )
         }) {
             return true;

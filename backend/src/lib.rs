@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod budget_forecast;
 pub mod balances;
 pub mod domain;
 pub mod error;

@@ -34,15 +34,16 @@ schemas = {
     "AccountInput": obj({"name": S, "subtype": enum("bank", "credit_card", "cash", "settle_up"), "currency": S, "timezone": S, "aliases": arr(S), "visibility": enum("private", "shared"), "active": B, "opening_balance": obj({"amount": M, "as_of": {"type":"string","format":"date-time"}}, ("amount","as_of")), "card_due": obj({"amount": M, "due_date": D}, ("due_date",))}, ("name", "subtype", "currency")),
     "CategoryInput": obj({"name": S, "kind": enum("expense", "income"), "parent_id": {"type": ["string", "null"]}, "visibility": enum("private", "shared")}, ("name", "kind")),
     "Movement": obj({"account_id": S, "amount": M}, ("account_id", "amount")),
-    "Allocation": obj({"category_id": {"type": ["string", "null"]}, "amount": M, "scope": enum("personal", "family"), "beneficiary_id": S}, ("amount", "scope")),
+    "Allocation": obj({"category_id": {"type": ["string", "null"]}, "amount": M, "scope": enum("personal", "family"), "beneficiary_id": S, "budget_destination": S}, ("amount", "scope")),
     "TransactionInput": obj({"event_type": enum("expense", "income", "refund", "transfer"), "amount": M, "currency": S, "effective_date": D, "effective_at": {"type":"string","format":"date-time"}, "description": S, "merchant": S, "movements": arr(ref("Movement")), "allocations": arr(ref("Allocation")), "paid_by_user_id": S}, ("event_type", "amount", "currency", "effective_date", "movements", "allocations")),
     "BudgetLine": obj({"category_id": S, "amount": M}, ("category_id", "amount")),
-    "BudgetInput": obj({"name": S, "month": {"type": "string", "pattern": r"^\d{4}-\d{2}$"}, "scope": enum("personal", "family"), "currency": S, "expected_income": M, "savings_goal": M, "lines": arr(ref("BudgetLine")), "targets": obj({})}, ("month", "scope", "currency", "expected_income", "lines")),
+    "BudgetPersonLimit": obj({"destination":S,"amount":M}, ("destination","amount")),
+    "BudgetInput": obj({"name": S, "month": {"type": "string", "pattern": r"^\d{4}-\d{2}$"}, "scope": enum("personal", "family"), "currency": S, "expected_income": M, "savings_goal": M, "lines": arr(ref("BudgetLine")), "people_limits": arr(ref("BudgetPersonLimit")), "targets": obj({})}, ("month", "scope", "currency", "expected_income", "lines")),
     "Revision": obj({"expected_revision": I}),
     "Reason": obj({"expected_revision": I, "reason": S}, ("reason",)),
     "InviteInput": obj({"email": S, "role": enum("admin", "member"), "token": {"type": "string", "pattern": "^[a-fA-F0-9]{64}$", "writeOnly": True, "description": "Generate 32 random bytes in the client; transmit the token to the invitee privately. Server persists only its hash."}, "expires_at": {"type": "string", "format": "date-time"}}, ("email", "role", "token")),
 }
-schemas["PlannedItemInput"] = obj({"title": S, "due_date": D, "amount": M, "currency": S, "category_id": {"type":["string","null"]}, "account_id": {"type":["string","null"]}, "visibility": enum("private","shared")}, ("title","due_date","amount","currency","visibility"))
+schemas["PlannedItemInput"] = obj({"title": S, "due_date": D, "amount": M, "currency": S, "category_id": {"type":["string","null"]}, "account_id": {"type":["string","null"]}, "visibility": enum("private","shared"), "budget_commitment": B, "budget_destination": S}, ("title","due_date","amount","currency","visibility"))
 schemas["PlannedItem"] = obj(dict(schemas["PlannedItemInput"]["properties"], id=S, revision=I, owner_id=S, status=enum("planned","done","skipped"), created_at=S), list(schemas["PlannedItemInput"]["required"])+["id","revision","owner_id","status","created_at"])
 schemas["PlannedItemCollection"] = obj({"data":arr(ref("PlannedItem")),"page":obj({}),"meta":obj({})}, ("data","page","meta"))
 schemas["PlannedItemPatch"] = obj(dict(schemas["PlannedItemInput"]["properties"], status=enum("planned","done","skipped"), expected_revision=I))
@@ -53,8 +54,9 @@ schemas["QuickExpenseSettings"] = obj({"enabled": B, "user_id": {"type":["string
 schemas["QuickExpenseSettingsPatch"] = obj({"enabled": B,"user_id": S,"default_account_id": S,"account_ids": arr(S),"expected_revision": I}, ("enabled","user_id","default_account_id","account_ids"))
 widget_period = obj({"start_date": D,"end_date": D,"spent": M,"transaction_count": I}, ("start_date","end_date","spent","transaction_count"))
 schemas["WidgetSpending"] = obj({"success": B,"generated_at": {"type":"string","format":"date-time"},"currency": S,"timezone": S,"scope": enum("personal","family","combined"),"summary": obj({"today": obj({"date": D,"spent": M,"transaction_count": I}, ("date","spent","transaction_count")),"week": widget_period,"month": widget_period}, ("today","week","month")),"daily_spending": arr(obj({"date": D,"spent": M}, ("date","spent"))),"categories": obj({"period": enum("month"),"total_spent": M,"items": arr(obj({"id": S,"label": S,"amount": M,"percentage": {"type":"number"}}, ("id","label","amount","percentage"))),"other_amount": M}, ("period","total_spent","items","other_amount"))}, ("success","generated_at","currency","timezone","scope","summary","daily_spending","categories"))
+schemas["WidgetExpenseCalendar"] = obj({"month": {"type":"string","pattern":r"^\d{4}-\d{2}$"},"currency": S,"complete": B,"days": arr(obj({"date": D,"expense": {"type":"number"}}, ("date","expense")))}, ("month","currency","complete","days"))
 schemas["WidgetAccounts"] = obj({"success": B,"generated_at": {"type":"string","format":"date-time"},"currency": S,"accounts": arr(obj({"id": S,"name": S,"type": enum("bank","credit_card","cash","settle_up"),"balance": {"type":["string","null"],"pattern":M["pattern"]},"last_transaction_date": {"type":["string","null"],"format":"date"}}, ("id","name","type","balance","last_transaction_date")))}, ("success","generated_at","currency","accounts"))
-schemas["WidgetSettings"] = obj({"enabled": B,"user_id": {"type":["string","null"]},"family_enabled": B,"accounts_enabled": B,"revision": I,"members": arr(obj({"id": S,"name": S,"email": S}))}, ("enabled","family_enabled","accounts_enabled","revision"))
+schemas["WidgetSettings"] = obj({"enabled": B,"user_id": {"type":["string","null"]},"family_enabled": B,"accounts_enabled": B,"revision": I,"members": arr(obj({"id": S,"name": S,"email": S})),"accounts": arr(obj({"id": S,"name": S,"currency": S}, ("id","name","currency")))}, ("enabled","family_enabled","accounts_enabled","revision","accounts"))
 schemas["WidgetSettingsPatch"] = obj({"enabled": B,"user_id": S,"family_enabled": B,"accounts_enabled": B,"expected_revision": I}, ("enabled",))
 schemas["BootstrapInput"] = obj({"owner": ref("Owner"), "household": ref("HouseholdInput")}, ("owner", "household"))
 for name in ["Account", "Category", "Transaction", "Budget"]:
@@ -65,7 +67,7 @@ for name in ["Account", "Category", "Transaction", "Budget"]:
     if name == "Category":
         props.update(archived=B)
     if name == "Budget":
-        props.update(state=enum("draft", "active", "archived"))
+        props.update(state=enum("draft", "active", "archived"),last_amendment=obj({"reason":S,"actor_id":S,"at":S,"total_allowance_delta":M}, ("reason","actor_id","at","total_allowance_delta")))
     if name == "Account":
         props.update(balance=obj({"amount": {"type": ["string", "null"]}, "currency": S, "basis": S, "as_of": {"type": ["string", "null"]}, "complete": B, "coverage": S, "source": enum("opening_balance", "balance_check", "unknown"), "anchor_at": {"type": ["string", "null"]}}))
     schemas[name] = obj(props, list(source["required"]) + ["id", "revision", "owner_id", "created_at"])
@@ -107,6 +109,7 @@ route("/openapi.json", "get", public=True)
 route("/quick-transactions/options", "get", "QuickExpenseOptions", public=True, parameters=["account_id"])
 route("/quick-transactions", "post", "QuickExpenseResult", "QuickExpenseInput", public=True)
 route("/widgets/spending", "get", "WidgetSpending", public=True, parameters=["account_id","category_limit","include_children","scope"])
+route("/widgets/expense-calendar", "get", "WidgetExpenseCalendar", public=True, parameters=["scope","month","account_id"])
 route("/widgets/accounts", "get", "WidgetAccounts", public=True)
 for health in ["live", "ready"]:
     route(f"/health/{health}", "get", public=True)
@@ -121,6 +124,9 @@ route("/planned-items", "get", "PlannedItemCollection", parameters=["month"])
 route("/planned-items", "post", "PlannedItem", "PlannedItemInput")
 route("/planned-items/{id}", "patch", "PlannedItem", "PlannedItemPatch", revision=True)
 route("/planned-items/{id}", "delete", revision=True)
+schemas["PlannedItemMatchInput"] = obj({"transaction_id":S,"reason":S,"expected_revision":I}, ("transaction_id","reason"))
+route("/planned-items/{id}/match", "post", "PlannedItem", "PlannedItemMatchInput", revision=True)
+route("/planned-items/{id}/match", "delete", request="Reason", revision=True)
 for kind in ["transactions", "budgets"]:
     route(f"/{kind}/{{id}}/revisions", "get")
 route("/transactions/{id}/void", "post", "Transaction", "Reason", revision=True)
@@ -160,11 +166,32 @@ route("/analytics/household", "get", "HouseholdReport", parameters=["from","to",
 for action in ["activate", "archive", "copy"]:
     route(f"/budgets/{{id}}/{action}", "post", "Budget", revision=True)
 route("/budgets/{id}/tracking", "get", parameters=["from", "to"])
+schemas["BudgetAllocation"] = obj({"id":S,"transaction_id":S,"effective_date":D,"description":{"type":["string","null"]},"event_type":enum("expense","refund"),"category_id":{"type":["string","null"]},"destination":S,"amount":M,"currency":S,"paid_by_user_id":{"type":["string","null"]},"entered_by":S}, ("id","transaction_id","effective_date","event_type","category_id","destination","amount","currency","entered_by"))
+schemas["BudgetAllocationCollection"] = obj({"data":arr(ref("BudgetAllocation")),"page":obj({"next_cursor":S}),"meta":obj({})}, ("data","page","meta"))
+route("/budgets/{id}/allocations", "get", "BudgetAllocationCollection", parameters=["category_id","destination","cursor","limit"])
+schemas["BudgetMatrixCell"] = obj({"category_id":{"type":["string","null"]},"destination":S,"spent":M}, ("category_id","destination","spent"))
+schemas["BudgetMatrix"] = obj({"data":arr(ref("BudgetMatrixCell")),"total_spent":M,"meta":obj({})}, ("data","total_spent","meta"))
+route("/budgets/{id}/matrix", "get", "BudgetMatrix", parameters=["category_id","destination"])
+schemas["BudgetChangeProposal"] = obj({"name":S,"expected_income":M,"savings_goal":M,"lines":arr(ref("BudgetLine")),"people_limits":arr(ref("BudgetPersonLimit"))})
+schemas["BudgetChangeSummary"] = obj({"total_allowance":M,"expected_income":M,"savings_goal":M,"funding_gap":M}, ("total_allowance","expected_income","savings_goal","funding_gap"))
+schemas["BudgetChangeLine"] = obj({"id":S,"before":M,"after":M,"delta":M}, ("id","before","after","delta"))
+schemas["BudgetPlanPreview"] = obj({"budget_id":S,"base_revision":I,"currency":S,"before_name":S,"after_name":S,"proposal":ref("BudgetChangeProposal"),"preview_hash":S,"before":ref("BudgetChangeSummary"),"after":ref("BudgetChangeSummary"),"total_allowance_delta":M,"category_changes":arr(ref("BudgetChangeLine")),"people_changes":arr(ref("BudgetChangeLine")),"unfunded_warning":B}, ("budget_id","base_revision","currency","before_name","after_name","proposal","preview_hash","before","after","total_allowance_delta","category_changes","people_changes","unfunded_warning"))
+schemas["BudgetAmendmentInput"] = obj({"proposal":ref("BudgetChangeProposal"),"preview_hash":S,"reason":S,"accept_unfunded":B,"expected_revision":I}, ("proposal","preview_hash","reason"))
+route("/budgets/{id}/plan-preview", "post", "BudgetPlanPreview", "BudgetChangeProposal", revision=True)
+route("/budgets/{id}/amendments", "post", "Budget", "BudgetAmendmentInput", revision=True)
+schemas["BudgetPersonRow"] = obj({"destination":S,"name":S,"active":B,"spent":M,"committed":M,"allowance":{"type":["string","null"]},"remaining":{"type":["string","null"]},"available_after_commitments":{"type":["string","null"]}}, ("destination","name","spent","committed","allowance","remaining","available_after_commitments"))
+schemas["BudgetPeople"] = obj({"data":arr(ref("BudgetPersonRow")),"total_spent":M,"total_committed":M,"meta":obj({})}, ("data","total_spent","total_committed","meta"))
+route("/budgets/{id}/people", "get", "BudgetPeople")
+schemas["BudgetCommitment"] = obj({"id":S,"title":S,"due_date":D,"category_id":S,"destination":S,"amount":M,"committed":M,"state":enum("planned","posted","skipped","needs_review")}, ("id","title","due_date","category_id","destination","amount","committed","state"))
+schemas["BudgetCommitments"] = obj({"data":arr(ref("BudgetCommitment")),"total_committed":M,"meta":obj({})}, ("data","total_committed","meta"))
+route("/budgets/{id}/commitments", "get", "BudgetCommitments")
+schemas["BudgetForecast"] = obj({"status":enum("unavailable","limited_history"),"reason":S,"as_of":D,"month":S,"currency":S,"effective_allowance":M,"spent":M,"unmatched_commitments":M,"elapsed_variable_spending":M,"elapsed_days":I,"remaining_days":I,"total_days":I,"remaining_variable_estimate":{"type":["string","null"],"pattern":M["pattern"]},"forecast_spending":{"type":["string","null"],"pattern":M["pattern"]},"forecast_headroom":{"type":["string","null"],"pattern":M["pattern"]},"formula_version":S,"quality_flags":arr(S),"meta":obj({})}, ("status","reason","as_of","month","currency","effective_allowance","spent","unmatched_commitments","elapsed_variable_spending","elapsed_days","remaining_days","total_days","remaining_variable_estimate","forecast_spending","forecast_headroom","formula_version","quality_flags","meta"))
+route("/budgets/{id}/forecast", "get", "BudgetForecast")
 route("/settings/household", "get", "HouseholdSettings")
 route("/settings/household", "patch", "HouseholdSettings", "HouseholdSettingsPatch", revision=True)
 route("/settings/quick-expense", "get", "QuickExpenseSettings", parameters=["user_id"])
 route("/settings/quick-expense", "patch", "QuickExpenseSettings", "QuickExpenseSettingsPatch", revision=True)
-route("/settings/widgets", "get", "WidgetSettings")
+route("/settings/widgets", "get", "WidgetSettings", parameters=["user_id"])
 route("/settings/widgets", "patch", "WidgetSettings", "WidgetSettingsPatch", revision=True)
 route("/households/{household_id}/members", "get")
 route("/households/{household_id}/invites", "post", request="InviteInput")

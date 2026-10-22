@@ -1,5 +1,5 @@
 use crate::{
-    AppState,
+    AppState, budget_forecast::{self, PeriodPhase},
     auth::{self, Principal},
     balances,
     domain::{self, add, format_money, money, text},
@@ -16,7 +16,7 @@ use axum::{
 use chrono::Utc;
 use serde_json::{Value, json};
 use sqlx::{Row, SqliteConnection};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub type Query = HashMap<String, String>;
 type Reply = (StatusCode, Value);
@@ -43,7 +43,7 @@ fn unsupported() -> ApiError {
 
 pub async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
     let widget_request = request.method() == axum::http::Method::GET
-        && ["/api/v1/widgets/spending", "/api/v1/widgets/accounts"]
+        && ["/api/v1/widgets/spending", "/api/v1/widgets/accounts", "/api/v1/widgets/expense-calendar"]
             .contains(&request.uri().path().trim_end_matches('/'));
     let request_id = request
         .headers()
@@ -127,6 +127,9 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
         .0;
     if method == "GET" && path == "widgets/spending" {
         return widgets::spending(state, &query).await;
+    }
+    if method == "GET" && path == "widgets/expense-calendar" {
+        return widgets::expense_calendar(state, &query).await;
     }
     if method == "GET" && path == "widgets/accounts" {
         return widgets::accounts(state, &query).await;
@@ -519,6 +522,7 @@ const BUDGET_FIELDS: &[&str] = &[
     "expected_income",
     "savings_goal",
     "lines",
+    "people_limits",
     "targets",
 ];
 
@@ -555,7 +559,7 @@ pub(crate) async fn route(
             ok(collection(values))
         }
         ("POST", ["planned-items"]) => {
-            allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility"])?;
+            allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility","budget_commitment","budget_destination"])?;
             let mut value = body.clone();
             if family_only(db,p).await? { value["visibility"] = json!("shared"); }
             validate_planned_item(db,p,&value).await?;
@@ -563,22 +567,71 @@ pub(crate) async fn route(
             created(storage::create(db,p,"planned_items",value).await?)
         }
         ("PATCH", ["planned-items", id]) => {
-            allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility","status"])?;
+            allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility","status","budget_commitment","budget_destination"])?;
             let before = storage::get(db,p,"planned_items",id).await?;
             if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
             revision(headers,body,&before)?;
-            let mut after = patch(&before,body,&["title","due_date","amount","currency","category_id","account_id","visibility","status"]);
+            let mut after = patch(&before,body,&["title","due_date","amount","currency","category_id","account_id","visibility","status","budget_commitment","budget_destination"]);
             if family_only(db,p).await? { after["visibility"] = json!("shared"); }
             validate_planned_item(db,p,&after).await?;
             domain::choice(&after,"status",&["planned","done","skipped"])?;
+            let matched: i64 = sqlx::query_scalar("SELECT count(*) FROM planned_item_matches WHERE household_id=? AND planned_item_id=?")
+                .bind(&p.household_id).bind(id).fetch_one(&mut *db).await?;
+            if matched > 0 && (after["status"] != "done" || after["budget_commitment"] != true || after["due_date"] != before["due_date"] || after["amount"] != before["amount"] || after["currency"] != before["currency"] || after["category_id"] != before["category_id"] || after["visibility"] != before["visibility"] || after["account_id"] != before["account_id"] || after["budget_destination"] != before["budget_destination"]) {
+                return Err(ApiError::conflict("Unmatch this commitment before changing its financial details or status."));
+            }
+            if after["budget_commitment"] == true && after["status"] == "done" && matched == 0 {
+                return Err(ApiError::conflict("Match the posted expense before marking a budget commitment done."));
+            }
             ok(storage::update(db,p,&before,after,"update").await?)
         }
         ("DELETE", ["planned-items", id]) => {
             let before = storage::get(db,p,"planned_items",id).await?;
             if before["owner_id"] != p.user_id { return Err(ApiError::forbidden()); }
             revision(headers,body,&before)?;
+            let matched: i64 = sqlx::query_scalar("SELECT count(*) FROM planned_item_matches WHERE household_id=? AND planned_item_id=?")
+                .bind(&p.household_id).bind(id).fetch_one(&mut *db).await?;
+            if matched > 0 { return Err(ApiError::conflict("Unmatch this commitment before removing it.")); }
             let mut after = before.clone(); after["deleted"] = json!(true);
             storage::update(db,p,&before,after,"delete").await?;
+            no_content()
+        }
+        ("POST", ["planned-items", id, "match"]) => {
+            allowed_body(body, &["transaction_id", "reason"])?;
+            let before = storage::get(db, p, "planned_items", id).await?;
+            if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
+            revision(headers, body, &before)?;
+            if before["budget_commitment"] != true || before["status"] != "planned" {
+                return Err(ApiError::conflict("Only a planned budget commitment can be matched."));
+            }
+            let reason = text(body, "reason")?.trim();
+            if reason.is_empty() || reason.len() > 500 { return Err(ApiError::invalid("Match reason must be 1–500 characters.")); }
+            let transaction_id = text(body, "transaction_id")?;
+            let transaction = storage::get(db, p, "transactions", transaction_id).await?;
+            validate_commitment_transaction(db, p, &before, &transaction).await?;
+            let used: i64 = sqlx::query_scalar("SELECT count(*) FROM planned_item_matches WHERE household_id=? AND transaction_id=?")
+                .bind(&p.household_id).bind(transaction_id).fetch_one(&mut *db).await?;
+            if used > 0 { return Err(ApiError::conflict("This expense is already matched to another commitment.")); }
+            sqlx::query("INSERT INTO planned_item_matches(household_id,planned_item_id,transaction_id,actor_id,reason,matched_at) VALUES(?,?,?,?,?,?)")
+                .bind(&p.household_id).bind(id).bind(transaction_id).bind(&p.user_id).bind(reason).bind(storage::now()).execute(&mut *db).await?;
+            let mut after = before.clone(); after["status"] = json!("done");
+            let result = storage::update(db, p, &before, after, "budget_commitment_matched").await?;
+            storage::audit(db, p, id, "budget_commitment_match_reason", None, Some(&json!({"reason":reason,"transaction_id":transaction_id}))).await?;
+            ok(result)
+        }
+        ("DELETE", ["planned-items", id, "match"]) => {
+            allowed_body(body, &["reason"])?;
+            let before = storage::get(db, p, "planned_items", id).await?;
+            if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
+            revision(headers, body, &before)?;
+            let reason = text(body, "reason")?.trim();
+            if reason.is_empty() || reason.len() > 500 { return Err(ApiError::invalid("Unmatch reason must be 1–500 characters.")); }
+            let deleted = sqlx::query("DELETE FROM planned_item_matches WHERE household_id=? AND planned_item_id=?")
+                .bind(&p.household_id).bind(id).execute(&mut *db).await?.rows_affected();
+            if deleted == 0 { return Err(ApiError::conflict("This commitment is not matched.")); }
+            let mut after = before.clone(); after["status"] = json!("planned");
+            storage::update(db, p, &before, after, "budget_commitment_unmatched").await?;
+            storage::audit(db, p, id, "budget_commitment_unmatch_reason", None, Some(&json!({"reason":reason}))).await?;
             no_content()
         }
         ("GET", ["recurring-transactions"]) => {
@@ -625,6 +678,9 @@ pub(crate) async fn route(
                     return Err(ApiError::invalid("Transfers have no allocation scope."));
                 }
                 for allocation in allocations {
+                    if allocation["scope"] == "personal" && scope == "family" {
+                        allocation.as_object_mut().unwrap().remove("budget_destination");
+                    }
                     allocation["scope"] = json!(scope);
                     if scope == "family" {
                         allocation.as_object_mut().unwrap().remove("beneficiary_id");
@@ -998,7 +1054,7 @@ pub(crate) async fn route(
                     if before["state"] == "archived" {
                         return Err(ApiError::conflict("Archived budgets cannot be edited."));
                     }
-                    validate_budget(db, p, &after, Some(id)).await?;
+                    return Err(ApiError::conflict("Preview the budget change and save it as an amendment."));
                 }
                 _ => unreachable!(),
             }
@@ -1251,6 +1307,7 @@ pub(crate) async fn route(
                                 "expected_income",
                                 "savings_goal",
                                 "lines",
+                                "people_limits",
                                 "targets",
                                 "state",
                             ],
@@ -1273,6 +1330,44 @@ pub(crate) async fn route(
             ok(storage::update(db, p, &before, after, action).await?)
         }
         ("GET", ["budgets", id, "tracking"]) => budget_tracking(db, p, id, q).await,
+        ("GET", ["budgets", id, "allocations"]) => budget_allocations(db, p, id, q).await,
+        ("GET", ["budgets", id, "matrix"]) => budget_matrix(db, p, id, q).await,
+        ("POST", ["budgets", id, "plan-preview"]) => {
+            allowed_body(body, &["name", "expected_income", "savings_goal", "lines", "people_limits"])?;
+            let before = storage::get(db, p, "budgets", id).await?;
+            budget_write(p, &before)?;
+            revision(headers, body, &before)?;
+            if before["state"] == "archived" { return Err(ApiError::conflict("Archived budgets cannot be edited.")); }
+            let (_, preview) = preview_budget_change(db, p, &before, body).await?;
+            ok(preview)
+        }
+        ("POST", ["budgets", id, "amendments"]) => {
+            allowed_body(body, &["proposal", "preview_hash", "reason", "accept_unfunded"])?;
+            let before = storage::get(db, p, "budgets", id).await?;
+            budget_write(p, &before)?;
+            revision(headers, body, &before)?;
+            if before["state"] == "archived" { return Err(ApiError::conflict("Archived budgets cannot be edited.")); }
+            let reason = text(body, "reason")?.trim();
+            if reason.is_empty() || reason.len() > 500 { return Err(ApiError::invalid("Amendment reason must be 1–500 characters.")); }
+            let proposal = body.get("proposal").filter(|value| value.is_object()).ok_or_else(|| ApiError::invalid("proposal must be an object."))?;
+            allowed_body(proposal, &["name", "expected_income", "savings_goal", "lines", "people_limits"])?;
+            let (mut after, preview) = preview_budget_change(db, p, &before, proposal).await?;
+            if preview["preview_hash"] != body["preview_hash"] { return Err(ApiError::conflict("Plan preview changed. Review the budget again.")); }
+            if preview["unfunded_warning"] == true && body["accept_unfunded"] != true {
+                return Err(ApiError::conflict("Confirm the unfunded budget increase before saving."));
+            }
+            after["last_amendment"] = json!({"reason":reason,"actor_id":p.user_id,"at":storage::now(),"total_allowance_delta":preview["total_allowance_delta"]});
+            let result = storage::update(db, p, &before, after, "budget_amendment").await?;
+            storage::audit(db, p, id, "budget_amendment_reason", None, Some(&json!({"reason":reason,"preview":preview}))).await?;
+            ok(result)
+        }
+        ("GET", ["budgets", id, "forecast"]) => budget_forecast_view(db, p, id, q).await,
+        ("GET", ["budgets", id, "people"]) => budget_people(db, p, id, q).await,
+        ("GET", ["budgets", id, "commitments"]) => {
+            allowed_query(q, &[])?;
+            let budget = storage::get(db, p, "budgets", id).await?;
+            ok(budget_commitments(db, p, &budget).await?)
+        },
         ("GET", ["households", household, "members"]) if *household == p.household_id => {
             let rows=sqlx::query("SELECT m.id,m.role,m.revision,u.name,u.email,u.id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.household_id=? AND m.active=1 ORDER BY m.id").bind(&p.household_id).fetch_all(db).await?;
             ok(collection(rows.into_iter().map(|r|json!({"id":r.get::<&str,_>(0),"role":r.get::<&str,_>(1),"revision":r.get::<i64,_>(2),"name":r.get::<&str,_>(3),"email":r.get::<&str,_>(4),"user_id":r.get::<&str,_>(5)})).collect()))
@@ -1324,6 +1419,9 @@ fn force_family(kind: &str, value: &mut Value) {
         "transactions" => {
             if let Some(allocations) = value["allocations"].as_array_mut() {
                 for allocation in allocations {
+                    if allocation["scope"] == "personal" {
+                        allocation.as_object_mut().map(|a| a.remove("budget_destination"));
+                    }
                     allocation["scope"] = json!("family");
                     allocation.as_object_mut().map(|a| a.remove("beneficiary_id"));
                 }
@@ -1354,6 +1452,9 @@ async fn enable_family_only(db: &mut SqliteConnection, p: &Principal) -> Result<
                 "transactions" => {
                     if let Some(allocations) = after["allocations"].as_array_mut() {
                         for allocation in allocations {
+                            if allocation["scope"] == "personal" {
+                                allocation.as_object_mut().map(|a| a.remove("budget_destination"));
+                            }
                             allocation["scope"] = json!("family");
                             allocation.as_object_mut().map(|a| a.remove("beneficiary_id"));
                         }
@@ -1438,6 +1539,59 @@ async fn validate_planned_item(db: &mut SqliteConnection, p: &Principal, v: &Val
         if category["kind"] != "expense" || category["archived"] == true { return Err(ApiError::invalid("Choose an active expense category.")); }
         if v["visibility"] == "shared" && category["visibility"] == "private" { return Err(ApiError::invalid("A household plan needs a household category.")); }
     } else if !v["category_id"].is_null() { return Err(ApiError::invalid("Invalid planned category.")); }
+    if v.get("budget_commitment").is_some_and(|flag| !flag.is_boolean()) {
+        return Err(ApiError::invalid("budget_commitment must be a boolean."));
+    }
+    if v["budget_commitment"] == true {
+        if v["category_id"].is_null() {
+            return Err(ApiError::invalid("A budget commitment needs an expense category."));
+        }
+        if let Some(destination) = v.get("budget_destination") {
+            let destination = destination.as_str().ok_or_else(|| ApiError::invalid("Invalid budget destination."))?;
+            if v["visibility"] == "private" {
+                if destination != p.user_id { return Err(ApiError::invalid("A private commitment belongs to its owner.")); }
+            } else if !["shared", "unassigned"].contains(&destination) {
+                let known: i64 = sqlx::query_scalar("SELECT count(*) FROM memberships WHERE household_id=? AND user_id=?")
+                    .bind(&p.household_id).bind(destination).fetch_one(&mut *db).await?;
+                if known == 0 { return Err(ApiError::invalid("Budget destination must be a household member.")); }
+            }
+        }
+    } else if v.get("budget_destination").is_some_and(|destination| !destination.is_null()) {
+        return Err(ApiError::invalid("Only budget commitments have a budget destination."));
+    }
+    Ok(())
+}
+async fn validate_commitment_transaction(db: &mut SqliteConnection, p: &Principal, item: &Value, transaction: &Value) -> Result<()> {
+    if transaction["voided"] == true || transaction["event_type"] != "expense"
+        || transaction["currency"] != item["currency"]
+        || money(text(transaction, "amount")?, text(item, "currency")?)? != money(text(item, "amount")?, text(item, "currency")?)? {
+        return Err(ApiError::invalid("Match a posted expense with the same amount and currency."));
+    }
+    let due = text(item, "due_date")?;
+    let posted = text(transaction, "effective_date")?;
+    if due.get(..7) != posted.get(..7) {
+        return Err(ApiError::invalid("The posted expense must belong to the commitment month."));
+    }
+    let scope = if item["visibility"] == "shared" { "family" } else { "personal" };
+    if scope == "personal" && transaction["entered_by"] != item["owner_id"] {
+        return Err(ApiError::invalid("A personal commitment needs the owner's expense."));
+    }
+    let allocations = transaction["allocations"].as_array().ok_or_else(|| ApiError::invalid("Invalid transaction allocations."))?;
+    if allocations.is_empty() || allocations.iter().any(|line| line["scope"] != scope || line["category_id"] != item["category_id"]) {
+        return Err(ApiError::invalid("The posted expense must use the commitment category and scope."));
+    }
+    if let Some(account_id) = item["account_id"].as_str()
+        && !transaction["movements"].as_array().is_some_and(|movements| movements.iter().any(|movement| movement["account_id"] == account_id)) {
+        return Err(ApiError::invalid("The posted expense uses a different account."));
+    }
+    if scope == "family" {
+        for movement in transaction["movements"].as_array().into_iter().flatten() {
+            let account = storage::raw(db, p, "accounts", text(movement, "account_id")?).await?;
+            if account["visibility"] != "shared" {
+                return Err(ApiError::invalid("Match a household commitment to an expense from a shared account."));
+            }
+        }
+    }
     Ok(())
 }
 async fn validate_category(
@@ -1541,6 +1695,23 @@ pub(crate) async fn validate_ledger_with_history(
         }
     }
     for allocation in v["allocations"].as_array().unwrap() {
+        if let Some(destination) = allocation.get("budget_destination") {
+            if !["expense", "refund"].contains(&v["event_type"].as_str().unwrap_or_default()) {
+                return Err(ApiError::invalid("Only expense and refund allocations have a budget destination."));
+            }
+            let destination = destination.as_str().ok_or_else(|| ApiError::invalid("Budget destination must be a member ID, shared, or unassigned."))?;
+            if allocation["scope"] == "personal" {
+                if destination != p.user_id {
+                    return Err(ApiError::invalid("Personal budget usage must stay with the current member."));
+                }
+            } else if !["shared", "unassigned"].contains(&destination) {
+                let known: i64 = sqlx::query_scalar("SELECT count(*) FROM memberships WHERE household_id=? AND user_id=?")
+                    .bind(&p.household_id).bind(destination).fetch_one(&mut *db).await?;
+                if known == 0 {
+                    return Err(ApiError::invalid("Budget destination must be a household member."));
+                }
+            }
+        }
         if let Some(category) = allocation["category_id"].as_str() {
             let c = storage::get(db, p, "categories", category).await?;
             let expected = if v["event_type"] == "income" {
@@ -1786,6 +1957,67 @@ fn budget_write(p: &Principal, v: &Value) -> Result<()> {
         Err(ApiError::forbidden())
     }
 }
+async fn preview_budget_change(db: &mut SqliteConnection, p: &Principal, before: &Value, proposal: &Value) -> Result<(Value, Value)> {
+    let after = patch(before, proposal, &["name", "expected_income", "savings_goal", "lines", "people_limits"]);
+    validate_budget(db, p, &after, Some(text(before, "id")?)).await?;
+    let fields = ["name", "expected_income", "savings_goal", "lines", "people_limits"];
+    let currency = text(before, "currency")?;
+    let sum_lines = |value: &Value| -> Result<i64> {
+        value["lines"].as_array().into_iter().flatten().try_fold(0_i64, |sum, line| add(sum, money(text(line, "amount")?, currency)?))
+    };
+    let before_total = sum_lines(before)?;
+    let after_total = sum_lines(&after)?;
+    let summary = |value: &Value, total: i64| -> Result<Value> {
+        let income = money(text(value, "expected_income")?, currency)?;
+        let savings = value["savings_goal"].as_str().map(|amount| money(amount, currency)).transpose()?.unwrap_or(0);
+        let gap = income.checked_sub(total).and_then(|remaining| remaining.checked_sub(savings))
+            .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+        Ok(json!({"total_allowance":format_money(total,currency)?,"expected_income":format_money(income,currency)?,"savings_goal":format_money(savings,currency)?,"funding_gap":format_money(gap,currency)?}))
+    };
+    let before_summary = summary(before, before_total)?;
+    let after_summary = summary(&after, after_total)?;
+    let before_gap = money(text(&before_summary, "funding_gap")?, currency)?;
+    let after_gap = money(text(&after_summary, "funding_gap")?, currency)?;
+    let changes = |key: &str| -> Result<Vec<Value>> {
+        let mut old = HashMap::<String,i64>::new();
+        let mut new = HashMap::<String,i64>::new();
+        for line in before[key].as_array().into_iter().flatten() {
+            let name = if key == "lines" { "category_id" } else { "destination" };
+            old.insert(text(line, name)?.to_owned(), money(text(line, "amount")?, currency)?);
+        }
+        for line in after[key].as_array().into_iter().flatten() {
+            let name = if key == "lines" { "category_id" } else { "destination" };
+            new.insert(text(line, name)?.to_owned(), money(text(line, "amount")?, currency)?);
+        }
+        let mut ids: Vec<String> = old.keys().chain(new.keys()).cloned().collect();
+        ids.sort(); ids.dedup();
+        ids.into_iter().filter_map(|id| {
+            let from = *old.get(&id).unwrap_or(&0);
+            let to = *new.get(&id).unwrap_or(&0);
+            (from != to).then_some((id, from, to))
+        }).map(|(id, from, to)| {
+            let delta = to.checked_sub(from).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+            Ok(json!({"id":id,"before":format_money(from,currency)?,"after":format_money(to,currency)?,"delta":format_money(delta,currency)?}))
+        }).collect()
+    };
+    let category_changes = changes("lines")?;
+    let people_changes = changes("people_limits")?;
+    let unchanged_savings = before["savings_goal"].as_str().map(|value| money(value, currency)).transpose()?.unwrap_or(0)
+        == after["savings_goal"].as_str().map(|value| money(value, currency)).transpose()?.unwrap_or(0);
+    if category_changes.is_empty() && people_changes.is_empty()
+        && before["name"] == after["name"] && before_summary["expected_income"] == after_summary["expected_income"]
+        && unchanged_savings {
+        return Err(ApiError::invalid("The proposed budget has no changes."));
+    }
+    let mut normalized = json!({});
+    for field in fields {
+        if let Some(value) = after.get(field) { normalized[field] = value.clone(); }
+    }
+    let preview_hash = auth::hash(&format!("{}:{}:{}", text(before, "id")?, before["revision"], normalized));
+    let total_delta = after_total.checked_sub(before_total).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+    let preview = json!({"budget_id":before["id"],"base_revision":before["revision"],"currency":currency,"before_name":before["name"].as_str().unwrap_or(""),"after_name":after["name"].as_str().unwrap_or(""),"proposal":normalized,"preview_hash":preview_hash,"before":before_summary,"after":after_summary,"total_allowance_delta":format_money(total_delta,currency)?,"category_changes":category_changes,"people_changes":people_changes,"unfunded_warning":after_gap < 0 && after_gap < before_gap});
+    Ok((after, preview))
+}
 async fn validate_budget(
     db: &mut SqliteConnection,
     p: &Principal,
@@ -1829,6 +2061,36 @@ async fn validate_budget(
             return Err(ApiError::invalid("Budget limits cannot be negative."));
         }
         sum = add(sum, limit)?;
+    }
+    if let Some(limits) = v.get("people_limits") {
+        let limits = limits.as_array().ok_or_else(|| ApiError::invalid("people_limits must be an array."))?;
+        let mut destinations = std::collections::HashSet::new();
+        let mut allocated = 0_i64;
+        for line in limits {
+            let destination = text(line, "destination")?;
+            if !destinations.insert(destination) {
+                return Err(ApiError::invalid("People allowances must have unique destinations."));
+            }
+            if v["scope"] == "personal" {
+                if destination != p.user_id {
+                    return Err(ApiError::invalid("Personal allowance must belong to the plan owner."));
+                }
+            } else if !["shared", "unassigned"].contains(&destination) {
+                let known: i64 = sqlx::query_scalar("SELECT count(*) FROM memberships WHERE household_id=? AND user_id=?")
+                    .bind(&p.household_id).bind(destination).fetch_one(&mut *db).await?;
+                if known == 0 {
+                    return Err(ApiError::invalid("People allowance destination must be a household member."));
+                }
+            }
+            let amount = money(text(line, "amount")?, currency)?;
+            if amount < 0 {
+                return Err(ApiError::invalid("People allowances cannot be negative."));
+            }
+            allocated = add(allocated, amount)?;
+        }
+        if !limits.is_empty() && allocated != sum {
+            return Err(ApiError::invalid("People allowances must equal the total category limits."));
+        }
     }
     for plan in storage::list(db, p, "budgets").await? {
         if plan["id"].as_str() != current
@@ -2269,6 +2531,239 @@ async fn analytics_result(
         _ => Err(ApiError::missing()),
     }
 }
+async fn budget_commitments(db: &mut SqliteConnection, p: &Principal, budget: &Value) -> Result<Value> {
+    let (from, to) = month_bounds(text(budget, "month")?)?;
+    let currency = text(budget, "currency")?;
+    let scope = text(budget, "scope")?;
+    let mut rows = Vec::new();
+    let mut total = 0_i64;
+    for item in storage::list(db, p, "planned_items").await? {
+        if item["deleted"] == true || item["budget_commitment"] != true
+            || item["currency"] != currency
+            || item["due_date"].as_str().is_none_or(|date| date < from.as_str() || date >= to.as_str())
+            || (item["visibility"] == "shared") != (scope == "family") {
+            continue;
+        }
+        let amount = money(text(&item, "amount")?, currency)?;
+        let match_id: Option<String> = sqlx::query_scalar("SELECT transaction_id FROM planned_item_matches WHERE household_id=? AND planned_item_id=?")
+            .bind(&p.household_id).bind(text(&item, "id")?).fetch_optional(&mut *db).await?;
+        let mut committed = if item["status"] == "planned" { amount } else { 0 };
+        let mut state = item["status"].as_str().unwrap_or("planned").to_owned();
+        if item["status"] == "done" {
+            if let Some(transaction_id) = match_id {
+                match storage::raw(db, p, "transactions", &transaction_id).await {
+                    Ok(transaction) => {
+                        let visible = storage::visible(db, p, "transactions", &transaction).await?;
+                        let same_month = transaction["effective_date"].as_str().is_some_and(|date| date >= from.as_str() && date < to.as_str());
+                        let same_scope = transaction["allocations"].as_array().is_some_and(|lines| lines.iter().any(|line| line["scope"] == scope));
+                        let same_account = item["account_id"].as_str().is_none_or(|account_id| transaction["movements"].as_array().is_some_and(|movements| movements.iter().any(|movement| movement["account_id"] == account_id)));
+                        let same_owner = scope != "personal" || transaction["entered_by"] == item["owner_id"];
+                        if !visible || transaction["voided"] == true || transaction["event_type"] != "expense" || transaction["currency"] != currency || !same_month || !same_scope {
+                            committed = amount;
+                            state = "needs_review".into();
+                        } else if money(text(&transaction, "amount")?, currency)? != amount || !same_account || !same_owner || transaction["allocations"].as_array().is_none_or(|lines| lines.iter().any(|line| line["category_id"] != item["category_id"] || line["scope"] != scope)) {
+                            committed = amount;
+                            state = "needs_review".into();
+                        } else {
+                            state = "posted".into();
+                        }
+                    }
+                    Err(error) if error.status == StatusCode::NOT_FOUND => {
+                        committed = amount;
+                        state = "needs_review".into();
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else {
+                committed = amount;
+                state = "needs_review".into();
+            }
+        }
+        total = add(total, committed)?;
+        let destination = if scope == "personal" { item["owner_id"].clone() } else { item.get("budget_destination").cloned().unwrap_or(json!("unassigned")) };
+        rows.push(json!({"id":item["id"],"title":item["title"],"due_date":item["due_date"],"category_id":item["category_id"],"destination":destination,"amount":item["amount"],"committed":format_money(committed,currency)?,"state":state}));
+    }
+    rows.sort_by(|a,b| a["due_date"].as_str().cmp(&b["due_date"].as_str()).then_with(|| a["id"].as_str().cmp(&b["id"].as_str())));
+    Ok(json!({"data":rows,"total_committed":format_money(total,currency)?,"meta":{"plan_revision":budget["revision"],"visibility":"authorized_accounts_only"}}))
+}
+
+fn budget_destination(transaction: &Value, allocation: &Value, p: &Principal) -> String {
+    if allocation["scope"] == "personal" {
+        transaction["entered_by"].as_str().unwrap_or(&p.user_id).to_owned()
+    } else {
+        allocation["budget_destination"].as_str().unwrap_or("unassigned").to_owned()
+    }
+}
+
+async fn budget_allocations(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Query) -> Result<Reply> {
+    allowed_query(q, &["category_id", "destination", "cursor", "limit"])?;
+    let budget = storage::get(db, p, "budgets", id).await?;
+    let (from, to) = month_bounds(text(&budget, "month")?)?;
+    let mut report_query = Query::from([
+        ("from".into(), from), ("to".into(), to),
+        ("scope".into(), text(&budget, "scope")?.into()),
+        ("currency".into(), text(&budget, "currency")?.into()),
+    ]);
+    if let Some(category_id) = q.get("category_id").filter(|value| value.as_str() != "uncategorized") { report_query.insert("category_id".into(), category_id.clone()); }
+    let (values, currency, mut meta) = report_inputs(db, p, &report_query, false).await?;
+    let mut rows = Vec::new();
+    for transaction in values {
+        let sign = match transaction["event_type"].as_str() {
+            Some("expense") => 1_i64,
+            Some("refund") => -1_i64,
+            _ => continue,
+        };
+        let transaction_id = text(&transaction, "id")?;
+        for (index, allocation) in transaction["allocations"].as_array().into_iter().flatten().enumerate() {
+            if q.get("category_id").is_some_and(|filter| filter == "uncategorized" && !allocation["category_id"].is_null()) { continue; }
+            let destination = budget_destination(&transaction, allocation, p);
+            if q.get("destination").is_some_and(|filter| filter != &destination) { continue; }
+            let value = money(text(allocation, "amount")?, &currency)?.checked_mul(sign)
+                .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+            rows.push(json!({"id":format!("{transaction_id}:{index}"),"transaction_id":transaction_id,"effective_date":transaction["effective_date"],"description":transaction["description"],"event_type":transaction["event_type"],"category_id":allocation["category_id"],"destination":destination,"amount":format_money(value,&currency)?,"currency":currency,"paid_by_user_id":transaction["paid_by_user_id"],"entered_by":transaction["entered_by"]}));
+        }
+    }
+    rows.sort_by(|a,b| b["effective_date"].as_str().cmp(&a["effective_date"].as_str()).then_with(|| b["id"].as_str().cmp(&a["id"].as_str())));
+    let mut result = paginate(rows, q)?;
+    meta["plan_revision"] = budget["revision"].clone();
+    result["meta"] = meta;
+    ok(result)
+}
+
+async fn budget_matrix(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Query) -> Result<Reply> {
+    allowed_query(q, &["category_id", "destination"])?;
+    let budget = storage::get(db, p, "budgets", id).await?;
+    let (from, to) = month_bounds(text(&budget, "month")?)?;
+    let mut report_query = Query::from([
+        ("from".into(), from), ("to".into(), to),
+        ("scope".into(), text(&budget, "scope")?.into()),
+        ("currency".into(), text(&budget, "currency")?.into()),
+    ]);
+    if let Some(category_id) = q.get("category_id").filter(|value| value.as_str() != "uncategorized") { report_query.insert("category_id".into(), category_id.clone()); }
+    let (values, currency, mut meta) = report_inputs(db, p, &report_query, false).await?;
+    let mut cells: std::collections::BTreeMap<(Option<String>, String), i64> = std::collections::BTreeMap::new();
+    for transaction in values {
+        let sign = match transaction["event_type"].as_str() {
+            Some("expense") => 1_i64,
+            Some("refund") => -1_i64,
+            _ => continue,
+        };
+        for allocation in transaction["allocations"].as_array().into_iter().flatten() {
+            let category_id = allocation["category_id"].as_str().map(str::to_owned);
+            if q.get("category_id").is_some_and(|filter| filter == "uncategorized" && category_id.is_some()) { continue; }
+            let destination = budget_destination(&transaction, allocation, p);
+            if q.get("destination").is_some_and(|filter| filter != &destination) { continue; }
+            let value = money(text(allocation, "amount")?, &currency)?.checked_mul(sign)
+                .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+            let cell = cells.entry((category_id, destination)).or_insert(0);
+            *cell = add(*cell, value)?;
+        }
+    }
+    let mut total = 0_i64;
+    let mut rows = Vec::new();
+    for ((category_id, destination), spent) in cells {
+        total = add(total, spent)?;
+        rows.push(json!({"category_id":category_id,"destination":destination,"spent":format_money(spent,&currency)?}));
+    }
+    meta["plan_revision"] = budget["revision"].clone();
+    meta["filters"] = json!({"category_id":q.get("category_id"),"destination":q.get("destination")});
+    ok(json!({"data":rows,"total_spent":format_money(total,&currency)?,"meta":meta}))
+}
+
+async fn budget_forecast_view(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Query) -> Result<Reply> {
+    allowed_query(q, &[])?;
+    let budget = storage::get(db, p, "budgets", id).await?;
+    let (from, to) = month_bounds(text(&budget, "month")?)?;
+    let household = auth::me(db, p).await?["household"].clone();
+    let timezone = text(&household, "timezone")?.parse::<chrono_tz::Tz>()
+        .map_err(|_| ApiError::invalid("Invalid household timezone."))?;
+    let today = Utc::now().with_timezone(&timezone).date_naive();
+    let phase = budget_forecast::phase(domain::date(&from)?, domain::date(&to)?, today);
+    let query = Query::from([
+        ("from".into(), from.clone()), ("to".into(), to.clone()),
+        ("scope".into(), text(&budget, "scope")?.into()),
+        ("currency".into(), text(&budget, "currency")?.into()),
+    ]);
+    let (values, currency, meta) = report_inputs(db, p, &query, false).await?;
+    let commitments = budget_commitments(db, p, &budget).await?;
+    let valid_posted: HashSet<String> = commitments["data"].as_array().into_iter().flatten()
+        .filter(|item| item["state"] == "posted")
+        .filter_map(|item| item["id"].as_str().map(str::to_owned)).collect();
+    let linked_rows = sqlx::query("SELECT planned_item_id, transaction_id FROM planned_item_matches WHERE household_id=?")
+        .bind(&p.household_id).fetch_all(&mut *db).await?;
+    let all_linked_transactions: HashSet<String> = linked_rows.iter()
+        .map(|row| row.get::<String, _>("transaction_id")).collect();
+    let scheduled_transactions: HashSet<String> = linked_rows.iter()
+        .filter(|row| valid_posted.contains(&row.get::<String, _>("planned_item_id")))
+        .map(|row| row.get::<String, _>("transaction_id")).collect();
+    let allowance = budget["lines"].as_array().into_iter().flatten().try_fold(0_i64, |sum, line| {
+        add(sum, money(text(line, "amount")?, &currency)?)
+    })?;
+    let mut spent = 0_i64;
+    let mut variable_spent = 0_i64;
+    let mut future_dated_recorded = false;
+    let today_string = today.to_string();
+    for transaction in &values {
+        let sign = match transaction["event_type"].as_str() {
+            Some("expense") => 1_i64,
+            Some("refund") => -1_i64,
+            _ => continue,
+        };
+        let date = text(transaction, "effective_date")?;
+        let elapsed_variable = date <= today_string.as_str()
+            && !scheduled_transactions.contains(text(transaction, "id")?);
+        if date > today_string.as_str() { future_dated_recorded = true; }
+        for allocation in transaction["allocations"].as_array().into_iter().flatten() {
+            let value = money(text(allocation, "amount")?, &currency)?
+                .checked_mul(sign).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+            spent = add(spent, value)?;
+            if elapsed_variable { variable_spent = add(variable_spent, value)?; }
+        }
+    }
+    let committed = money(text(&commitments, "total_committed")?, &currency)?;
+    let needs_review = commitments["data"].as_array().into_iter().flatten().any(|item| item["state"] == "needs_review");
+    let possible_unmatched_payment = commitments["data"].as_array().into_iter().flatten()
+        .filter(|item| item["state"] == "planned")
+        .any(|item| values.iter().any(|transaction| {
+            transaction["event_type"] == "expense"
+                && money(transaction["amount"].as_str().unwrap_or(""), &currency).ok()
+                    == money(item["amount"].as_str().unwrap_or(""), &currency).ok()
+                && transaction["allocations"].as_array().is_some_and(|lines| !lines.is_empty() && lines.iter().all(|line| line["category_id"] == item["category_id"] && line["scope"] == budget["scope"]))
+                && transaction["id"].as_str().is_some_and(|id| !all_linked_transactions.contains(id))
+        }));
+    let mut flags = vec!["coverage_unknown"];
+    if needs_review { flags.push("commitment_needs_review"); }
+    if possible_unmatched_payment { flags.push("possible_unmatched_payment"); }
+    if future_dated_recorded { flags.push("future_dated_recorded_expense"); }
+    if variable_spent < 0 { flags.push("negative_variable_spending_rate_floor"); }
+    let (status, reason, elapsed, remaining, total, estimate) = match phase {
+        PeriodPhase::Future => ("unavailable", "This budget month has not started.", 0, 0, 0, None),
+        PeriodPhase::Past => ("unavailable", "This budget month has ended; use recorded results.", 0, 0, 0, None),
+        PeriodPhase::Current { elapsed_days, remaining_days, total_days } if elapsed_days < 8 =>
+            ("unavailable", "Fewer than eight days have elapsed and complete comparable history is not established.", elapsed_days, remaining_days, total_days, None),
+        PeriodPhase::Current { elapsed_days, remaining_days, total_days } =>
+            ("limited_history", "Projected from this month's elapsed variable spending; historical coverage is unconfirmed.", elapsed_days, remaining_days, total_days,
+                budget_forecast::remaining_from_current_rate(variable_spent, elapsed_days, remaining_days)),
+    };
+    let estimate = estimate.map(|value| format_money(value, &currency)).transpose()?;
+    let forecast_spending = estimate.as_ref().map(|value| {
+        add(add(spent, committed)?, money(value, &currency)?)
+    }).transpose()?;
+    let headroom = forecast_spending.map(|value| allowance.checked_sub(value)
+        .ok_or_else(|| ApiError::invalid("Money total is out of range."))).transpose()?;
+    ok(json!({
+        "status":status,"reason":reason,"as_of":today.to_string(),"month":budget["month"],
+        "currency":currency,"effective_allowance":format_money(allowance,&currency)?,
+        "spent":format_money(spent,&currency)?,"unmatched_commitments":format_money(committed,&currency)?,
+        "elapsed_variable_spending":format_money(variable_spent,&currency)?,
+        "elapsed_days":elapsed,"remaining_days":remaining,"total_days":total,
+        "remaining_variable_estimate":estimate,"forecast_spending":forecast_spending.map(|value| format_money(value,&currency)).transpose()?,
+        "forecast_headroom":headroom.map(|value| format_money(value,&currency)).transpose()?,
+        "formula_version":"current_rate_v1","quality_flags":flags,
+        "meta":{"plan_revision":budget["revision"],"ledger_revision":meta["ledger_revision"],"visibility":meta["visibility"],"coverage":meta["coverage"]}
+    }))
+}
+
 async fn budget_tracking(
     db: &mut SqliteConnection,
     p: &Principal,
@@ -2292,6 +2787,17 @@ async fn budget_tracking(
         ("currency".into(), text(&budget, "currency")?.into()),
     ]);
     let (values, currency, mut meta) = report_inputs(db, p, &query, false).await?;
+    let commitments = budget_commitments(db, p, &budget).await?;
+    let mut commitments_by_category: HashMap<String, i64> = HashMap::new();
+    let mut total_committed = 0_i64;
+    for item in commitments["data"].as_array().into_iter().flatten() {
+        if item["due_date"].as_str().is_none_or(|date| date < from.as_str() || date >= to.as_str()) { continue; }
+        let key = item["category_id"].as_str().unwrap_or("uncategorized").to_owned();
+        let value = money(text(item, "committed")?, &currency)?;
+        total_committed = add(total_committed, value)?;
+        let previous = *commitments_by_category.get(&key).unwrap_or(&0);
+        commitments_by_category.insert(key, add(previous, value)?);
+    }
     let mut actuals: HashMap<String, i64> = HashMap::new();
     for v in &values {
         if !["expense", "refund"].contains(&v["event_type"].as_str().unwrap_or_default()) {
@@ -2311,16 +2817,25 @@ async fn budget_tracking(
         }
     }
     let mut lines = vec![];
+    let mut planned_total = 0_i64;
+    let mut spent_in_lines = 0_i64;
     for line in budget["lines"].as_array().unwrap() {
         let category = text(line, "category_id")?;
         let planned = money(text(line, "amount")?, &currency)?;
         let actual = actuals.remove(category).unwrap_or(0);
+        let committed = commitments_by_category.remove(category).unwrap_or(0);
+        planned_total = add(planned_total, planned)?;
+        spent_in_lines = add(spent_in_lines, actual)?;
         let remaining = planned
             .checked_sub(actual)
             .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
-        lines.push(json!({"category_id":category,"planned":format_money(planned,&currency)?,"actual":format_money(actual,&currency)?,"remaining":format_money(remaining,&currency)?,"utilization":if planned==0{None}else{Some(actual as f64/planned as f64)},"coverage":"unknown","transactions_url":format!("/api/v1/analytics/transactions?scope={}&from={from}&to={to}&currency={currency}&category_id={category}",text(&budget,"scope")?)}));
+        let available = remaining.checked_sub(committed).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+        lines.push(json!({"category_id":category,"planned":format_money(planned,&currency)?,"actual":format_money(actual,&currency)?,"committed":format_money(committed,&currency)?,"remaining":format_money(remaining,&currency)?,"available_after_commitments":format_money(available,&currency)?,"utilization":if planned==0{None}else{Some(actual as f64/planned as f64)},"coverage":"unknown","transactions_url":format!("/api/v1/analytics/transactions?scope={}&from={from}&to={to}&currency={currency}&category_id={category}",text(&budget,"scope")?)}));
     }
     let unbudgeted = actuals.values().try_fold(0, |a, b| add(a, *b))?;
+    let unbudgeted_committed = commitments_by_category.values().try_fold(0, |a, b| add(a, *b))?;
+    let total_spent = add(spent_in_lines, unbudgeted)?;
+    let available = planned_total.checked_sub(total_spent).and_then(|value| value.checked_sub(total_committed)).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
     let mut unbudgeted_lines = vec![];
     for (category_id, amount) in actuals {
         unbudgeted_lines
@@ -2330,8 +2845,96 @@ async fn budget_tracking(
     meta["plan_revision"] = budget["revision"].clone();
     meta["full_plan_period"] = json!(from == &start && to == &end);
     ok(
-        json!({"data":lines,"unbudgeted":format_money(unbudgeted,&currency)?,"unbudgeted_lines":unbudgeted_lines,"meta":meta}),
+        json!({"data":lines,"unbudgeted":format_money(unbudgeted,&currency)?,"unbudgeted_committed":format_money(unbudgeted_committed,&currency)?,"unbudgeted_lines":unbudgeted_lines,"total_committed":format_money(total_committed,&currency)?,"available_after_commitments":format_money(available,&currency)?,"meta":meta}),
     )
+}
+
+async fn budget_people(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    id: &str,
+    q: &Query,
+) -> Result<Reply> {
+    allowed_query(q, &[])?;
+    let budget = storage::get(db, p, "budgets", id).await?;
+    let (from, to) = month_bounds(text(&budget, "month")?)?;
+    let query = Query::from([
+        ("from".into(), from),
+        ("to".into(), to),
+        ("scope".into(), text(&budget, "scope")?.into()),
+        ("currency".into(), text(&budget, "currency")?.into()),
+    ]);
+    let (values, currency, mut meta) = report_inputs(db, p, &query, false).await?;
+    let commitments = budget_commitments(db, p, &budget).await?;
+    let mut commitments_by_destination: HashMap<String, i64> = HashMap::new();
+    for item in commitments["data"].as_array().into_iter().flatten() {
+        let destination = text(item, "destination")?;
+        let value = money(text(item, "committed")?, &currency)?;
+        let previous = *commitments_by_destination.get(destination).unwrap_or(&0);
+        commitments_by_destination.insert(destination.to_owned(), add(previous, value)?);
+    }
+    let personal_allowance = if budget["scope"] == "personal" {
+        Some(budget["lines"].as_array().into_iter().flatten().try_fold(0_i64, |sum, line| {
+            add(sum, money(text(line, "amount")?, &currency)?)
+        })?)
+    } else {
+        None
+    };
+    let mut allowances: HashMap<String, i64> = HashMap::new();
+    for line in budget["people_limits"].as_array().into_iter().flatten() {
+        allowances.insert(text(line, "destination")?.to_owned(), money(text(line, "amount")?, &currency)?);
+    }
+    let mut usage: HashMap<String, i64> = HashMap::new();
+    for transaction in &values {
+        let sign = match transaction["event_type"].as_str() {
+            Some("expense") => 1,
+            Some("refund") => -1,
+            _ => continue,
+        };
+        for allocation in transaction["allocations"].as_array().into_iter().flatten() {
+            let destination = budget_destination(transaction, allocation, p);
+            let amount = money(text(allocation, "amount")?, &currency)?;
+            let signed = amount.checked_mul(sign).ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
+            let previous = *usage.get(&destination).unwrap_or(&0);
+            usage.insert(destination, add(previous, signed)?);
+        }
+    }
+    let mut rows = Vec::new();
+    let members = sqlx::query("SELECT u.id,u.name,m.active FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.household_id=? ORDER BY u.name,u.id")
+        .bind(&p.household_id).fetch_all(&mut *db).await?;
+    for member in members {
+        let user_id: String = member.get(0);
+        let amount = usage.remove(&user_id).unwrap_or(0);
+        let committed = commitments_by_destination.remove(&user_id).unwrap_or(0);
+        if amount != 0 || committed != 0 || user_id == p.user_id || allowances.contains_key(&user_id) {
+            let allowance = allowances.remove(&user_id).or(if user_id == p.user_id { personal_allowance } else { None });
+            let remaining = allowance.map(|limit| limit.checked_sub(amount).ok_or_else(|| ApiError::invalid("Money total is out of range."))).transpose()?;
+            let available = remaining.map(|value| value.checked_sub(committed).ok_or_else(|| ApiError::invalid("Money total is out of range."))).transpose()?;
+            rows.push(json!({"destination":user_id,"name":member.get::<String,_>(1),"active":member.get::<i64,_>(2) != 0,"spent":format_money(amount,&currency)?,"committed":format_money(committed,&currency)?,"allowance":allowance.map(|value| format_money(value,&currency)).transpose()?,"remaining":remaining.map(|value| format_money(value,&currency)).transpose()?,"available_after_commitments":available.map(|value| format_money(value,&currency)).transpose()?}));
+        }
+    }
+    for (destination, name) in [("shared", "Shared household pool"), ("unassigned", "Unassigned")] {
+        let amount = usage.remove(destination).unwrap_or(0);
+        let committed = commitments_by_destination.remove(destination).unwrap_or(0);
+        let allowance = allowances.remove(destination);
+        if amount != 0 || committed != 0 || allowance.is_some() || (destination == "unassigned" && budget["scope"] == "family") {
+            let remaining = allowance.map(|limit| limit.checked_sub(amount).ok_or_else(|| ApiError::invalid("Money total is out of range."))).transpose()?;
+            let available = remaining.map(|value| value.checked_sub(committed).ok_or_else(|| ApiError::invalid("Money total is out of range."))).transpose()?;
+            rows.push(json!({"destination":destination,"name":name,"spent":format_money(amount,&currency)?,"committed":format_money(committed,&currency)?,"allowance":allowance.map(|value| format_money(value,&currency)).transpose()?,"remaining":remaining.map(|value| format_money(value,&currency)).transpose()?,"available_after_commitments":available.map(|value| format_money(value,&currency)).transpose()?}));
+        }
+    }
+    if !usage.is_empty() || !allowances.is_empty() || !commitments_by_destination.is_empty() {
+        return Err(ApiError::invalid("Stored budget attribution refers to an unknown member."));
+    }
+    let total = rows.iter().try_fold(0_i64, |sum, row| {
+        add(sum, money(text(row, "spent")?, &currency)?)
+    })?;
+    let total_committed = rows.iter().try_fold(0_i64, |sum, row| {
+        add(sum, money(text(row, "committed")?, &currency)?)
+    })?;
+    meta["plan_revision"] = budget["revision"].clone();
+    meta["visibility"] = json!("authorized_accounts_only");
+    ok(json!({"data":rows,"total_spent":format_money(total,&currency)?,"total_committed":format_money(total_committed,&currency)?,"meta":meta}))
 }
 
 async fn create_invite(db: &mut SqliteConnection, p: &Principal, body: &Value) -> Result<Reply> {

@@ -150,7 +150,8 @@ button:disabled {transform:none!important;box-shadow:none!important}
   .topbar .mobile-brand .brand-mark {background:#255539;color:#f7fbf3}
   .topbar .breadcrumb strong {color:#45674a}
   .content {padding:23px 16px calc(106px + env(safe-area-inset-bottom))}
-  .page-heading {gap:12px;margin-bottom:19px}
+  .page-heading {align-items:stretch;gap:12px;margin-bottom:19px;text-align:left}
+  .page-heading>div:first-child {width:100%;min-width:0}
   .page-heading h1 {font-size:29px}
   .page-heading p {font-size:12px}
   .heading-actions {gap:7px}
