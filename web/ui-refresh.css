@@ -33,6 +33,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 .household-card span,.profile span {color:#a9c3af}
 .workspace-label {color:#83a28b;font-size:10px;letter-spacing:.14em}
 .nav-item {min-height:42px;border-radius:10px;color:#bdcfc0;font-size:13px;font-weight:550;transition:transform .18s ease}
+.nav-item[hidden] {display:none!important}
 .nav-item svg {color:#91ae99}
 .nav-item:hover {background:#ffffff12;color:#fff;transform:translateX(2px)}
 .nav-item:hover svg {color:#d6efbf}

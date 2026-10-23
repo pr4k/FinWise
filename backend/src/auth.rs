@@ -178,7 +178,7 @@ pub async fn bootstrap(db: &mut SqliteConnection, body: &Value) -> Result<Princi
         role: "owner".into(),
         csrf: String::new(),
     };
-    let document = json!({"id":p.household_id,"name":household["name"],"timezone":household["timezone"],"base_currency":household["base_currency"],"locale":"en-IN","revision":1});
+    let document = json!({"id":p.household_id,"name":household["name"],"timezone":household["timezone"],"base_currency":household["base_currency"],"locale":"en-IN","money_manager_extension":true,"revision":1});
     let encoded = password_hash(password.into()).await?;
     sqlx::query("INSERT INTO households(id,document) VALUES(?,?)")
         .bind(&p.household_id)

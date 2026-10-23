@@ -226,6 +226,15 @@ pub async fn create(
     kind: &str,
     mut value: Value,
 ) -> Result<Value> {
+    if kind == "transactions" && value["source_refs"].as_array().is_some_and(Vec::is_empty) {
+        let document: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+            .bind(&p.household_id).fetch_one(&mut *db).await?;
+        let household: Value = serde_json::from_str(&document)
+            .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+        if household["money_manager_extension"] == false {
+            value["money_manager_excluded"] = json!(true);
+        }
+    }
     let id = id();
     value["id"] = json!(id);
     value["revision"] = json!(1);

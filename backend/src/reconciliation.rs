@@ -14,6 +14,14 @@ use std::collections::{HashMap, HashSet};
 
 type Reply = (StatusCode, Value);
 
+async fn money_manager_extension(db: &mut SqliteConnection, p: &Principal) -> Result<bool> {
+    let document: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id).fetch_one(db).await?;
+    let household: Value = serde_json::from_str(&document)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+    Ok(household["money_manager_extension"] != false)
+}
+
 pub async fn store_observation(
     db: &mut SqliteConnection,
     p: &Principal,
@@ -514,7 +522,8 @@ async fn apply_amendment(
             "Proposed date must be in the review month.",
         ));
     }
-    let reason = text(body, "reason")?;
+    let independent = !money_manager_extension(db, p).await?;
+    let reason = if independent { body["reason"].as_str().unwrap_or("Adjusted to statement") } else { text(body, "reason")? };
     if reason.len() > 500 {
         return Err(ApiError::invalid(
             "Amendment reason must be 500 characters or fewer.",
@@ -595,11 +604,12 @@ async fn apply_amendment(
             "original_date":transaction["effective_date"],"proposed_date":proposed_date,
             "description":transaction["description"],"statement_description":o["description"],
             "statement_reference":o["reference"],"source_refs":transaction["source_refs"],
-            "reason":reason,"status":"pending_money_manager_update"
+            "reason":reason,"status":if independent { "applied" } else { "pending_money_manager_update" }
         }),
     )
     .await?;
-    amended["amendment"] = json!({"id":amendment["id"],"original_amount":transaction["amount"],"original_date":transaction["effective_date"],"reason":reason,"status":"pending_money_manager_update"});
+    amended["amendment"] = json!({"id":amendment["id"],"original_amount":transaction["amount"],"original_date":transaction["effective_date"],"reason":reason,"status":if independent { "applied" } else { "pending_money_manager_update" }});
+    if independent { amended["money_manager_excluded"] = json!(true); }
     amended["reconciliation_state"] = json!("unmatched");
     invalidate(db, p, ledger_id).await?;
     storage::update(
@@ -1311,6 +1321,10 @@ async fn internal_transfer(
             changed["movements"] = json!([{"account_id":s["account_id"],"amount":format_money(source_amount,currency)?},{"account_id":target["id"],"amount":format_money(target_amount,currency)?}]);
             changed["allocations"] = json!([]);
             changed["reconciliation_created"] = json!({"session_id":s["id"],"account_id":s["account_id"],"observation_ids":evidence_ids,"statement_source_refs":evidence_refs,"reason":reason,"status":"pending_money_manager_update","action":action,"original_event_type":original["reconciliation_created"]["original_event_type"].as_str().unwrap_or_else(||original["event_type"].as_str().unwrap_or("expense")),"original_allocations":original["reconciliation_created"]["original_allocations"].as_array().unwrap_or_else(||original["allocations"].as_array().unwrap())});
+            if !money_manager_extension(db, p).await? {
+                changed["money_manager_excluded"] = json!(true);
+                changed["reconciliation_created"]["status"] = json!("applied");
+            }
             api::validate_ledger(db, p, &changed).await?;
             invalidate(db, p, text(row, "id")?).await?;
             storage::update(db, p, &original, changed, "converted_to_internal_transfer").await?
@@ -1334,7 +1348,11 @@ async fn internal_transfer(
             .chain(counterpart.iter())
             .map(|v| v["id"].clone())
             .collect();
-        let value = json!({"event_type":"transfer","amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(source_amount,currency)?},{"account_id":target["id"],"amount":format_money(target_amount,currency)?}],"allocations":[],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":evidence_ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transfer"}});
+        let mut value = json!({"event_type":"transfer","amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(source_amount,currency)?},{"account_id":target["id"],"amount":format_money(target_amount,currency)?}],"allocations":[],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":evidence_ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transfer"}});
+        if !money_manager_extension(db, p).await? {
+            value["money_manager_excluded"] = json!(true);
+            value["reconciliation_created"]["status"] = json!("applied");
+        }
         api::validate_ledger(db, p, &value).await?;
         storage::create(db, p, "transactions", value).await?
     };
@@ -1541,7 +1559,11 @@ async fn create_from_observations(
         .bind(&p.household_id).fetch_one(&mut *db).await?;
     let family_only = serde_json::from_str::<Value>(&household)
         .map_err(|_| ApiError::invalid("Invalid household settings."))?["family_only"] == true;
-    let transaction = json!({"event_type":event_type,"amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(total,currency)?}],"allocations":[{"category_id":body["category_id"],"amount":format_money(magnitude,currency)?,"scope":if family_only { "family" } else { text(body,"scope")? }}],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transaction"}});
+    let mut transaction = json!({"event_type":event_type,"amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(total,currency)?}],"allocations":[{"category_id":body["category_id"],"amount":format_money(magnitude,currency)?,"scope":if family_only { "family" } else { text(body,"scope")? }}],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transaction"}});
+    if !money_manager_extension(db, p).await? {
+        transaction["money_manager_excluded"] = json!(true);
+        transaction["reconciliation_created"]["status"] = json!("applied");
+    }
     api::validate_ledger(db, p, &transaction).await?;
     let created = storage::create(db, p, "transactions", transaction).await?;
     let allocations:Vec<_>=selected.iter().map(|row|json!({"ledger_id":created["id"],"ledger_revision":created["revision"],"observation_id":row["id"],"amount":row["remaining"]})).collect();

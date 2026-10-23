@@ -679,6 +679,59 @@ async fn investment_movements_debit_account_without_becoming_expenses() {
 }
 
 #[tokio::test]
+async fn linking_an_existing_investment_expense_replaces_the_duplicate_account_movement() {
+    let (client, _) = setup().await;
+    let bank = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let category = client.create("categories", json!({"name":"Investment","kind":"expense","tracking_type":"investment"})).await;
+    let holding = client.create("investments", json!({"name":"Index fund","type":"investment","currency":"INR","initial_record":{"month":"2026-09","principal":"200.00","current_value":"205.00","account_id":bank["id"],"transaction_date":"2026-09-15"}})).await;
+    let generated_id = holding["records"][0]["transaction_ids"][0].as_str().unwrap();
+    let entry = client.transaction("expense", "200.00", &bank, &category, "personal").await;
+    let balance_path = format!("accounts/{}/balance-at?as_of=2026-09-30T23%3A59%3A00%2B05%3A30", bank["id"].as_str().unwrap());
+    assert_eq!(client.call("GET", &balance_path, json!({}), None, None).await.1["amount"], "600.00");
+    let holding_id = holding["id"].as_str().unwrap();
+    assert_eq!(client.call("GET", &format!("investments/{holding_id}"), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(client.call("GET", &format!("transactions/{generated_id}"), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(client.call("GET", &format!("transactions/{}", entry["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(client.call("GET", &format!("categories/{}", category["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(entry["allocations"][0]["category_id"], category["id"]);
+    let linked = client.call("POST", &format!("investments/{holding_id}/linked-transactions"), json!({"transaction_id":entry["id"],"replace_movement_id":generated_id}), Some("link-investment-expense"), Some(holding["revision"].as_i64().unwrap())).await;
+    assert_eq!(linked.0, StatusCode::OK, "{}", linked.1);
+    assert_eq!(linked.1["records"][0]["contribution"], "200.00");
+    assert_eq!(linked.1["records"][0]["value"], "205.00");
+    assert_eq!(linked.1["net_contributions"], "200.00");
+    assert_eq!(linked.1["records"][0]["linked_transaction_ids"][0], entry["id"]);
+    assert_eq!(client.call("GET", &balance_path, json!({}), None, None).await.1["amount"], "800.00");
+    assert_eq!(client.call("GET", &format!("transactions/{generated_id}"), json!({}), None, None).await.1["voided"], true);
+    let valued = client.call("PUT", &format!("investments/{holding_id}/months/2026-09"), json!({"contribution":"200.00","withdrawal":"0.00","value":"210.00"}), None, Some(linked.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(valued.0, StatusCode::OK, "{}", valued.1);
+    assert_eq!(valued.1["records"][0]["linked_transaction_ids"][0], entry["id"]);
+    assert_eq!(valued.1["current_value"], "210.00");
+    let blocked = client.call("PATCH", &format!("transactions/{}", entry["id"].as_str().unwrap()), json!({"description":"Changed"}), None, Some(entry["revision"].as_i64().unwrap())).await;
+    assert_eq!(blocked.0, StatusCode::CONFLICT);
+    let unlinked = client.call("DELETE", &format!("investments/{holding_id}/linked-transactions/{}", entry["id"].as_str().unwrap()), json!({}), None, Some(valued.1["revision"].as_i64().unwrap())).await;
+    assert_eq!(unlinked.0, StatusCode::OK, "{}", unlinked.1);
+    assert_eq!(unlinked.1["records"][0]["contribution"], "0.00");
+    assert_eq!(unlinked.1["records"][0]["value"], "210.00");
+    assert_eq!(client.call("GET", &balance_path, json!({}), None, None).await.1["amount"], "800.00");
+}
+
+#[tokio::test]
+async fn investment_refund_links_as_withdrawal_without_changing_current_value() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let category = client.create("categories", json!({"name":"Investment","kind":"expense","tracking_type":"investment"})).await;
+    let holding = client.create("investments", json!({"name":"Reserve","type":"emergency_fund","currency":"INR","opening_value":"500.00","opening_month":"2026-09"})).await;
+    let mut refund_body = transaction("refund", "50.00", &bank, &category, "personal");
+    refund_body["description"] = json!("Returned contribution");
+    let refund = client.create("transactions", refund_body).await;
+    let linked = client.call("POST", &format!("investments/{}/linked-transactions", holding["id"].as_str().unwrap()), json!({"transaction_id":refund["id"]}), Some("link-refund"), Some(holding["revision"].as_i64().unwrap())).await;
+    assert_eq!(linked.0, StatusCode::OK, "{}", linked.1);
+    assert_eq!(linked.1["records"][0]["withdrawal"], "50.00");
+    assert_eq!(linked.1["net_contributions"], "450.00");
+    assert_eq!(linked.1["current_value"], "500.00");
+}
+
+#[tokio::test]
 async fn investment_shortcut_adds_separate_contributions_and_stock_holdings() {
     let (client, _) = setup().await;
     let bank=client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"200.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
@@ -6815,4 +6868,48 @@ async fn statement_credit_can_be_created_as_refund() {
     assert_eq!(created.1["transaction"]["movements"][0]["amount"], "3315.00");
     let summary = client.call("GET", "analytics/summary?from=2026-09-01&to=2026-10-01", json!({}), None, None).await.1;
     assert_eq!(summary["net_spending"], "-3315.00");
+}
+
+#[tokio::test]
+async fn independent_mode_keeps_imports_and_excludes_new_money_manager_work() {
+    let (owner, _) = setup().await;
+    let settings = owner.call("GET", "settings/household", json!({}), None, None).await.1;
+    assert_ne!(settings["money_manager_extension"], false);
+    let changed = owner.call("PATCH", "settings/household", json!({"money_manager_extension":false}), None, settings["revision"].as_i64()).await;
+    assert_eq!(changed.0, StatusCode::OK, "{}", changed.1);
+    assert_eq!(changed.1["money_manager_extension"], false);
+    let account = owner.account("Cash", "cash").await;
+    let category = owner.category("Food", "expense").await;
+    let entry = owner.transaction("expense", "12.00", &account, &category, "personal").await;
+    assert_eq!(entry["money_manager_excluded"], true);
+    assert_eq!(owner.call("GET", "money-manager/changes", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    let upload = owner.call("GET", "imports", json!({}), None, None).await;
+    assert_eq!(upload.0, StatusCode::OK, "{}", upload.1);
+    let restored = owner.call("PATCH", "settings/household", json!({"money_manager_extension":true}), None, changed.1["revision"].as_i64()).await;
+    assert_eq!(restored.0, StatusCode::OK, "{}", restored.1);
+    let queue = owner.call("GET", "money-manager/changes", json!({}), None, None).await;
+    assert_eq!(queue.0, StatusCode::OK, "{}", queue.1);
+    assert!(!queue.1["data"].as_array().unwrap().iter().any(|row| row["id"] == entry["id"]));
+}
+
+#[tokio::test]
+async fn independent_amendment_needs_no_money_manager_reason() {
+    let (owner, _) = setup().await;
+    let bank = owner.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let food = owner.category("Food", "expense").await;
+    let tx = owner.transaction("expense", "100.00", &bank, &food, "personal").await;
+    bank_evidence(&owner, &bank).await;
+    let settings = owner.call("GET", "settings/household", json!({}), None, None).await.1;
+    let mode = owner.call("PATCH", "settings/household", json!({"money_manager_extension":false}), None, settings["revision"].as_i64()).await;
+    assert_eq!(mode.0, StatusCode::OK, "{}", mode.1);
+    let session = owner.create("reconciliation/sessions", json!({"account_id":bank["id"],"month":"2026-09"})).await;
+    let root = format!("reconciliation/sessions/{}", session["id"].as_str().unwrap());
+    let observations = owner.call("GET", &format!("{root}/items?side=statement"), json!({}), None, None).await.1;
+    let observation = observations["data"].as_array().unwrap().iter().find(|v| v["amount"] == "-120.00").unwrap();
+    let saved = owner.call("POST", &format!("{root}/amendments"), json!({"ledger_id":tx["id"],"ledger_revision":tx["revision"],"observation_id":observation["id"],"proposed_amount":"-120.00"}), Some("independent-amendment"), Some(1)).await;
+    assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+    assert_eq!(saved.1["status"], "applied");
+    let amended = owner.call("GET", &format!("transactions/{}", tx["id"].as_str().unwrap()), json!({}), None, None).await.1;
+    assert_eq!(amended["money_manager_excluded"], true);
+    assert_eq!(amended["amount"], "120.00");
 }

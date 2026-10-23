@@ -151,6 +151,18 @@ fn decorate_investment(v: &mut Value) -> Result<()> {
         .map_or(Value::Null, |s| json!(s));
     Ok(())
 }
+pub async fn transaction_linked(db: &mut SqliteConnection, p: &Principal, transaction_id: &str) -> Result<bool> {
+    let documents: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='investments'")
+        .bind(&p.household_id).fetch_all(db).await?;
+    for document in documents {
+        let holding: Value = serde_json::from_str(&document).map_err(|_| ApiError::invalid("Invalid stored investment."))?;
+        if holding["deleted"] == true { continue; }
+        if holding["records"].as_array().into_iter().flatten().any(|record| {
+            record["linked_transaction_ids"].as_array().into_iter().flatten().any(|id| id.as_str() == Some(transaction_id))
+        }) { return Ok(true); }
+    }
+    Ok(false)
+}
 async fn retire_investment_movements(db: &mut SqliteConnection, p: &Principal, record: &Value) -> Result<()> {
     for id in record["transaction_ids"].as_array().into_iter().flatten() {
         let transaction = storage::get(db, p, "transactions", id.as_str().ok_or_else(|| ApiError::invalid("Invalid investment transaction."))?).await?;
@@ -658,6 +670,104 @@ pub async fn route(
             decorate_investment(&mut saved)?;
             ok(saved)
         }
+        ("POST", ["investments", id, "linked-transactions"]) => {
+            api::allowed_body(body, &["transaction_id", "replace_movement_id", "value"])?;
+            let before = storage::get(db, p, "investments", id).await?;
+            owner(p, &before)?;
+            active(&before)?;
+            api::revision(headers, body, &before)?;
+            let transaction_id = text(body, "transaction_id")?;
+            if transaction_linked(db, p, transaction_id).await? {
+                return Err(ApiError::conflict("This transaction is already linked to an investment holding."));
+            }
+            let transaction = storage::get(db, p, "transactions", transaction_id).await?;
+            if transaction["voided"] == true || !["expense", "refund"].contains(&text(&transaction, "event_type")?) || transaction["currency"] != before["currency"] {
+                return Err(ApiError::invalid("Choose an active expense or refund in the holding currency."));
+            }
+            let allocations = transaction["allocations"].as_array().ok_or_else(|| ApiError::invalid("Invalid transaction allocations."))?;
+            if allocations.is_empty() || allocations.iter().any(|allocation| allocation["category_id"].is_null()) {
+                return Err(ApiError::invalid("Assign the whole transaction to investment categories first."));
+            }
+            for allocation in allocations {
+                let category = storage::get(db, p, "categories", text(allocation, "category_id")?).await?;
+                if category["tracking_type"] != "investment" {
+                    return Err(ApiError::invalid("All allocations must use investment categories."));
+                }
+            }
+            let currency = text(&before, "currency")?;
+            let amount = positive(&transaction, "amount", currency)?;
+            let record_month = &text(&transaction, "effective_date")?[..7];
+            if before["opening_month"].as_str().is_some_and(|opening| record_month < opening) {
+                return Err(ApiError::invalid("Transaction predates the holding's starting value."));
+            }
+            let mut after = before.clone();
+            let records = after["records"].as_array_mut().ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
+            let position = records.iter().position(|record| record["month"] == record_month);
+            let mut record = position.map(|index| records[index].clone()).unwrap_or_else(|| json!({"month":record_month,"contribution":"0","withdrawal":"0","value":Value::Null}));
+            let field = if transaction["event_type"] == "expense" { "contribution" } else { "withdrawal" };
+            let mut previous = 0;
+            let mut replaced = None;
+            if let Some(movement_id) = body["replace_movement_id"].as_str() {
+                if !record["transaction_ids"].as_array().is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(movement_id))) {
+                    return Err(ApiError::invalid("Choose a generated movement from this holding and month."));
+                }
+                let movement = storage::get(db, p, "transactions", movement_id).await?;
+                let expected_kind = if field == "contribution" { "investment" } else { "investment_withdrawal" };
+                if movement["voided"] == true || movement["investment_id"] != before["id"] || movement["event_type"] != expected_kind
+                    || movement["currency"] != transaction["currency"] || movement["movements"][0]["account_id"] != transaction["movements"][0]["account_id"]
+                    || positive(&movement, "amount", currency)? != amount {
+                    return Err(ApiError::invalid("Replacement must have the same account, amount, direction, and month."));
+                }
+                previous = amount;
+                record["transaction_ids"].as_array_mut().unwrap().retain(|value| value.as_str() != Some(movement_id));
+                if record["transaction_ids"].as_array().is_some_and(Vec::is_empty) {
+                    record.as_object_mut().unwrap().remove("account_id");
+                    record.as_object_mut().unwrap().remove("transaction_date");
+                }
+                replaced = Some(movement);
+            }
+            let total = nonnegative(&record, field, currency)?.checked_sub(previous).and_then(|v| v.checked_add(amount)).ok_or_else(|| ApiError::invalid("Investment amount is out of range."))?;
+            record[field] = json!(format_money(total, currency)?);
+            if !record["linked_transaction_ids"].is_array() { record["linked_transaction_ids"] = json!([]); }
+            record["linked_transaction_ids"].as_array_mut().unwrap().push(json!(transaction_id));
+            if !body["value"].is_null() { nonnegative(body, "value", currency)?; record["value"] = body["value"].clone(); }
+            if let Some(index) = position { records[index] = record; } else { records.push(record); }
+            let mut check = after.clone();
+            decorate_investment(&mut check)?;
+            if let Some(movement) = replaced {
+                reconciliation::invalidate(db, p, text(&movement, "id")?).await?;
+                let mut voided = movement.clone();
+                voided["voided"] = json!(true);
+                voided["void_reason"] = json!("Replaced by linked investment transaction");
+                voided["reconciliation_state"] = json!("unmatched");
+                storage::update(db, p, &movement, voided, "investment_movement_replaced").await?;
+            }
+            let mut saved = storage::update(db, p, &before, after, "investment_transaction_linked").await?;
+            decorate_investment(&mut saved)?;
+            ok(saved)
+        }
+        ("DELETE", ["investments", id, "linked-transactions", transaction_id]) => {
+            api::allowed_body(body, &["value"])?;
+            let before = storage::get(db, p, "investments", id).await?;
+            owner(p, &before)?;
+            active(&before)?;
+            api::revision(headers, body, &before)?;
+            let transaction = storage::get(db, p, "transactions", transaction_id).await?;
+            let currency = text(&before, "currency")?;
+            let field = if transaction["event_type"] == "expense" { "contribution" } else { "withdrawal" };
+            let amount = positive(&transaction, "amount", currency)?;
+            let mut after = before.clone();
+            let record = after["records"].as_array_mut().into_iter().flatten().find(|record| record["linked_transaction_ids"].as_array().is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(transaction_id)))).ok_or_else(ApiError::missing)?;
+            let total = nonnegative(record, field, currency)?.checked_sub(amount).ok_or_else(|| ApiError::invalid("Investment amount is out of range."))?;
+            record[field] = json!(format_money(total, currency)?);
+            record["linked_transaction_ids"].as_array_mut().unwrap().retain(|value| value.as_str() != Some(transaction_id));
+            if !body["value"].is_null() { nonnegative(body, "value", currency)?; record["value"] = body["value"].clone(); }
+            let mut check = after.clone();
+            decorate_investment(&mut check)?;
+            let mut saved = storage::update(db, p, &before, after, "investment_transaction_unlinked").await?;
+            decorate_investment(&mut saved)?;
+            ok(saved)
+        }
         ("POST", ["investments", id, "sip", record_month, "process"]) => {
             api::allowed_body(body, &["account_id", "transaction_date", "value"])?;
             month(record_month)?;
@@ -800,6 +910,21 @@ pub async fn route(
                 .as_array_mut()
                 .ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
             let old_record = records.iter().find(|v| v["month"] == *record_month).cloned();
+            if let Some(old) = old_record.as_ref().filter(|old| old["linked_transaction_ids"].as_array().is_some_and(|ids| !ids.is_empty())) {
+                if nonnegative(body, "contribution", currency)? != nonnegative(old, "contribution", currency)?
+                    || nonnegative(body, "withdrawal", currency)? != nonnegative(old, "withdrawal", currency)?
+                    || body.get("account_id").is_some_and(|account| *account != old["account_id"])
+                    || body.get("transaction_date").is_some_and(|date| *date != old["transaction_date"]) {
+                    return Err(ApiError::conflict("Unlink source transactions or edit generated movements before changing this month's contribution, withdrawal, account, or date."));
+                }
+                let record = records.iter_mut().find(|record| record["month"] == *record_month).unwrap();
+                record["value"] = body["value"].clone();
+                let mut check = after.clone();
+                decorate_investment(&mut check)?;
+                let mut saved = storage::update(db, p, &before, after, "monthly_valuation").await?;
+                decorate_investment(&mut saved)?;
+                return ok(saved);
+            }
             let mut record = json!({"month":record_month,"contribution":body["contribution"],"withdrawal":body["withdrawal"],"value":body["value"]});
             if let Some(old) = &old_record {
                 if old["sip_processed"] == true { record["sip_processed"] = json!(true); }
@@ -853,6 +978,9 @@ pub async fn route(
                 .ok_or_else(|| ApiError::invalid("Invalid investment records."))?;
             let original = records.len();
             let old_record = records.iter().find(|v| v["month"] == *record_month).cloned();
+            if old_record.as_ref().is_some_and(|old| old["linked_transaction_ids"].as_array().is_some_and(|ids| !ids.is_empty())) {
+                return Err(ApiError::conflict("Unlink this month's source transactions before deleting the monthly record."));
+            }
             records.retain(|v| v["month"] != *record_month);
             if records.len() == original {
                 return Err(ApiError::missing());

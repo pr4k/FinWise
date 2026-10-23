@@ -698,6 +698,7 @@ pub(crate) async fn route(
             ok(json!({"updated":count,"scope":scope}))
         }
         ("GET", ["money-manager", "changes"]) => {
+            if !money_manager_extension(db, p).await? { return Err(ApiError::missing()); }
             allowed_query(q, &["include_done", "limit", "cursor"])?;
             let include_done = q.get("include_done").is_some_and(|v| v == "true");
             let mut values = storage::list(db, p, "transactions").await?;
@@ -709,6 +710,7 @@ pub(crate) async fn route(
                     || v["money_manager_manual_edit"].is_object()
                     || manual;
                 changed
+                    && v["money_manager_excluded"] != true
                     && v["voided"] != true
                     && (include_done || v["money_manager_synced_at"].is_null())
             });
@@ -741,12 +743,14 @@ pub(crate) async fn route(
             ok(paginate(values, q)?)
         }
         ("POST", ["money-manager", "changes", id, "sync"]) => {
+            if !money_manager_extension(db, p).await? { return Err(ApiError::missing()); }
             allowed_body(body, &["synced"])?;
             let synced = body["synced"]
                 .as_bool()
                 .ok_or_else(|| ApiError::invalid("synced must be a boolean."))?;
             let before = storage::get(db, p, "transactions", id).await?;
             revision(headers, body, &before)?;
+            if before["money_manager_excluded"] == true { return Err(ApiError::missing()); }
             if before["amendment"].is_null()
                 && before["reconciliation_created"].is_null()
                 && before["money_manager_manual_edit"].is_null()
@@ -792,14 +796,17 @@ pub(crate) async fn route(
             auth::admin(p)?;
             let before = auth::me(db, p).await?["household"].clone();
             revision(headers, body, &before)?;
-            allowed_body(body, &["name", "timezone", "base_currency", "locale", "family_only"])?;
+            allowed_body(body, &["name", "timezone", "base_currency", "locale", "family_only", "money_manager_extension"])?;
             let mut after = patch(
                 &before,
                 body,
-                &["name", "timezone", "base_currency", "locale", "family_only"],
+                &["name", "timezone", "base_currency", "locale", "family_only", "money_manager_extension"],
             );
             if !after["family_only"].is_null() && !after["family_only"].is_boolean() {
                 return Err(ApiError::invalid("family_only must be a boolean."));
+            }
+            if body.get("money_manager_extension").is_some() && !body["money_manager_extension"].is_boolean() {
+                return Err(ApiError::invalid("money_manager_extension must be a boolean."));
             }
             text(&after, "name")?;
             domain::exponent(text(&after, "base_currency")?)?;
@@ -942,6 +949,7 @@ pub(crate) async fn route(
                 }
                 "transactions" => {
                     value["voided"] = json!(false);
+                    if !money_manager_extension(db, p).await? { value["money_manager_excluded"] = json!(true); }
                     if ["investment", "investment_withdrawal"].contains(&value["event_type"].as_str().unwrap_or("")) {
                         return Err(ApiError::invalid("Record investment movements through Investments."));
                     }
@@ -1036,6 +1044,9 @@ pub(crate) async fn route(
                     if before["voided"] == true {
                         return Err(ApiError::conflict("Voided transactions cannot be edited."));
                     }
+                    if planning::transaction_linked(db, p, id).await? {
+                        return Err(ApiError::conflict("Unlink this transaction from its investment holding before editing it."));
+                    }
                     if !before["investment_id"].is_null() {
                         return Err(ApiError::conflict("Edit this movement from its investment month."));
                     }
@@ -1061,8 +1072,14 @@ pub(crate) async fn route(
             if *kind == "transactions" {
                 reconciliation::invalidate(db, p, id).await?;
                 after["reconciliation_state"] = json!("unmatched");
-                after["money_manager_synced_at"] = Value::Null;
-                if !before["source_refs"].as_array().is_some_and(Vec::is_empty)
+                let extension = money_manager_extension(db, p).await?;
+                if extension {
+                    after["money_manager_synced_at"] = Value::Null;
+                } else {
+                    after["money_manager_excluded"] = json!(true);
+                }
+                if extension
+                    && !before["source_refs"].as_array().is_some_and(Vec::is_empty)
                     && before["amendment"].is_null()
                     && before["reconciliation_created"].is_null()
                 {
@@ -1086,6 +1103,9 @@ pub(crate) async fn route(
             revision(headers, body, &before)?;
             if !before["investment_id"].is_null() {
                 return Err(ApiError::conflict("Remove this movement from its investment month."));
+            }
+            if planning::transaction_linked(db, p, id).await? {
+                return Err(ApiError::conflict("Unlink this transaction from its investment holding before deleting it."));
             }
             if before["voided"] == true {
                 return Err(ApiError::conflict("Transaction is already voided."));
@@ -1410,6 +1430,10 @@ pub(crate) async fn route(
 
 async fn family_only(db: &mut SqliteConnection, p: &Principal) -> Result<bool> {
     Ok(auth::me(db, p).await?["household"]["family_only"] == true)
+}
+
+async fn money_manager_extension(db: &mut SqliteConnection, p: &Principal) -> Result<bool> {
+    Ok(auth::me(db, p).await?["household"]["money_manager_extension"] != false)
 }
 
 fn force_family(kind: &str, value: &mut Value) {

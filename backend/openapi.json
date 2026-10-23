@@ -9797,6 +9797,164 @@
         }
       }
     },
+    "/investments/{id}/linked-transactions": {
+      "post": {
+        "operationId": "post_investments_id_linked_transactions",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestmentLinkInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/investments/{id}/linked-transactions/{transaction_id}": {
+      "delete": {
+        "operationId": "delete_investments_id_linked_transactions_transaction_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "transaction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestmentUnlinkInput"
+              }
+            }
+          }
+        }
+      }
+    },
     "/investments/{id}/movements/{movement_id}": {
       "patch": {
         "operationId": "patch_investments_id_movements_movement_id",
@@ -11215,6 +11373,9 @@
           "family_only": {
             "type": "boolean"
           },
+          "money_manager_extension": {
+            "type": "boolean"
+          },
           "revision": {
             "type": "integer"
           }
@@ -11237,6 +11398,9 @@
             "type": "string"
           },
           "family_only": {
+            "type": "boolean"
+          },
+          "money_manager_extension": {
             "type": "boolean"
           },
           "expected_revision": {
@@ -12983,6 +13147,9 @@
             },
             "required": []
           },
+          "money_manager_excluded": {
+            "type": "boolean"
+          },
           "reconciliation_created": {
             "type": "object",
             "properties": {
@@ -14716,15 +14883,15 @@
             "description": "Exact decimal money; never a JSON number."
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "description": "Required in Money Manager extension mode; optional in independent mode."
           }
         },
         "required": [
           "ledger_id",
           "ledger_revision",
           "observation_id",
-          "proposed_amount",
-          "reason"
+          "proposed_amount"
         ]
       },
       "CancelAmendmentInput": {
@@ -15424,6 +15591,42 @@
           "account_id",
           "transaction_date"
         ]
+      },
+      "InvestmentLinkInput": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string"
+          },
+          "replace_movement_id": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "transaction_id"
+        ]
+      },
+      "InvestmentUnlinkInput": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": []
       },
       "InvestmentMovementPatch": {
         "type": "object",

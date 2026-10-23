@@ -29,8 +29,8 @@ schemas = {
     "LoginInput": obj({"email": S, "password": {"type":"string","writeOnly":True}}, ("email","password")),
     "Owner": obj({"name": S, "email": {"type": "string", "format": "email"}, "password": {"type": "string", "minLength": 12, "maxLength": 1024, "writeOnly": True}}, ("name", "email", "password")),
     "HouseholdInput": obj({"name": S, "timezone": S, "base_currency": S}, ("name", "timezone", "base_currency")),
-    "HouseholdSettings": obj({"id": S, "name": S, "timezone": S, "base_currency": S, "locale": S, "family_only": B, "revision": I}),
-    "HouseholdSettingsPatch": obj({"name": S, "timezone": S, "base_currency": S, "locale": S, "family_only": B, "expected_revision": I}),
+    "HouseholdSettings": obj({"id": S, "name": S, "timezone": S, "base_currency": S, "locale": S, "family_only": B, "money_manager_extension": B, "revision": I}),
+    "HouseholdSettingsPatch": obj({"name": S, "timezone": S, "base_currency": S, "locale": S, "family_only": B, "money_manager_extension": B, "expected_revision": I}),
     "AccountInput": obj({"name": S, "subtype": enum("bank", "credit_card", "cash", "settle_up"), "currency": S, "timezone": S, "aliases": arr(S), "visibility": enum("private", "shared"), "active": B, "opening_balance": obj({"amount": M, "as_of": {"type":"string","format":"date-time"}}, ("amount","as_of")), "card_due": obj({"amount": M, "due_date": D}, ("due_date",))}, ("name", "subtype", "currency")),
     "CategoryInput": obj({"name": S, "kind": enum("expense", "income"), "parent_id": {"type": ["string", "null"]}, "visibility": enum("private", "shared"), "tracking_type": enum("regular", "investment", "subscription")}, ("name", "kind")),
     "Movement": obj({"account_id": S, "amount": M}, ("account_id", "amount")),
@@ -63,7 +63,7 @@ for name in ["Account", "Category", "Transaction", "Budget"]:
     source = schemas[name + "Input"]
     props = dict(source["properties"], id=S, revision=I, owner_id=S, created_at=S)
     if name == "Transaction":
-        props.update(event_type=enum("expense", "income", "refund", "transfer", "investment", "investment_withdrawal"), voided=B, entered_by=S, source_refs=arr(obj({})), investment_id=S, investment_month=S, reconciliation_state=S, reconciliation_evidence=arr(obj({})), amendment=obj({"id":S,"original_amount":M,"original_date":D,"reason":S,"status":S}), money_manager_synced_at=S, money_manager_manual_edit=obj({"updated_at":S}), reconciliation_created=obj({"action":S,"reason":S}))
+        props.update(event_type=enum("expense", "income", "refund", "transfer", "investment", "investment_withdrawal"), voided=B, entered_by=S, source_refs=arr(obj({})), investment_id=S, investment_month=S, reconciliation_state=S, reconciliation_evidence=arr(obj({})), amendment=obj({"id":S,"original_amount":M,"original_date":D,"reason":S,"status":S}), money_manager_synced_at=S, money_manager_manual_edit=obj({"updated_at":S}), money_manager_excluded=B, reconciliation_created=obj({"action":S,"reason":S}))
     if name == "Category":
         props.update(archived=B)
     if name == "Budget":
@@ -78,7 +78,7 @@ paths = {}
 
 def route(path, method, response=None, request=None, public=False, revision=False, implemented=True, parameters=()):
     status = "201" if method == "post" and path in ["/auth/bootstrap", "/accounts", "/categories", "/transactions", "/quick-transactions", "/budgets", "/planned-items"] or method == "post" and path.endswith(("/balance-checks", "/copy")) or method == "post" and path.endswith("/invites") else "200"
-    if method == "delete" or path == "/auth/logout":
+    if (method == "delete" and "/linked-transactions/" not in path) or path == "/auth/logout":
         status = "204"
     params = [{"name": part[1:-1], "in": "path", "required": True, "schema": S} for part in path.split("/") if part.startswith("{")]
     params += [{"name": p, "in": "query", "schema": S} for p in parameters]
@@ -245,7 +245,7 @@ schemas["ReconciliationSessionInput"] = obj({"account_id": S, "month": S, "expec
 schemas["MatchAllocation"] = obj({"ledger_id": S, "ledger_revision": I, "observation_id": S, "amount": M}, ("ledger_id", "ledger_revision", "observation_id", "amount"))
 schemas["MatchInput"] = obj({"expected_revision": I, "decision": enum("accept"), "allocations": arr(ref("MatchAllocation")), "note": S}, ("decision", "allocations"))
 schemas["AutoMatchResult"] = obj({"matched_count": I, "session_revision": I}, ("matched_count", "session_revision"))
-schemas["AmendmentInput"] = obj({"ledger_id": S, "ledger_revision": I, "observation_id": S, "proposed_amount": M, "reason": S}, ("ledger_id", "ledger_revision", "observation_id", "proposed_amount", "reason"))
+schemas["AmendmentInput"] = obj({"ledger_id": S, "ledger_revision": I, "observation_id": S, "proposed_amount": M, "reason": {"type":"string", "description":"Required in Money Manager extension mode; optional in independent mode."}}, ("ledger_id", "ledger_revision", "observation_id", "proposed_amount"))
 schemas["CancelAmendmentInput"] = obj({"amendment_revision": I, "reason": S}, ("amendment_revision", "reason"))
 schemas["ReconciliationAmendment"] = obj({"id": S, "session_id": S, "account_id": S, "ledger_id": S, "ledger_revision": I, "applied_transaction_revision": I, "observation_id": S, "currency": S, "original_transaction_amount": M, "original_movement": M, "proposed_movement": M, "proposed_transaction_amount": M, "difference": M, "original_date": D, "proposed_date": D, "description": S, "statement_description": S, "statement_reference": S, "source_refs": arr(obj({})), "reason": S, "status": S, "stale": B, "created_at": S}, ("id", "session_id", "account_id", "ledger_id", "observation_id", "currency", "original_movement", "proposed_movement", "difference", "reason", "status"))
 schemas["MissingEntryInput"] = obj({"expected_revision": I, "observation_id": S, "transaction": ref("TransactionInput"), "reason": S}, ("observation_id", "transaction", "reason"))
@@ -306,6 +306,8 @@ schemas["InitialInvestmentRecord"] = obj({"month":{"type":"string","pattern":"^\
 schemas["InvestmentInput"] = obj({"name":S,"type":enum("investment","emergency_fund"),"asset_class":enum("mutual_fund","stock_market"),"currency":S,"target":M,"monthly_goal":M,"notes":S,"visibility":enum("private","shared"),"sip":{"oneOf":[ref("SipSchedule"),{"type":"null"}]},"opening_value":M,"opening_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"initial_record":ref("InitialInvestmentRecord")},("name","type","currency"))
 schemas["InvestmentMonthInput"] = obj({"contribution":M,"withdrawal":M,"value":{"oneOf":[M,{"type":"null"}]},"account_id":S,"transaction_date":D,"expected_revision":I},("contribution","withdrawal"))
 schemas["InvestmentContributionInput"] = obj({"amount":M,"account_id":S,"transaction_date":D,"value":M,"expected_revision":I},("amount","account_id","transaction_date"))
+schemas["InvestmentLinkInput"] = obj({"transaction_id":S,"replace_movement_id":S,"value":M,"expected_revision":I},("transaction_id",))
+schemas["InvestmentUnlinkInput"] = obj({"value":M,"expected_revision":I})
 schemas["InvestmentMovementPatch"] = obj({"amount":M,"account_id":S,"transaction_date":D,"expected_revision":I},("amount","account_id","transaction_date"))
 schemas["ProcessSipInput"] = obj({"account_id":S,"transaction_date":D,"value":M,"expected_revision":I},("account_id",))
 for path, method, request, revision, params in [
@@ -323,6 +325,8 @@ for path, method, request, revision, params in [
     ("/investments/{id}","patch","InvestmentInput",True,[]),
     ("/investments/{id}","delete",None,True,[]),
     ("/investments/{id}/contributions","post","InvestmentContributionInput",True,[]),
+    ("/investments/{id}/linked-transactions","post","InvestmentLinkInput",True,[]),
+    ("/investments/{id}/linked-transactions/{transaction_id}","delete","InvestmentUnlinkInput",True,[]),
     ("/investments/{id}/movements/{movement_id}","patch","InvestmentMovementPatch",True,[]),
     ("/investments/{id}/movements/{movement_id}","delete",None,True,[]),
     ("/investments/{id}/months/{month}","put","InvestmentMonthInput",True,[]),
