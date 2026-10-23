@@ -76,6 +76,7 @@ FinWise is a self hosted personal and household finance app. Users record or imp
 
 - Summary counts and tabs: **To review**, **Subscriptions**, and **Ignored**, each with its own empty state. Each pattern card shows a local logo for recognized services or the first character of its name, plus name, account, observed amount or range, frequency, payment count, first/latest dates, and expandable occurrence history with source. The Analytics subscription cards use the same visual identity.
 - A pattern can be marked as a subscription, have its tag removed, be ignored, or be restored to review. The status is saved. Amazon Prime, Prime Video, Netflix, Backblaze, Vultr, and Azure payment names default to subscription after one observed payment; an explicit tag removal or ignore overrides the default. Detection uses visible Money Manager transactions and bank statement rows; bank evidence already linked to a ledger entry counts once.
+- An expense category marked **Subscription** lists its directly tagged historical and future transactions under the Subscriptions tab and Analytics planning detail. These category allocations remain ordinary spending; a transaction may also belong to a detected pattern, so the category history is shown separately from pattern totals.
 - This is observed payment history, not a future billing schedule or an automatic cancellation tool. The Analytics subscription panel uses the tagged patterns.
 
 ### 5. Transactions (`#transactions`, `#transactions/all`)
@@ -139,13 +140,14 @@ Current implementation update: the page now has Top View, People, Categories, an
 - **SIP on investments**: set a monthly amount, day (1–31), start month, optional end month, and active/paused status; edit or remove the schedule. In shorter months the planned date is the last day. The holding card compares the scheduled amount with recorded additions for the selected month. SIP schedules are planning records and do not create contributions, valuations, or bank transactions.
 - **Add/correct month**: month, added, withdrawn, optional month end value, account, and movement date. Existing holdings need starting cost basis in the first month's Added field for meaningful value change. A month with an account posts investment movements to the ledger; a valuation by itself does not move money. The Transactions shortcut adds separate movements to an existing holding without replacing prior contributions in that month. For a month with multiple linked movements, correct or remove each movement from its monthly history so the other dates and accounts remain intact.
 - Delete a month after confirmation, recalculating later net additions and value change and retiring linked investment movements. Delete a holding and its monthly history after confirmation; its linked investment movements are retired.
+- Expense categories marked **Investment** also contribute a separate transaction history here, including older tagged transactions and refunds. Their allocations are removed from spending and budget actuals while their original account movements and source records remain intact. Category activity does not create a valued holding or gain/loss figure.
 
 ### 11. Categories (`#categories`)
 
 **Goal:** Maintain canonical income and expense category trees used by transactions, imports, budgets, and reports.
 
 - Separate income and expense trees show hierarchy, full path, Personal or Household access, and archived status. Active rows can add a subcategory or edit.
-- **Add/edit category**: name, kind for a new root, optional parent. A subcategory inherits its parent's kind. Parent choices prevent cycles. Archived categories remain visible for historical context but are excluded from new choices.
+- **Add/edit category**: name, kind for a new root, optional parent, and transaction tracking type for expense categories: Regular expense, Investment, or Subscription. A subcategory inherits its parent's kind but has its own tracking type; tagging applies to direct allocations only, including historical transactions. Investment allocations leave spending and budget actuals and appear in Investments. Subscription allocations remain spending and appear under Recurring → Subscriptions. Parent choices prevent cycles. Archived categories remain visible for historical context but are excluded from new choices.
 
 ### 12. Statements (`#statements`, `#statements/{accountId}`)
 

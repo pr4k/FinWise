@@ -11349,6 +11349,14 @@
               "private",
               "shared"
             ]
+          },
+          "tracking_type": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "investment",
+              "subscription"
+            ]
           }
         },
         "required": [
@@ -12742,6 +12750,14 @@
               "shared"
             ]
           },
+          "tracking_type": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "investment",
+              "subscription"
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -12791,6 +12807,14 @@
             "enum": [
               "private",
               "shared"
+            ]
+          },
+          "tracking_type": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "investment",
+              "subscription"
             ]
           },
           "expected_revision": {

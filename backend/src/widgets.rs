@@ -262,6 +262,7 @@ pub async fn expense_calendar(state: &AppState, query: &Query) -> Result<Reply> 
                         allocation["category_id"].as_str().unwrap_or("uncategorized"),
                         &by_id,
                     )
+                    || by_id.get(allocation["category_id"].as_str().unwrap_or("")).is_some_and(|category| category["tracking_type"] == "investment")
                 {
                     continue;
                 }
@@ -479,7 +480,7 @@ async fn calculate(
             let category_id = allocation["category_id"]
                 .as_str()
                 .unwrap_or("uncategorized");
-            if is_card_settlement(category_id, &by_id) {
+            if is_card_settlement(category_id, &by_id) || by_id.get(category_id).is_some_and(|category| category["tracking_type"] == "investment") {
                 continue;
             }
             let amount = money(text(allocation, "amount")?, currency)?;

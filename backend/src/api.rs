@@ -501,7 +501,7 @@ const ACCOUNT_FIELDS: &[&str] = &[
     "opening_balance",
     "card_due",
 ];
-const CATEGORY_FIELDS: &[&str] = &["name", "kind", "parent_id", "visibility"];
+const CATEGORY_FIELDS: &[&str] = &["name", "kind", "parent_id", "visibility", "tracking_type"];
 const TRANSACTION_FIELDS: &[&str] = &[
     "event_type",
     "amount",
@@ -1603,6 +1603,12 @@ async fn validate_category(
     text(v, "name")?;
     domain::choice(v, "kind", &["expense", "income"])?;
     domain::choice(v, "visibility", &["private", "shared"])?;
+    if let Some(tracking) = v.get("tracking_type") {
+        let tracking = tracking.as_str().ok_or_else(|| ApiError::invalid("tracking_type must be regular, investment, or subscription."))?;
+        if !["regular", "investment", "subscription"].contains(&tracking) || (v["kind"] != "expense" && tracking != "regular") {
+            return Err(ApiError::invalid("Only expense categories can track investments or subscriptions."));
+        }
+    }
     if v.get("parent_id")
         .is_some_and(|value| !value.is_string() && !value.is_null())
     {
@@ -2129,6 +2135,12 @@ async fn budget_category_parents(db: &mut SqliteConnection, p: &Principal) -> Re
         Some((category["id"].as_str()?.to_owned(), category["parent_id"].as_str()?.to_owned()))
     }).collect())
 }
+async fn investment_category_ids(db: &mut SqliteConnection, p: &Principal) -> Result<HashSet<String>> {
+    Ok(storage::list(db, p, "categories").await?.into_iter()
+        .filter(|category| category["tracking_type"] == "investment")
+        .filter_map(|category| category["id"].as_str().map(str::to_owned))
+        .collect())
+}
 
 fn category_within(category: &str, root: &str, parents: &HashMap<String, String>) -> bool {
     let mut current = category;
@@ -2205,12 +2217,20 @@ async fn report_inputs(
     )?;
     values.retain(|v| v["currency"] == currency);
     retain_scope(&mut values, scope, p, q.get("category_id"));
+    let investment_categories = investment_category_ids(db, p).await?;
+    for transaction in &mut values {
+        if matches!(transaction["event_type"].as_str(), Some("expense" | "refund")) {
+            if let Some(allocations) = transaction["allocations"].as_array_mut() {
+                allocations.retain(|allocation| !allocation["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)));
+            }
+        }
+    }
     let ledger_revision: i64 =
         sqlx::query_scalar("SELECT coalesce(max(id),0) FROM audit_events WHERE household_id=?")
             .bind(&p.household_id)
             .fetch_one(db)
             .await?;
-    let meta = json!({"from":from,"to":to,"scope":scope,"currency":currency,"timezone":household["timezone"],"filters":q,"policy_version":"1","ledger_revision":ledger_revision,"coverage":"unknown","complete":false,"visibility":"authorized_accounts_only"});
+    let meta = json!({"from":from,"to":to,"scope":scope,"currency":currency,"timezone":household["timezone"],"filters":q,"policy_version":"2","ledger_revision":ledger_revision,"coverage":"unknown","complete":false,"visibility":"authorized_accounts_only"});
     Ok((values, currency, meta))
 }
 fn totals(values: &[Value], currency: &str) -> Result<Value> {
@@ -2286,6 +2306,7 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
             categories: std::collections::BTreeMap::new(),
         })
         .collect();
+    let investment_categories = investment_category_ids(db, p).await?;
     let transactions = storage::transactions_in_period(db, p, from, to, false).await?;
     for transaction in transactions {
         if transaction["voided"] == true
@@ -2329,6 +2350,10 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
                 } else {
                     value
                 };
+                if allocation["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)) {
+                    member.invested = add(member.invested, signed)?;
+                    continue;
+                }
                 member.spending = add(member.spending, signed)?;
                 let category = allocation["category_id"]
                     .as_str()
@@ -2477,7 +2502,6 @@ async fn analytics_result(
             let mut groups: std::collections::BTreeMap<String, (i64, usize)> =
                 std::collections::BTreeMap::new();
             for v in &values {
-                let entry = groups.entry(text(v, "event_type")?.to_owned()).or_default();
                 let scoped_amount = if ["transfer", "investment", "investment_withdrawal"].contains(&v["event_type"].as_str().unwrap_or("")) {
                     money(text(v, "amount")?, &currency)?
                 } else {
@@ -2489,8 +2513,11 @@ async fn analytics_result(
                             add(sum, money(text(a, "amount")?, &currency)?)
                         })?
                 };
-                entry.0 = add(entry.0, scoped_amount)?;
-                entry.1 += 1;
+                if scoped_amount != 0 || !matches!(v["event_type"].as_str(), Some("expense" | "refund")) {
+                    let entry = groups.entry(text(v, "event_type")?.to_owned()).or_default();
+                    entry.0 = add(entry.0, scoped_amount)?;
+                    entry.1 += 1;
+                }
             }
             let data = groups.into_iter().map(|(event_type,(total,count))| Ok(json!({"event_type":event_type,"amount":format_money(total,&currency)?,"currency":currency,"count":count}))).collect::<Result<Vec<_>>>()?;
             ok(json!({"data":data,"page":{},"meta":meta}))

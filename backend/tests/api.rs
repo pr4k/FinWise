@@ -11,6 +11,48 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn expense_category_tracking_can_be_changed_without_rewriting_transactions() {
+    let (owner, _) = setup().await;
+    let account = owner.account("Cash", "cash").await;
+    let category = owner.category("Fund contribution", "expense").await;
+    let entry = owner.transaction("expense", "42.00", &account, &category, "personal").await;
+    let summary_path = "analytics/summary?from=2026-09-01&to=2026-10-01&scope=personal&currency=INR";
+    assert_eq!(owner.call("GET", summary_path, json!({}), None, None).await.1["net_spending"], "42.00");
+    let budget = owner.create("budgets", json!({"month":"2026-09","scope":"personal","currency":"INR","expected_income":"100.00","lines":[{"category_id":category["id"],"amount":"50.00"}]})).await;
+    let tracking_path = format!("budgets/{}/tracking", budget["id"].as_str().unwrap());
+    assert_eq!(owner.call("GET", &tracking_path, json!({}), None, None).await.1["data"][0]["actual"], "42.00");
+    let path = format!("categories/{}", category["id"].as_str().unwrap());
+    let investment = owner.call("PATCH", &path, json!({"tracking_type":"investment"}), None, Some(1)).await;
+    assert_eq!(investment.0, StatusCode::OK, "{}", investment.1);
+    assert_eq!(investment.1["tracking_type"], "investment");
+    assert_eq!(owner.call("GET", summary_path, json!({}), None, None).await.1["net_spending"], "0.00");
+    assert_eq!(owner.call("GET", &tracking_path, json!({}), None, None).await.1["data"][0]["actual"], "0.00");
+    let household = owner.call("GET", "analytics/household?from=2026-09-01&to=2026-10-01&currency=INR", json!({}), None, None).await.1;
+    assert_eq!(household["data"][0]["net_spending"], "0.00");
+    assert_eq!(household["data"][0]["net_invested"], "42.00");
+    assert_eq!(owner.call("GET", &path, json!({}), None, None).await.1["tracking_type"], "investment");
+    let stored = owner.call("GET", &format!("transactions/{}", entry["id"].as_str().unwrap()), json!({}), None, None).await.1;
+    assert_eq!(stored["event_type"], "expense");
+    assert_eq!(stored["allocations"][0]["category_id"], category["id"]);
+    let subscription = owner.call("PATCH", &path, json!({"tracking_type":"subscription"}), None, Some(2)).await;
+    assert_eq!(subscription.0, StatusCode::OK, "{}", subscription.1);
+    assert_eq!(owner.call("GET", summary_path, json!({}), None, None).await.1["net_spending"], "42.00");
+    let regular = owner.category("Supplies", "expense").await;
+    let mut mixed = transaction("expense", "50.00", &account, &category, "personal");
+    mixed["allocations"] = json!([
+        {"category_id":category["id"],"amount":"20.00","scope":"personal"},
+        {"category_id":regular["id"],"amount":"30.00","scope":"personal"}
+    ]);
+    owner.create("transactions", mixed).await;
+    assert_eq!(owner.call("GET", summary_path, json!({}), None, None).await.1["net_spending"], "92.00");
+    assert_eq!(owner.call("PATCH", &path, json!({"tracking_type":"investment"}), None, Some(3)).await.0, StatusCode::OK);
+    assert_eq!(owner.call("GET", summary_path, json!({}), None, None).await.1["net_spending"], "30.00");
+    let income = owner.category("Salary", "income").await;
+    let rejected = owner.call("PATCH", &format!("categories/{}", income["id"].as_str().unwrap()), json!({"tracking_type":"investment"}), None, Some(1)).await;
+    assert_eq!(rejected.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn family_only_mode_converts_history_and_forces_new_records() {
     let (owner, _) = setup().await;
     let (member, _) = partner(&owner).await;
