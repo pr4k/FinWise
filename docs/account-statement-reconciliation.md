@@ -4,6 +4,8 @@ FinWise accepts the supplied August 2026 bank XLSX layout as a **bank statement*
 
 To upload, open **Imports**, choose **Bank statement CSV / XLSX**, and select the file. In the mapping step choose the FinWise account and date format (day/month/year for the supplied statement). Review the signed movements and statement balances, then commit. Open **Reconcile**, select the same account and month, and compare the statement evidence with Money Manager or manually recorded ledger entries. Accept matches only after checking the rows.
 
+When a statement row has no ledger entry, select it and choose **Create from statement**. A debit can become an expense or an internal transfer. A credit can become income, a refund, or an internal transfer. For a transfer, select one statement row and choose the other account; the other account leg can be matched in its own review. Refunds reduce net spending, while internal transfers affect both account balances without counting as income or spending.
+
 For a simple CSV you can prepare yourself, use **Imports → Download sample bank statement CSV** in the frontend, or use UTF-8 with a header like:
 
 ```csv

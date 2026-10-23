@@ -1456,6 +1456,7 @@ async fn create_from_observations(
         body,
         &[
             "observation_ids",
+            "event_type",
             "description",
             "effective_date",
             "category_id",
@@ -1520,13 +1521,27 @@ async fn create_from_observations(
     let magnitude = total
         .checked_abs()
         .ok_or_else(|| ApiError::invalid("Amount is out of range."))?;
+    let event_type = if body.get("event_type").is_some() {
+        text(body, "event_type")?
+    } else if total < 0 {
+        "expense"
+    } else {
+        "income"
+    };
+    if !match event_type {
+        "expense" => total < 0,
+        "income" | "refund" => total > 0,
+        _ => false,
+    } {
+        return Err(ApiError::invalid("Choose an expense for debits, or income or refund for credits. Use internal transfer for transfers."));
+    }
     let ids: Vec<_> = selected.iter().map(|v| v["id"].clone()).collect();
     let refs: Vec<_> = selected.iter().map(|v| v["raw_row_ref"].clone()).collect();
     let household: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
         .bind(&p.household_id).fetch_one(&mut *db).await?;
     let family_only = serde_json::from_str::<Value>(&household)
         .map_err(|_| ApiError::invalid("Invalid household settings."))?["family_only"] == true;
-    let transaction = json!({"event_type":if total<0 {"expense"} else {"income"},"amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(total,currency)?}],"allocations":[{"category_id":body["category_id"],"amount":format_money(magnitude,currency)?,"scope":if family_only { "family" } else { text(body,"scope")? }}],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transaction"}});
+    let transaction = json!({"event_type":event_type,"amount":format_money(magnitude,currency)?,"currency":currency,"effective_date":date,"description":description,"movements":[{"account_id":s["account_id"],"amount":format_money(total,currency)?}],"allocations":[{"category_id":body["category_id"],"amount":format_money(magnitude,currency)?,"scope":if family_only { "family" } else { text(body,"scope")? }}],"entered_by":p.user_id,"voided":false,"source_refs":refs,"reconciliation_state":"unmatched","reconciliation_created":{"session_id":s["id"],"account_id":s["account_id"],"observation_ids":ids,"statement_source_refs":refs,"reason":reason,"status":"pending_money_manager_update","action":"add_transaction"}});
     api::validate_ledger(db, p, &transaction).await?;
     let created = storage::create(db, p, "transactions", transaction).await?;
     let allocations:Vec<_>=selected.iter().map(|row|json!({"ledger_id":created["id"],"ledger_revision":created["revision"],"observation_id":row["id"],"amount":row["remaining"]})).collect();

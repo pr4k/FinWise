@@ -6787,3 +6787,32 @@ async fn net_spend_matches_debit_and_refund_together() {
             .all(|row| row["state"] == "matched")
     );
 }
+
+#[tokio::test]
+async fn statement_credit_can_be_created_as_refund() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let food = client.category("Travel", "expense").await;
+    let csv = b"Date,Debit,Credit,Description,Currency\n2026-09-15,,3315.00,Travel refund,INR\n";
+    let key = uuid::Uuid::new_v4().to_string();
+    let (status, upload) = upload_file(&client, json!({"files":[{"source_kind":"bank_statement","mapping":{"account_id":bank["id"],"currency":"INR"}}]}), "statement-refund.csv", csv, &key).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{upload}");
+    let batch = upload["id"].as_str().unwrap();
+    wait_for_file(&client, batch, upload["files"][0]["id"].as_str().unwrap()).await;
+    let revision = client.call("GET", &format!("imports/{batch}"), json!({}), None, None).await.1["revision"].as_i64().unwrap();
+    let committed = client.call("POST", &format!("imports/{batch}/commit"), json!({}), Some("statement-refund-commit"), Some(revision)).await;
+    assert_eq!(committed.0, StatusCode::OK, "{}", committed.1);
+    let session = client.create("reconciliation/sessions", json!({"account_id":bank["id"],"month":"2026-09"})).await;
+    let root = format!("reconciliation/sessions/{}", session["id"].as_str().unwrap());
+    let statement = client.call("GET", &format!("{root}/items?side=statement"), json!({}), None, None).await.1;
+    let observation_id = statement["data"][0]["id"].clone();
+    let body = json!({"observation_ids":[observation_id],"event_type":"refund","description":"Travel refund","effective_date":"2026-09-15","category_id":food["id"],"scope":"personal","reason":"Refund missing from ledger"});
+    let invalid = client.call("POST", &format!("{root}/created-ledger-entries"), json!({"observation_ids":[statement["data"][0]["id"]],"event_type":"expense","description":"Wrong direction","effective_date":"2026-09-15","category_id":food["id"],"scope":"personal","reason":"Direction check"}), Some("invalid-statement-expense"), Some(1)).await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+    let created = client.call("POST", &format!("{root}/created-ledger-entries"), body, Some("create-statement-refund"), Some(1)).await;
+    assert_eq!(created.0, StatusCode::OK, "{}", created.1);
+    assert_eq!(created.1["transaction"]["event_type"], "refund");
+    assert_eq!(created.1["transaction"]["movements"][0]["amount"], "3315.00");
+    let summary = client.call("GET", "analytics/summary?from=2026-09-01&to=2026-10-01", json!({}), None, None).await.1;
+    assert_eq!(summary["net_spending"], "-3315.00");
+}

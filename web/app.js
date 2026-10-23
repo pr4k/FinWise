@@ -451,7 +451,20 @@ function createFromStatementEditor() {
   state.createObservationIds=selected.observations.map(v=>v.id);
   const first=selected.observations[0];
   const description=selected.observations.length===1?first.description||'Statement transaction':`Grouped statement entries (${selected.observations.length})`;
-  editor('Create transaction from statement',`<p>${selected.observations.length} statement row${selected.observations.length===1?'':'s'} → one ${h(total.eventType)} of ${amount(total.total,total.currency)}. The rows will be attached to the new transaction.</p>${field('Description',input('description',`required maxlength="300" value="${h(description)}"`))}${field('Date',input('effective_date',`type="date" required value="${h(first.effective_date)}"`))}${field('Category',`<select name="category_id">${option('','Uncategorized')}${categoryOptions(total.eventType)}</select>`)}${scopeField()}${field('Why is this missing from Money Manager?',input('reason','required maxlength="500"'))}<p class="helper">FinWise balances and analytics will include the new transaction. It will be tagged for the Money Manager additions export.</p>`,'create-statement-form','Create and attach');
+  const otherAccounts=selected.observations.length===1?state.accounts.filter(a=>a.id!==state.session.account_id && a.active!==false && a.currency===total.currency):[];
+  const types=total.eventType==='expense'?['expense',...(otherAccounts.length?['transfer']:[])]:['income','refund',...(otherAccounts.length?['transfer']:[])];
+  editor('Create transaction from statement',`<p>${selected.observations.length} statement row${selected.observations.length===1?'':'s'} · ${amount(total.total,total.currency)}. Choose what this movement represents before attaching it.</p>${field('Transaction type',`<select name="event_type" id="statement-create-type">${types.map(v=>option(v,v==='transfer'?'Internal transfer':v[0].toUpperCase()+v.slice(1))).join('')}</select>`)}${field('Description',input('description',`required maxlength="300" value="${h(description)}"`))}<div id="statement-create-ledger">${field('Date',input('effective_date',`type="date" required value="${h(first.effective_date)}"`))}${field('Category',`<select name="category_id" id="statement-create-category"></select>`)}${scopeField()}</div><div id="statement-create-transfer" hidden>${field('Other account',`<select name="counterpart_account_id" disabled>${otherAccounts.map(a=>option(a.id,`${a.name} · ${a.currency}`)).join('')}</select>`)}<p class="helper">A transfer moves money between your accounts and does not count as income or spending. The other account’s statement row can be matched in its review.</p></div>${field('Reason',input('reason','required maxlength="500"'))}<p id="statement-create-help" class="helper"></p>`,'create-statement-form','Create and attach');
+  updateStatementCreateType();
+}
+function updateStatementCreateType() {
+  const form=dialog.querySelector('#create-statement-form');if(!form)return;
+  const type=form.elements.event_type.value,transfer=type==='transfer';
+  const ledger=form.querySelector('#statement-create-ledger'),other=form.querySelector('#statement-create-transfer');
+  ledger.hidden=transfer;other.hidden=!transfer;
+  ledger.querySelectorAll('input,select').forEach(control=>control.disabled=transfer);
+  other.querySelectorAll('input,select').forEach(control=>control.disabled=!transfer);
+  if(!transfer)form.elements.category_id.innerHTML=option('','Uncategorized')+categoryOptions(type==='income'?'income':'expense');
+  form.querySelector('#statement-create-help').textContent=transfer?'The selected statement row will attach to the new transfer. Its other account leg stays open until you match that account.':'The selected statement rows will attach to the new transaction. FinWise balances and analytics will include it, and it will appear in Money Manager changes.';
 }
 function updateTransferCounterparts(preferred='') {
   const accountId=dialog.querySelector('#transfer-destination')?.value;
@@ -1716,6 +1729,7 @@ document.addEventListener('click',async event=>{
   try { await action(el); } catch(e) { if(state.me) failure(e,dialog.open?dialog:transactionDrawer.hidden?root:transactionDrawer); } finally { el.disabled=false; }
 });
 document.addEventListener('change',async event=>{
+  if(event.target.id==='statement-create-type') updateStatementCreateType();
   if(event.target.id==='category-kind') {
     const tracking=document.querySelector('#category-tracking-type');
     if(tracking) {tracking.disabled=event.target.value!=='expense';if(tracking.disabled)tracking.value='regular';}
@@ -2102,7 +2116,12 @@ document.addEventListener('submit',async event=>{
       state.ignoreSelection=null;dialog.close();notify('Rows ignored for this review. You can restore them from either list.');await refreshReconciliationComparison();return;
     } else if(form.id==='create-statement-form') {
       if(!state.createObservationIds?.length) throw new Error('Select statement rows again.');
-      const result=await api.request(`reconciliation/sessions/${id(state.session.id)}/created-ledger-entries`,{method:'POST',revision:state.session.revision,body:{observation_ids:state.createObservationIds,description:data.description,effective_date:data.effective_date,category_id:data.category_id||null,scope:data.scope,reason:data.reason}});
+      if(data.event_type==='transfer') {
+        if(state.createObservationIds.length!==1 || !data.counterpart_account_id) throw new Error('Choose one statement row and another account for a transfer.');
+        await api.request(`reconciliation/sessions/${id(state.session.id)}/internal-transfer`,{method:'POST',revision:state.session.revision,body:{observation_id:state.createObservationIds[0],counterpart_account_id:data.counterpart_account_id,description:data.description,reason:data.reason}});
+        state.createObservationIds=null;dialog.close();notify('Internal transfer created. Match its other account leg when that statement is available.');await refreshReconciliationComparison();return;
+      }
+      const result=await api.request(`reconciliation/sessions/${id(state.session.id)}/created-ledger-entries`,{method:'POST',revision:state.session.revision,body:{observation_ids:state.createObservationIds,event_type:data.event_type,description:data.description,effective_date:data.effective_date,category_id:data.category_id||null,scope:data.scope,reason:data.reason}});
       state.createObservationIds=null;dialog.close();notify(`Created and attached ${result.transaction.description}. It is tagged for the Money Manager export.`);await refreshReconciliationComparison();return;
     } else if(form.id==='internal-transfer-form') {
       const selected=state.transferSelection;if(!selected)throw new Error('Select the transfer row again.');
