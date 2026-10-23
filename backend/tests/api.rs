@@ -6698,3 +6698,92 @@ async fn date_only_transaction_is_assumed_at_ten_am_account_local_time() {
         .unwrap();
     assert_eq!(movement["effective_at"], "2026-09-15T04:30:00+00:00");
 }
+
+#[tokio::test]
+async fn net_spend_matches_debit_and_refund_together() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let food = client.category("Travel", "expense").await;
+    let expense = client
+        .transaction("expense", "4348.00", &bank, &food, "personal")
+        .await;
+    let csv = b"Date,Debit,Credit,Description,Currency\n2026-09-15,7663.00,,Purchase,INR\n2026-09-15,,3315.00,Refund,INR\n";
+    let key = uuid::Uuid::new_v4().to_string();
+    let (status, upload) = upload_file(&client, json!({"files":[{"source_kind":"bank_statement","mapping":{"account_id":bank["id"],"currency":"INR"}}]}), "refund.csv", csv, &key).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{upload}");
+    let batch = upload["id"].as_str().unwrap();
+    wait_for_file(&client, batch, upload["files"][0]["id"].as_str().unwrap()).await;
+    let revision = client
+        .call("GET", &format!("imports/{batch}"), json!({}), None, None)
+        .await
+        .1["revision"]
+        .as_i64()
+        .unwrap();
+    let committed = client
+        .call(
+            "POST",
+            &format!("imports/{batch}/commit"),
+            json!({}),
+            Some("refund-commit"),
+            Some(revision),
+        )
+        .await;
+    assert_eq!(committed.0, StatusCode::OK, "{}", committed.1);
+    let session = client
+        .create(
+            "reconciliation/sessions",
+            json!({"account_id":bank["id"],"month":"2026-09"}),
+        )
+        .await;
+    let root = format!(
+        "reconciliation/sessions/{}",
+        session["id"].as_str().unwrap()
+    );
+    let statement = client
+        .call(
+            "GET",
+            &format!("{root}/items?side=statement"),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    let rows = statement["data"].as_array().unwrap();
+    let debit = rows.iter().find(|v| v["amount"] == "-7663.00").unwrap();
+    let refund = rows.iter().find(|v| v["amount"] == "3315.00").unwrap();
+    let matched = client.call("POST", &format!("{root}/matches"), json!({"decision":"accept","allocations":[
+        {"ledger_id":expense["id"],"ledger_revision":1,"observation_id":debit["id"],"amount":"-7663.00"},
+        {"ledger_id":expense["id"],"ledger_revision":1,"observation_id":refund["id"],"amount":"3315.00"}
+    ]}), Some("net-refund-match"), Some(1)).await;
+    assert_eq!(matched.0, StatusCode::OK, "{}", matched.1);
+    let ledger = client
+        .call(
+            "GET",
+            &format!("{root}/items?side=ledger"),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert_eq!(ledger["data"][0]["state"], "matched");
+    assert_eq!(ledger["data"][0]["amount"], "-4348.00");
+    let statement = client
+        .call(
+            "GET",
+            &format!("{root}/items?side=statement"),
+            json!({}),
+            None,
+            None,
+        )
+        .await
+        .1;
+    assert!(
+        statement["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["state"] == "matched")
+    );
+}

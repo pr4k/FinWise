@@ -326,6 +326,46 @@ async fn accept_with_items(
     let mut observation_used: HashMap<String, i64> = HashMap::new();
     let mut unique = HashSet::new();
     let mut allocations = Vec::new();
+    // A net ledger movement may represent a debit and a related refund. Allow
+    // their full, previously unmatched statement rows to attach as one atomic
+    // decision when their signed sum equals that ledger movement exactly.
+    let netted_refund = if links.len() > 1 {
+        let lid = links[0]["ledger_id"].as_str();
+        let ledger_row = lid.and_then(|id| ledger.iter().find(|v| v["id"] == id));
+        if let Some(l) = ledger_row.filter(|l| l["state"] == "unmatched") {
+            let mut seen = HashSet::new();
+            let mut total = 0;
+            let mut positive = false;
+            let mut negative = false;
+            let mut valid = true;
+            for link in links {
+                let observation = link["observation_id"]
+                    .as_str()
+                    .and_then(|id| observations.iter().find(|v| v["id"] == id));
+                if link["ledger_id"] != l["id"] || observation.is_none() {
+                    valid = false;
+                    break;
+                }
+                let o = observation.unwrap();
+                let amount = money(text(link, "amount")?, currency)?;
+                if o["state"] != "unmatched"
+                    || !seen.insert(text(o, "id")?)
+                    || amount != money(text(o, "remaining")?, currency)?
+                {
+                    valid = false;
+                    break;
+                }
+                positive |= amount > 0;
+                negative |= amount < 0;
+                total = add(total, amount)?;
+            }
+            valid && positive && negative && total == money(text(l, "remaining")?, currency)?
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     for link in links {
         api::allowed_body(
             link,
@@ -356,11 +396,12 @@ async fn accept_with_items(
         if amount == 0 {
             return Err(ApiError::invalid("Allocation must be nonzero."));
         }
-        for (map, id, item) in [(&mut ledger_used, lid, l), (&mut observation_used, oid, o)] {
+        for (side, (map, id, item)) in [(&mut ledger_used, lid, l), (&mut observation_used, oid, o)].into_iter().enumerate() {
             let total = add(*map.get(id).unwrap_or(&0), amount)?;
             let available = money(text(item, "remaining")?, currency)?;
-            if amount.signum() != available.signum()
-                || total.unsigned_abs() > available.unsigned_abs()
+            if !(netted_refund && side == 0)
+                && (amount.signum() != available.signum()
+                    || total.unsigned_abs() > available.unsigned_abs())
             {
                 return Err(ApiError::conflict(
                     "Allocation exceeds remaining value or has the wrong sign.",

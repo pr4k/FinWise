@@ -10,6 +10,13 @@ function matchAllocations(ledger,observations) {
   const formatted=value=>{const negative=value<0n,digits=(negative?-value:value).toString().padStart(scale+1,'0');return `${negative?'-':''}${scale?digits.slice(0,-scale)+'.'+digits.slice(-scale):digits}`;};
   const sign=value=>value<0n?-1n:value>0n?1n:0n;
   const entries=[...ledger,...observations],direction=sign(minor(entries[0].remaining));
+  if(ledger.length===1 && observations.length>1 && ledger[0].state==='unmatched' && observations.every(v=>v.state==='unmatched' && v.currency===ledger[0].currency)) {
+    const values=observations.map(v=>minor(v.remaining));
+    const net=values.reduce((total,value)=>total+value,0n);
+    if(values.some(value=>sign(value)!==direction) && values.some(value=>sign(value)===direction) && net===minor(ledger[0].remaining)) {
+      return {allocations:observations.map((v,i)=>({ledger_id:ledger[0].id,ledger_revision:ledger[0].revision,observation_id:v.id,amount:formatted(values[i])})),ledgerTotal:formatted(net),statementTotal:formatted(net),matchedTotal:formatted(net),difference:formatted(0n),hasDifference:false,currency:ledger[0].currency,nettedRefund:true};
+    }
+  }
   if(!direction || entries.some(v=>sign(minor(v.remaining))!==direction)) return {error:'Select rows with the same transaction direction.'};
   const left=ledger.map(v=>{const n=minor(v.remaining);return {item:v,remaining:n<0n?-n:n};});
   const right=observations.map(v=>{const n=minor(v.remaining);return {item:v,remaining:n<0n?-n:n};});
