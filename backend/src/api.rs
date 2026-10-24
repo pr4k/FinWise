@@ -861,9 +861,20 @@ pub(crate) async fn route(
             } else {
                 kind
             };
-            let mut values = storage::list(db, p, source).await?;
-            if source == "transactions" {
+            let mut values = if source == "transactions" {
                 validate_transaction_query(q)?;
+                storage::transactions_in_range(
+                    db,
+                    p,
+                    q.get("from").map(String::as_str),
+                    q.get("to").map(String::as_str),
+                    true,
+                )
+                .await?
+            } else {
+                storage::list(db, p, source).await?
+            };
+            if source == "transactions" {
                 values = filter_transactions(values, q, p)?;
                 if let Some(scope) = q.get("scope") {
                     validate_report_scope(scope)?;

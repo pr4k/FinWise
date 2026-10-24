@@ -191,3 +191,84 @@ button:disabled {transform:none!important;box-shadow:none!important}
   html {scroll-behavior:auto}
   *,*::before,*::after {animation-duration:.01ms!important;transition-duration:.01ms!important}
 }
+
+/* Everyday views: fewer competing surfaces and details on demand. */
+body {background:#f7f8f7}
+.sidebar {background:#fff;border-color:var(--line);box-shadow:none}
+.sidebar .brand {color:var(--ink)}
+.sidebar .household-card {background:#f6f8f5;border-color:var(--line)}
+.sidebar .household-card strong,.sidebar .profile strong {color:var(--ink)}
+.sidebar .household-card span,.sidebar .profile span {color:var(--muted)}
+.sidebar .nav-item {color:#526157;border-radius:8px}
+.sidebar .nav-item svg {color:#718176}
+.sidebar .nav-item:hover {background:#f2f5f1;color:#214e34;transform:none}
+.sidebar .nav-item.active {background:#eaf2e9;color:#214e34;box-shadow:none}
+.sidebar .profile,.sidebar .settings-link {border-color:var(--line)}
+.sidebar .profile button:hover {color:#214e34}
+.nav-disclosure {margin-top:12px}
+.nav-disclosure summary {padding:12px 10px;color:var(--muted);font-size:12px;cursor:pointer}
+.nav-disclosure[open] summary {margin-bottom:4px}
+.topbar {box-shadow:none}
+.page-heading h1 {font-size:clamp(26px,2.4vw,32px);letter-spacing:-.035em}
+.card,.panel,.account-card,.finance-card,.recurring-card,.statement-month-card,
+.stat-card,.overview-metric,.account-detail-metric,.ledger-workspace {box-shadow:none}
+.account-card:hover,.finance-card:hover,.recurring-card:hover,.household-person:hover {transform:none;box-shadow:none}
+.overview-summary {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-bottom:24px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.overview-summary .overview-metric {min-width:0;min-height:156px;margin:0;padding:22px;border:0;border-right:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none}
+.overview-summary .overview-metric:last-child {border-right:0}
+.overview-summary .metric-label {color:#526157;font-size:12px}
+.overview-summary .metric-number {font-size:clamp(22px,2.1vw,32px);margin:12px 0 8px;letter-spacing:-.04em}
+.overview-summary .metric-icon {display:none}
+.overview-summary .metric-caption {color:var(--muted);font-size:12px}
+.overview-summary .position-card {background:#f1f6ef}
+.overview-summary .position-card.negative {background:#fff4f0}
+.overview-summary .overview-budget-foot {align-items:center;gap:8px}
+.overview-summary .overview-budget-foot>span {font-size:11px}
+.overview-workspace {grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}
+.attention-panel {padding:16px 20px;background:#fffaf1;border-color:#eadfc8;box-shadow:none;margin-bottom:24px}
+.attention-heading {margin-bottom:8px}
+.attention-heading h2 {font-size:14px}
+.attention-grid {grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:12px}
+.attention-item {min-height:56px;grid-template-columns:1fr auto;background:transparent;padding:8px 0}
+.quiet-details {margin:20px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.quiet-details>summary {padding:16px 2px;font-size:13px;font-weight:650;color:#355c3e;cursor:pointer}
+.quiet-details[open]>summary {margin-bottom:8px}
+.analytics-metrics {grid-template-columns:repeat(3,minmax(0,1fr))}
+.analytics-metric,.analytics-metric.featured {background:#fff;color:var(--ink);box-shadow:none;border-color:var(--line)}
+.analytics-metric.featured .analytics-metric-head,.analytics-metric.featured p {color:var(--muted)}
+.analytics-metric.featured strong {color:#214e34}
+.analytics-metric-icon {display:none}
+@media(max-width:1000px) {
+  .overview-summary {grid-template-columns:repeat(2,minmax(0,1fr))}
+  .overview-summary .overview-metric:nth-child(2) {border-right:0}
+  .overview-summary .overview-metric:nth-child(-n+2) {border-bottom:1px solid var(--line)}
+}
+@media(max-width:760px) {
+  .overview-summary .overview-metric {padding:16px;min-height:140px}
+  .overview-summary .metric-number {font-size:24px}
+  .overview-workspace {grid-template-columns:1fr}
+  .analytics-metrics {grid-template-columns:1fr}
+  .attention-panel {padding:14px 16px}
+}
+@media(max-width:360px) {
+  .overview-summary {grid-template-columns:1fr}
+  .overview-summary .overview-metric {border-right:0;border-bottom:1px solid var(--line)}
+  .overview-summary .overview-metric:last-child {border-bottom:0}
+}
+.overview-summary .position-card .metric-label {margin-top:0}
+.overview-summary .position-card .metric-caption {display:block}
+.analytics-page .page-heading h1 {font-size:clamp(26px,2.4vw,32px)}
+.analytics-page .page-heading p {font-size:13px}
+@media(min-width:761px) {
+  .sidebar-collapsed .nav-disclosure summary {font-size:0;text-align:center;padding-inline:0}
+  .sidebar-collapsed .nav-disclosure summary::after {content:'•••';font-size:14px}
+}
+.attention-heading h2 {margin:0}
+.attention-item {display:grid}
+.attention-item strong {font-size:13px}
+.attention-item small {font-size:12px;color:var(--muted)}
+.attention-item>span:first-child {min-width:0}
+@media(max-width:760px) {
+  /* Keep the three-row filter header from covering the reading area on phones. */
+  .topbar {position:static}
+}

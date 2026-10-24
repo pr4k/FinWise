@@ -1,4 +1,4 @@
--- FinWise schema-only export. Generated from backend/migrations/0001_core.sql through 0012_budget_commitment_matches.sql.
+-- FinWise schema-only export. Generated from backend/migrations/0001_core.sql through 0013_transaction_sources.sql.
 -- Empty SQLite database; no user data. Do not apply this file on an existing database.
 -- Runtime migrations remain authoritative. JSON resource shapes are defined in API/domain code.
 
@@ -222,3 +222,8 @@ CREATE INDEX source_files_account_hash ON source_files(household_id,account_id,s
 CREATE INDEX source_files_batch ON source_files(batch_id,id);
 
 CREATE UNIQUE INDEX widgets_one_enabled ON widget_settings(enabled) WHERE enabled=1;
+
+-- Transaction reads and source cleanup look up occurrences by ledger ID.
+-- The existing fingerprint index cannot serve this lookup beyond household_id.
+CREATE INDEX import_occurrences_transaction
+ON import_occurrences(household_id, transaction_id);

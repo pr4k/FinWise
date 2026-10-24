@@ -7311,3 +7311,24 @@ async fn independent_amendment_needs_no_money_manager_reason() {
     assert_eq!(amended["money_manager_excluded"], true);
     assert_eq!(amended["amount"], "120.00");
 }
+
+#[tokio::test]
+async fn investment_pages_keep_calculations_and_reject_changed_snapshots() {
+    let (client, _) = setup().await;
+    for name in ["Fund A", "Fund B", "Fund C"] {
+        client.create("investments", json!({"name":name,"type":"investment","currency":"INR","initial_record":{"month":"2026-09","principal":"100.00","current_value":"125.00"}})).await;
+    }
+    let first = client.call("GET", "investments?limit=1", json!({}), None, None).await;
+    assert_eq!(first.0, StatusCode::OK);
+    let row = &first.1["data"][0];
+    assert_eq!(row["gain_loss"], "25.00");
+    let detail = client.call("GET", &format!("investments/{}", row["id"].as_str().unwrap()), json!({}), None, None).await;
+    assert_eq!(*row, detail.1);
+    let path = format!("investments?limit=1&cursor={}", first.1["page"]["next_cursor"].as_str().unwrap());
+    let second = client.call("GET", &path, json!({}), None, None).await;
+    assert_eq!(second.0, StatusCode::OK);
+    assert_ne!(second.1["data"][0]["id"], row["id"]);
+    assert_eq!(second.1["data"][0]["gain_loss"], "25.00");
+    client.create("investments", json!({"name":"New fund","type":"investment","currency":"INR"})).await;
+    assert_eq!(client.call("GET", &path, json!({}), None, None).await.0, StatusCode::CONFLICT);
+}

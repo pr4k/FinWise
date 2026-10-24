@@ -119,35 +119,64 @@ fn state(amount: i64, allocated: i64) -> &'static str {
 
 /// Projection only: accepting evidence never adds a ledger revision or changes balances.
 pub async fn decorate_transaction(db: &mut SqliteConnection, value: &mut Value) -> Result<()> {
-    let currency = text(value, "currency")?.to_owned();
-    let id = text(value, "id")?.to_owned();
-    let mut all = true;
-    let mut any = false;
-    for movement in value["movements"]
-        .as_array()
-        .ok_or_else(|| ApiError::invalid("Invalid movements."))?
-    {
-        let amount = money(text(movement, "amount")?, &currency)?;
-        let allocated = used(db, &id, Some(text(movement, "account_id")?)).await?;
-        all &= amount == allocated;
-        any |= allocated != 0;
+    decorate_transactions(db, std::slice::from_mut(value)).await
+}
+
+/// Fetch evidence once for the authorized set, rather than once per movement.
+pub(crate) async fn decorate_transactions(
+    db: &mut SqliteConnection,
+    values: &mut [Value],
+) -> Result<()> {
+    if values.is_empty() {
+        return Ok(());
     }
-    value["reconciliation_state"] = json!(if all {
-        "matched"
-    } else if any {
-        "partial"
-    } else {
-        "unmatched"
-    });
-    let rows=sqlx::query("SELECT l.account_id,l.observation_id,l.amount_minor,b.document FROM reconciliation_links l JOIN bank_observations b ON b.id=l.observation_id WHERE l.transaction_id=? AND l.active=1 ORDER BY l.observation_id")
-        .bind(&id).fetch_all(&mut *db).await?;
-    let mut evidence = Vec::new();
+    let ids: Vec<&str> = values
+        .iter()
+        .map(|v| text(v, "id"))
+        .collect::<Result<_>>()?;
+    let rows = sqlx::query("SELECT l.transaction_id,l.account_id,l.observation_id,l.amount_minor,b.document FROM reconciliation_links l JOIN bank_observations b ON b.id=l.observation_id WHERE l.transaction_id IN (SELECT value FROM json_each(?)) AND l.active=1 ORDER BY l.observation_id")
+        .bind(serde_json::to_string(&ids).unwrap()).fetch_all(db).await?;
+    let mut links: HashMap<String, Vec<_>> = HashMap::new();
     for row in rows {
-        let observation: Value = serde_json::from_str(row.get::<&str, _>(3))
-            .map_err(|_| ApiError::invalid("Invalid stored observation."))?;
-        evidence.push(json!({"account_id":row.get::<&str,_>(0),"observation_id":row.get::<&str,_>(1),"matched_amount":format_money(row.get::<i64,_>(2),&currency)?,"statement_date":observation["effective_date"],"statement_description":observation["description"],"statement_reference":observation["reference"]}));
+        links.entry(row.get(0)).or_default().push(row);
     }
-    value["reconciliation_evidence"] = json!(evidence);
+    for value in values {
+        let currency = text(value, "currency")?.to_owned();
+        let id = text(value, "id")?;
+        let mut allocated: HashMap<&str, i64> = HashMap::new();
+        let mut evidence = Vec::new();
+        for row in links.get(id).into_iter().flatten() {
+            let account: &str = row.get(1);
+            let amount: i64 = row.get(3);
+            let total = allocated.entry(account).or_default();
+            *total = add(*total, amount)?;
+            let observation: Value = serde_json::from_str(row.get::<&str, _>(4))
+                .map_err(|_| ApiError::invalid("Invalid stored observation."))?;
+            evidence.push(json!({"account_id":account,"observation_id":row.get::<&str,_>(2),"matched_amount":format_money(amount,&currency)?,"statement_date":observation["effective_date"],"statement_description":observation["description"],"statement_reference":observation["reference"]}));
+        }
+        let mut all = true;
+        let mut any = false;
+        for movement in value["movements"]
+            .as_array()
+            .ok_or_else(|| ApiError::invalid("Invalid movements."))?
+        {
+            let amount = money(text(movement, "amount")?, &currency)?;
+            let used = allocated
+                .get(text(movement, "account_id")?)
+                .copied()
+                .unwrap_or(0);
+            all &= amount == used;
+            any |= used != 0;
+        }
+        value["reconciliation_state"] = json!(if all {
+            "matched"
+        } else if any {
+            "partial"
+        } else {
+            "unmatched"
+        });
+        value["reconciliation_evidence"] = json!(evidence);
+    }
     Ok(())
 }
 

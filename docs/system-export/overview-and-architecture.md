@@ -51,7 +51,7 @@ flowchart TD
     Ledger --> Match
 ```
 
-The physical schema has **25 tables and 19 explicit indexes**. Identity, upload staging, deduplication, bank observations, reconciliation links, and some settings have relational tables. Many domain objects reside in one `resources` table with `kind`, `household_id`, `owner_id`, `revision`, and a JSON `document`. Accounts, categories, transactions, budgets, planned items, reconciliation sessions/matches, balance checks, settle-up obligations, and investments use this document pattern. The [schema export](db-schema-export.md) enumerates every physical column and constraint. API component schemas describe the public JSON shapes.
+The physical schema has **25 tables and 20 explicit indexes**. Identity, upload staging, deduplication, bank observations, reconciliation links, and some settings have relational tables. Many domain objects reside in one `resources` table with `kind`, `household_id`, `owner_id`, `revision`, and a JSON `document`. Accounts, categories, transactions, budgets, planned items, reconciliation sessions/matches, balance checks, settle-up obligations, and investments use this document pattern. The [schema export](db-schema-export.md) enumerates every physical column and constraint. API component schemas describe the public JSON shapes.
 
 This is a constrained ledger, not a general double-entry accounting system. A transaction stores signed account movements and separate category allocations. Expense/income/refund allocations must sum to the transaction magnitude; a transfer has two distinct accounts, opposite movements, and no expense allocation. Money is parsed from decimal strings to checked integer minor units, with explicit supported currency precision. This keeps transfers and repayments from inflating spending totals.
 
@@ -138,3 +138,9 @@ An eventual investment implementation should keep bank funding evidence, portfol
 | Deployment policy | Review `deploy/compose.yaml`, cookie flags, private network/HTTPS proxy, and anonymous shortcut/widget settings. |
 
 Useful checks already used by the repository: `python3 scripts/generate_contract.py --check`, `cargo test --locked --workspace`, and `node --test web/tests/*.test.cjs`. The schema snapshot can also be replayed into an empty in-memory SQLite database for structural verification.
+
+## 10. Transaction read performance update (24 October 2026)
+
+Transaction collections now apply optional business-date bounds in SQL, using the existing household/date expression indexes before JSON decoding and account authorization. Authorized transactions load import references and active reconciliation evidence in two batch queries instead of per-transaction/per-movement queries. Migration `0013_transaction_sources.sql` indexes import occurrences by household and transaction ID. Stored documents, revisions, visibility rules, and cursor snapshot validation remain intact. File-backed and in-memory databases retain the single connection because mutation revision/idempotency decisions currently rely on serialized access.
+
+These changes reduce query overhead; all-date collections still load and hash their complete result for snapshot pagination. Account balances still scan movements per account, and several UI workspaces request many reports. Further work should measure those paths on representative NAS data before adding a transaction-movement projection, a combined workspace endpoint, or concurrent readers with explicit writer serialization. See [performance notes](../performance.md) for validation and remaining work.

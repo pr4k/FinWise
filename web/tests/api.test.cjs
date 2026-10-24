@@ -58,3 +58,21 @@ test('catalog reads are reused briefly and a mutation invalidates them',async()=
   const third=await api.collection('categories?include_archived=true');
   assert.equal(third.data[0].id,'3');
 });
+test('investment pages and reports reuse reads and refresh after writes or session changes',async()=>{
+  const calls=[];
+  const api=client(async(url,options)=>{
+    calls.push({url,method:options.method});
+    return response({data:[],page:{},revision:calls.length});
+  });
+  for(const path of ['investments?limit=200','investments?limit=200&cursor=page2','investments/report?month=2026-10&scope=personal&currency=INR','investments/goals?month=2026-10']) {
+    const first=await api.request(path);
+    assert.equal(await api.request(path),first);
+  }
+  assert.equal(calls.length,4);
+  await api.request('investments/h/valuations',{method:'POST',body:{value:'123.45'}});
+  await api.request('investments?limit=200');
+  assert.equal(calls.length,6);
+  api.reset();
+  await api.request('investments?limit=200');
+  assert.equal(calls.length,7);
+});

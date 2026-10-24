@@ -26,18 +26,18 @@
     <link rel="stylesheet" href="/reference-theme.css?v=20261012f" />
     <link rel="stylesheet" href="/analytics-view.css?v=20261012b" />
     <link rel="stylesheet" href="/accounts-view.css?v=20261021b" />
-    <link rel="stylesheet" href="/ui-refresh.css?v=20261024b" />
+    <link rel="stylesheet" href="/ui-refresh.css?v=20261024c" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
-    <script src="/api.js?v=20261006b" defer></script>
+    <script src="/api.js?v=20261024perf" defer></script>
     <script src="/view-state.js?v=20261009c" defer></script>
     <script src="/categories.js?v=20261002e" defer></script>
-    <script src="/analytics.js?v=20261023a" defer></script>
+    <script src="/analytics.js?v=20261024a" defer></script>
     <script src="/subscription-brands.js?v=20261021b" defer></script>
     <script src="/activity.js?v=20261002e" defer></script>
     <script src="/time.js?v=20261002e" defer></script>
     <script src="/reconciliation.js?v=20261023a" defer></script>
     <script src="/compact-money.js?v=20261010a" defer></script>
-    <script src="/app.js?v=20261024d" defer></script>
+    <script src="/app.js?v=20261024perf" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -89,24 +89,25 @@
         <a class="brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>FinWise<span class="brand-dot">.</span></span></a>
         <div class="household-card"><div class="household-icon" aria-hidden="true">FW</div><div><strong id="household-name"></strong><span id="household-currency"></span></div></div>
         <nav class="nav-list" id="desktop-nav">
-          <div class="workspace-label">INSIGHTS</div>
           <button class="nav-item" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
-          <button class="nav-item" data-view="household"><svg><use href="#i-grid"/></svg><span>Household</span></button>
-          <button class="nav-item" data-view="analytics"><svg><use href="#i-chart"/></svg><span>Analytics</span></button>
-          <div class="workspace-label nav-group-label">YOUR MONEY</div>
           <button class="nav-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Transactions</span></button>
-          <button class="nav-item" data-view="recurring"><svg><use href="#i-receipt"/></svg><span>Recurring</span></button>
-          <button class="nav-item" data-view="planner"><svg><use href="#i-bell"/></svg><span>Planner</span></button>
           <button class="nav-item" data-view="accounts"><svg><use href="#i-wallet"/></svg><span>Accounts</span></button>
           <button class="nav-item" data-view="budgets"><svg><use href="#i-wallet"/></svg><span>Budgets</span></button>
-          <button class="nav-item" data-view="settlements"><svg><use href="#i-check"/></svg><span>Settle up</span></button>
           <button class="nav-item" data-view="investments"><svg><use href="#i-chart"/></svg><span>Investments</span></button>
-          <div class="workspace-label nav-group-label">WORKSPACE</div>
-          <button class="nav-item" data-view="categories"><svg><use href="#i-grid"/></svg><span>Categories</span></button>
-          <button class="nav-item" data-view="statements"><svg><use href="#i-receipt"/></svg><span>Statements</span></button>
-          <button class="nav-item" data-view="reconcile"><svg><use href="#i-check"/></svg><span>Reconcile</span></button>
-          <button class="nav-item" data-view="changes"><svg><use href="#i-check"/></svg><span>Money Manager changes</span></button>
-          <button class="nav-item" data-view="imports"><svg><use href="#i-upload"/></svg><span>Imports</span></button>
+          <button class="nav-item" data-view="analytics"><svg><use href="#i-chart"/></svg><span>Analytics</span></button>
+          <details class="nav-disclosure"><summary>Planning & household</summary>
+            <button class="nav-item" data-view="planner"><svg><use href="#i-bell"/></svg><span>Planner</span></button>
+            <button class="nav-item" data-view="recurring"><svg><use href="#i-receipt"/></svg><span>Recurring</span></button>
+            <button class="nav-item" data-view="household"><svg><use href="#i-grid"/></svg><span>Household</span></button>
+            <button class="nav-item" data-view="settlements"><svg><use href="#i-check"/></svg><span>Settle up</span></button>
+          </details>
+          <details class="nav-disclosure"><summary>Manage records</summary>
+            <button class="nav-item" data-view="imports"><svg><use href="#i-upload"/></svg><span>Imports</span></button>
+            <button class="nav-item" data-view="statements"><svg><use href="#i-receipt"/></svg><span>Statements</span></button>
+            <button class="nav-item" data-view="reconcile"><svg><use href="#i-check"/></svg><span>Reconcile</span></button>
+            <button class="nav-item" data-view="categories"><svg><use href="#i-grid"/></svg><span>Categories</span></button>
+            <button class="nav-item" data-view="changes"><svg><use href="#i-check"/></svg><span>Money Manager changes</span></button>
+          </details>
         </nav>
         <div class="sidebar-spacer"></div>
         <button class="nav-item settings-link" data-view="settings"><svg><use href="#i-settings"/></svg><span>Settings</span></button>

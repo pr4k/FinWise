@@ -17,7 +17,8 @@
     // Keep repeated navigation responsive while bounding staleness from another
     // household member's changes to ten seconds.
     const cacheable=method==='GET' && !signal && (/^analytics\/(dashboard|summary|series|categories|income-categories|merchants|types|accounts)(\?|$)/.test(path)
-      || /^(accounts|categories)\?include_archived=true&limit=200$/.test(path));
+      || /^(accounts|categories)\?include_archived=true&limit=200$/.test(path)
+      || /^investments(?:\?|$|\/(?:report|goals)(?:\?|$))/.test(path));
     if (cacheable) {
       const saved=reads.get(path);
       if (saved && saved.expires>Date.now()) return saved.value;

@@ -1170,6 +1170,19 @@ pub async fn route(
             let holdings = storage::list(db, p, "investments").await?;
             let holdings: Vec<_> = holdings.into_iter().filter(|h| h["deleted"] != true && (h["archived"] != true || h["archived_at"].as_str().is_some_and(|date| date.get(..7).is_some_and(|m| m > selected_month.as_str())))).filter(|h| match scope { "family" => h["visibility"] == "shared", "combined" => h["owner_id"] == p.user_id || h["visibility"] == "shared", _ => true }).collect();
             let visible_ids: HashSet<_> = holdings.iter().filter_map(|h| h["id"].as_str()).collect();
+            // Index evidence once. Ordinary expenses should not rescan every
+            // month and trade in every holding merely to discover no link.
+            let mut linked_holdings: HashMap<&str, Vec<usize>> = HashMap::new();
+            for (index, holding) in holdings.iter().enumerate() {
+                let mut ids = HashSet::new();
+                for record in holding["records"].as_array().into_iter().flatten() {
+                    ids.extend(record["linked_transaction_ids"].as_array().into_iter().flatten().filter_map(Value::as_str));
+                }
+                for event in holding["events"].as_array().into_iter().flatten().filter(|event| event["reversed"] != true) {
+                    ids.extend(event["funding_allocations"].as_array().into_iter().flatten().filter_map(|link| link["transaction_id"].as_str()));
+                }
+                for id in ids { linked_holdings.entry(id).or_default().push(index); }
+            }
             let categories = storage::list(db, p, "categories").await?;
             let investment_categories: HashSet<_> = categories.iter().filter(|c| c["tracking_type"] == "investment").filter_map(|c| c["id"].as_str()).collect();
             let mut contributed = 0;
@@ -1204,15 +1217,15 @@ pub async fn route(
                     }
                     "expense" | "refund" => {
                         let transaction_id = text(&transaction, "id")?;
-                        let allocated = if scope == "personal" {
-                            let mut total = 0;
-                            for holding in &holdings {
-                                let full = visible_linked_amount(std::slice::from_ref(holding), transaction_id, currency, transaction_amount)?;
-                                total = add(total, prorate(full, ownership_basis(holding, text(&transaction, "effective_date")?, &p.user_id)?)?)?;
-                            }
-                            total
-                        } else { visible_linked_amount(&holdings, transaction_id, currency, transaction_amount)? };
-                        let linked_full = visible_linked_amount(&holdings, transaction_id, currency, transaction_amount)?;
+                        let mut allocated = 0;
+                        let mut linked_full = 0;
+                        for index in linked_holdings.get(transaction_id).into_iter().flatten() {
+                            let holding = &holdings[*index];
+                            let full = visible_linked_amount(std::slice::from_ref(holding), transaction_id, currency, transaction_amount)?;
+                            linked_full = add(linked_full, full)?;
+                            let share = if scope == "personal" { ownership_basis(holding, text(&transaction, "effective_date")?, &p.user_id)? } else { 10000 };
+                            allocated = add(allocated, prorate(full, share)?)?;
+                        }
                         if linked_full > transaction_amount { return Err(ApiError::invalid("Investment allocations exceed a transaction.")); }
                         let paid = if scope != "personal" || payer == Some(p.user_id.as_str()) { linked_full } else { 0 };
                         if transaction["event_type"] == "expense" { contributed = add(contributed, paid)?; attributed_contributed = add(attributed_contributed, allocated)?; }
@@ -1238,10 +1251,13 @@ pub async fn route(
             api::allowed_query(q, &["cursor", "limit"])?;
             let mut items = storage::list(db, p, "investments").await?;
             items.retain(|v| v["deleted"] != true);
-            for item in &mut items {
+            // Cursor validation uses canonical documents; compute FIFO/returns
+            // only for the requested page rather than every holding per page.
+            let mut response = api::paginate(items, q)?;
+            for item in response["data"].as_array_mut().unwrap() {
                 decorate_investment(item)?;
             }
-            ok(api::paginate(items, q)?)
+            ok(response)
         }
         ("POST", ["investments"]) => {
             api::allowed_body(

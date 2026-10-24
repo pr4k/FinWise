@@ -1,8 +1,8 @@
 # Database schema export
 
-Schema-only snapshot from all 12 committed migrations. The runnable DDL is in [db-schema.sql](db-schema.sql). This export has no personal records, credentials, or upload contents.
+Schema-only snapshot from all 13 committed migrations. The runnable DDL is in [db-schema.sql](db-schema.sql). This export has no personal records, credentials, or upload contents.
 
-**Physical objects:** 25 tables and 19 explicit indexes (SQLite also creates indexes for some primary keys and unique constraints).
+**Physical objects:** 25 tables and 20 explicit indexes (SQLite also creates indexes for some primary keys and unique constraints).
 
 ## Tables and columns
 
@@ -348,6 +348,7 @@ Foreign keys: `user_id` → `users.id`; `household_id` → `households.id`.
 | `import_batches_owner` | `import_batches` |
 | `import_jobs_recover` | `import_jobs` |
 | `import_occurrences_lookup` | `import_occurrences` |
+| `import_occurrences_transaction` | `import_occurrences` |
 | `import_rows_item_id` | `import_rows` |
 | `planned_item_matches_transaction` | `planned_item_matches` |
 | `quick_expense_one_enabled` | `quick_expense_settings` |

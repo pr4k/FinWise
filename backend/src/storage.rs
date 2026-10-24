@@ -103,27 +103,40 @@ async fn visible_asset_for_goal(db: &mut SqliteConnection, p: &Principal, kind: 
         _ => Ok(false),
     }
 }
-async fn attach_sources(db: &mut SqliteConnection, p: &Principal, value: &mut Value) -> Result<()> {
-    let rows: Vec<String> = sqlx::query_scalar(
-        "SELECT source_refs_json FROM import_occurrences WHERE household_id=? AND transaction_id=?",
-    )
-    .bind(&p.household_id)
-    .bind(text(value, "id")?)
-    .fetch_all(&mut *db)
-    .await?;
-    let refs = value["source_refs"]
-        .as_array_mut()
-        .ok_or_else(|| ApiError::invalid("Invalid transaction sources."))?;
+/// Only authorized transactions may be passed here. JSON IDs use one bound
+/// parameter, avoiding SQLite's variable limit even for large imports.
+async fn decorate_transactions(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    values: &mut [Value],
+) -> Result<()> {
+    if values.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<&str> = values
+        .iter()
+        .map(|v| text(v, "id"))
+        .collect::<Result<_>>()?;
+    let rows = sqlx::query("SELECT transaction_id,source_refs_json FROM import_occurrences WHERE household_id=? AND transaction_id IN (SELECT value FROM json_each(?)) ORDER BY rowid")
+        .bind(&p.household_id).bind(serde_json::to_string(&ids).unwrap()).fetch_all(&mut *db).await?;
+    let mut sources: HashMap<String, Vec<Value>> = HashMap::new();
     for row in rows {
-        let extras: Vec<Value> = serde_json::from_str(&row)
+        let extras: Vec<Value> = serde_json::from_str(row.get::<&str, _>(1))
             .map_err(|_| ApiError::invalid("Invalid source references."))?;
+        sources.entry(row.get(0)).or_default().extend(extras);
+    }
+    for value in values.iter_mut() {
+        let extras = sources.remove(text(value, "id")?).unwrap_or_default();
+        let refs = value["source_refs"]
+            .as_array_mut()
+            .ok_or_else(|| ApiError::invalid("Invalid transaction sources."))?;
         for source in extras {
             if !refs.contains(&source) {
                 refs.push(source);
             }
         }
     }
-    Ok(())
+    crate::reconciliation::decorate_transactions(db, values).await
 }
 
 pub async fn get(db: &mut SqliteConnection, p: &Principal, kind: &str, id: &str) -> Result<Value> {
@@ -132,8 +145,7 @@ pub async fn get(db: &mut SqliteConnection, p: &Principal, kind: &str, id: &str)
         return Err(ApiError::missing());
     }
     if kind == "transactions" {
-        attach_sources(db, p, &mut value).await?;
-        crate::reconciliation::decorate_transaction(db, &mut value).await?;
+        decorate_transactions(db, p, std::slice::from_mut(&mut value)).await?;
     }
     Ok(value)
 }
@@ -151,7 +163,7 @@ pub async fn list(db: &mut SqliteConnection, p: &Principal, kind: &str) -> Resul
     };
     let mut result = Vec::new();
     for row in rows {
-        let mut value: Value = serde_json::from_str(row.get::<&str, _>(0))
+        let value: Value = serde_json::from_str(row.get::<&str, _>(0))
             .map_err(|_| ApiError::invalid("Invalid stored document."))?;
         let permitted = if let Some(accounts) = &account_visibility {
             transaction_visible(&value, accounts)?
@@ -159,15 +171,15 @@ pub async fn list(db: &mut SqliteConnection, p: &Principal, kind: &str) -> Resul
             visible(db, p, kind, &value).await?
         };
         if permitted {
-            if kind == "transactions" {
-                attach_sources(db, p, &mut value).await?;
-                crate::reconciliation::decorate_transaction(db, &mut value).await?;
-            }
             result.push(value);
         }
     }
+    if kind == "transactions" {
+        decorate_transactions(db, p, &mut result).await?;
+    }
     Ok(result)
 }
+
 pub async fn transactions_in_period(
     db: &mut SqliteConnection,
     p: &Principal,
@@ -175,20 +187,45 @@ pub async fn transactions_in_period(
     to: &str,
     decorate: bool,
 ) -> Result<Vec<Value>> {
-    let rows = sqlx::query("SELECT document FROM resources WHERE household_id=? AND kind='transactions' AND json_extract(document,'$.effective_date')>=? AND json_extract(document,'$.effective_date')<?")
-        .bind(&p.household_id).bind(from).bind(to).fetch_all(&mut *db).await?;
+    transactions_in_range(db, p, Some(from), Some(to), decorate).await
+}
+
+/// Push optional date bounds into SQLite so monthly lists use the period index.
+pub async fn transactions_in_range(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    from: Option<&str>,
+    to: Option<&str>,
+    decorate: bool,
+) -> Result<Vec<Value>> {
+    let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT document FROM resources WHERE kind='transactions' AND household_id=",
+    );
+    query.push_bind(&p.household_id);
+    if let Some(from) = from {
+        query
+            .push(" AND json_extract(document,'$.effective_date')>=")
+            .push_bind(from);
+    }
+    if let Some(to) = to {
+        query
+            .push(" AND json_extract(document,'$.effective_date')<")
+            .push_bind(to);
+    }
+    // Preserve resource-list order for callers that do not apply date sorting.
+    query.push(" ORDER BY id");
+    let rows = query.build().fetch_all(&mut *db).await?;
     let accounts = visible_accounts(db, p).await?;
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
-        let mut value: Value = serde_json::from_str(row.get::<&str, _>(0))
+        let value: Value = serde_json::from_str(row.get::<&str, _>(0))
             .map_err(|_| ApiError::invalid("Invalid stored document."))?;
         if transaction_visible(&value, &accounts)? {
-            if decorate {
-                attach_sources(db, p, &mut value).await?;
-                crate::reconciliation::decorate_transaction(db, &mut value).await?;
-            }
             result.push(value);
         }
+    }
+    if decorate {
+        decorate_transactions(db, p, &mut result).await?;
     }
     Ok(result)
 }

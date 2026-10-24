@@ -28,7 +28,7 @@
           plugins:{legend:{display:spec.datasets.length>1,position:'bottom',align:'start',labels:{usePointStyle:true,pointStyle:'circle',boxWidth:8,boxHeight:8,padding:18,color:'#566579',font:{size:11,weight:'600'}}},
             tooltip:{backgroundColor:'#182534',padding:11,cornerRadius:8,displayColors:spec.datasets.length>1,
               callbacks:{label:context=>`${context.dataset.label}: ${spec.currency} ${context.dataset.exact[context.dataIndex]}`}}},
-          scales:{x:{grid:{display:horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:spec.type==='line'?7:undefined,callback:horizontal?value=>compact(value):undefined,font:{size:11}}},
+          scales:{x:{grid:{display:horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:spec.type==='line'?7:undefined,callback:horizontal?value=>compact(value):value=>spec.labels[value]??value,font:{size:11}}},
             y:{beginAtZero:spec.type==='bar',grid:{display:!horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:horizontal?undefined:5,callback:horizontal?value=>{const label=spec.labels[value]||'';return label.length>22?`${label.slice(0,21)}…`:label;}:value=>compact(value),font:{size:11}}}}
         }
       });
