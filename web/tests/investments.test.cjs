@@ -124,3 +124,45 @@ test('tagged investment table identifies the payer',()=>{
   assert.match(html,/Other member/);
   assert.doesNotMatch(html,/Other member · You/);
 });
+
+test('Add money preselects an emergency fund and limits the source account currency',async()=>{
+  const fund={id:'cc',name:'CC emergency',type:'emergency_fund',owner_id:'u',currency:'INR'};
+  const panels={'#investment-transaction-new':{},'#investment-transaction-hint':{}};
+  const form={elements:{holding_id:{value:''},investment_name:{},account_id:{value:''},amount:{focus:()=>{}}},querySelector:selector=>panels[selector]};
+  const rendered=[];
+  const context=vm.createContext({
+    state:{view:'investments',month:'2026-10',me:{user:{id:'u'}},transactionFilters:{},accounts:[{id:'bank',name:'Bank',currency:'INR'},{id:'usd',name:'Dollar bank',currency:'USD'}]},
+    allInvestments:async()=>[fund,{...fund,id:'archived',archived:true},{...fund,id:'other',owner_id:'someone-else'}],
+    dialog:{querySelector:()=>form},document:{querySelector:()=>form},
+    h:String,option:(value,label)=>`<option value="${value}">${label}</option>`,field:(_label,html)=>html,input:()=>'',moneyInput:()=>'',
+    localDate:()=> '2026-10-24',lastTransactionAccount:()=>'',editor:(...args)=>rendered.push(args)
+  });
+  vm.runInContext(source.slice(source.indexOf('async function investmentTransactionEditor('),source.indexOf('function planEditor(')),context);
+  await context.investmentTransactionEditor('cc');
+  assert.equal(rendered[0][0],'Add money to emergency fund');
+  assert.equal(form.elements.holding_id.value,'cc');
+  assert.equal(panels['#investment-transaction-new'].hidden,true);
+  assert.equal(form.elements.investment_name.required,false);
+  assert.match(form.elements.account_id.innerHTML,/Bank/);
+  assert.doesNotMatch(form.elements.account_id.innerHTML,/Dollar bank/);
+  assert.match(panels['#investment-transaction-hint'].textContent,/without counting as an expense/);
+  assert.equal(form.investmentHoldings.length,1);
+});
+
+test('emergency fund submission posts a contribution rather than an expense',async()=>{
+  const requests=[];
+  const context=vm.createContext({
+    state:{accounts:[{id:'bank',currency:'INR'}]},
+    form:{closest:()=>null},data:{holding_id:'cc',account_id:'bank',amount:'2000.00',transaction_date:'2026-10-24',value:'3000.00'},
+    id:encodeURIComponent,notify:()=>{},
+    api:{request:async(path,options)=>{requests.push({path,options});return {id:'cc',type:'emergency_fund',currency:'INR',revision:3};}}
+  });
+  const start=source.indexOf("    } else if(form.id==='investment-transaction-form') {")+"    } else if(form.id==='investment-transaction-form') {".length;
+  const end=source.indexOf("    } else if(form.id==='investment-goal-form') {",start);
+  await vm.runInContext('(async()=>{'+source.slice(start,end)+'})()',context);
+  assert.equal(requests.length,2);
+  assert.equal(requests[1].path,'investments/cc/contributions');
+  assert.equal(requests[1].options.body.account_id,'bank');
+  assert.equal(requests[1].options.body.amount,'2000.00');
+  assert.equal(requests[1].options.body.value,'3000.00');
+});

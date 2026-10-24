@@ -1231,6 +1231,32 @@ async fn one_bank_debit_can_be_split_between_holdings_without_overallocation() {
 }
 
 #[tokio::test]
+async fn emergency_fund_additions_move_money_without_expense() {
+    let (client, _) = setup().await;
+    let bank = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"10000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let fund = client.create("investments", json!({"name":"CC emergency","type":"emergency_fund","currency":"INR"})).await;
+    let mut revision = fund["revision"].as_i64().unwrap();
+    for (key, amount, value) in [("first-emergency-addition", "2000.00", "2000.00"), ("second-emergency-addition", "1000.00", "3000.00")] {
+        let saved = client.call("POST", &format!("investments/{}/contributions", fund["id"].as_str().unwrap()), json!({"amount":amount,"account_id":bank["id"],"transaction_date":"2026-09-10","value":value}), Some(key), Some(revision)).await;
+        assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+        revision = saved.1["revision"].as_i64().unwrap();
+        assert_eq!(saved.1["current_value"], value);
+    }
+    let saved = client.call("GET", &format!("investments/{}", fund["id"].as_str().unwrap()), json!({}), None, None).await.1;
+    assert_eq!(saved["records"][0]["contribution"], "3000.00");
+    let transactions = client.call("GET", "transactions?event_type=investment", json!({}), None, None).await.1;
+    assert_eq!(transactions["data"].as_array().unwrap().len(), 2);
+    for entry in transactions["data"].as_array().unwrap() {
+        assert_eq!(entry["investment_id"], fund["id"]);
+        assert!(entry["allocations"].as_array().unwrap().is_empty());
+    }
+    let summary = client.call("GET", "analytics/summary?from=2026-09-01&to=2026-10-01&currency=INR", json!({}), None, None).await.1;
+    assert_eq!(summary["net_spending"], "0.00");
+    let account = client.call("GET", &format!("accounts/{}", bank["id"].as_str().unwrap()), json!({}), None, None).await.1;
+    assert_eq!(account["balance"]["amount"], "7000.00");
+}
+
+#[tokio::test]
 async fn investment_shortcut_adds_separate_contributions_and_stock_holdings() {
     let (client, _) = setup().await;
     let bank=client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"200.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
