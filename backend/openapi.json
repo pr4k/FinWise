@@ -13676,6 +13676,95 @@
               }
             },
             "required": []
+          },
+          "funds": {
+            "type": "object",
+            "properties": {
+              "available": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "reserved": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "emergency_reserved": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "other_reserved": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "reservation_shortfall": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "goals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "goal_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "requested": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^-?\\d+(\\.\\d+)?$"
+                    },
+                    "reserved": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^-?\\d+(\\.\\d+)?$"
+                    }
+                  },
+                  "required": [
+                    "goal_id",
+                    "name",
+                    "kind",
+                    "requested",
+                    "reserved"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "available",
+              "reserved",
+              "emergency_reserved",
+              "other_reserved",
+              "reservation_shortfall",
+              "goals"
+            ]
           }
         },
         "required": [

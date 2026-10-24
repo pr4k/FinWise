@@ -166,3 +166,13 @@ test('emergency fund submission posts a contribution rather than an expense',asy
   assert.equal(requests[1].options.body.amount,'2000.00');
   assert.equal(requests[1].options.body.value,'3000.00');
 });
+
+test('emergency fund holdings are separate from the regular investment value',()=>{
+  const {context,state,root}=workspace();
+  state.investmentTab='overview';
+  state.investmentViewData.holdings.push({id:'emergency',name:'CC emergency',owner_id:'u',type:'emergency_fund',currency:'INR',records:[{month:'2026-10',contribution:'5000.00',withdrawal:'0',value:'5000.00',net_contributions:'5000.00',gain_loss:'0'}]});
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/Investment value \(excluding emergency funds\)<\/span><strong>100.00<\/strong>/);
+  assert.match(root.innerHTML,/Separate emergency funds/);
+  assert.match(root.innerHTML,/CC emergency/);
+});

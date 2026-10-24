@@ -70,6 +70,7 @@ for name in ["Account", "Category", "Transaction", "Budget"]:
         props.update(state=enum("draft", "active", "archived"),last_amendment=obj({"reason":S,"actor_id":S,"at":S,"total_allowance_delta":M}, ("reason","actor_id","at","total_allowance_delta")))
     if name == "Account":
         props.update(balance=obj({"amount": {"type": ["string", "null"]}, "currency": S, "basis": S, "as_of": {"type": ["string", "null"]}, "complete": B, "coverage": S, "source": enum("opening_balance", "balance_check", "unknown"), "anchor_at": {"type": ["string", "null"]}}))
+
     schemas[name] = obj(props, list(source["required"]) + ["id", "revision", "owner_id", "created_at"])
     schemas[name + "Patch"] = obj(dict(source["properties"], expected_revision=I))
     schemas[name + "Collection"] = obj({"data": arr(ref(name)), "page": obj({"next_cursor": S}), "meta": obj({})}, ("data", "page", "meta"))
@@ -371,6 +372,8 @@ for path, methods in deferred.items():
 # original generated v1 contract remains stable.
 investment_contract = json.loads((ROOT / "scripts/contract_overrides.json").read_text())
 schemas.update(investment_contract["schemas"])
+nullable_money = {"type": ["string", "null"], "pattern": M["pattern"]}
+schemas["Account"]["properties"]["funds"] = obj({"available":nullable_money,"reserved":nullable_money,"emergency_reserved":nullable_money,"other_reserved":nullable_money,"reservation_shortfall":nullable_money,"goals":arr(obj({"goal_id":{"type":["string","null"]},"name":S,"kind":S,"requested":nullable_money,"reserved":nullable_money}, ("goal_id","name","kind","requested","reserved")))}, ("available","reserved","emergency_reserved","other_reserved","reservation_shortfall","goals"))
 for path, methods in investment_contract["paths"].items():
     for operation in methods.values():
         parameters = operation.setdefault("parameters", [])

@@ -138,6 +138,9 @@ pub async fn project(
 }
 pub async fn decorate(db: &mut SqliteConnection, p: &Principal, account: &mut Value) -> Result<()> {
     account["balance"] = derived(db, p, account, Utc::now()).await?;
+    if matches!(account["subtype"].as_str(), Some("bank" | "cash" | "investment_cash")) {
+        account["funds"] = crate::planning::account_funds(db, p, account).await?;
+    }
     Ok(())
 }
 

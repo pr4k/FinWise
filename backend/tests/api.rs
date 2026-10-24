@@ -11,6 +11,57 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn account_available_funds_separate_goal_reserves_without_changing_ledger() {
+    let (client, _) = setup().await;
+    let bank = client.create("accounts", json!({"name":"Savings","subtype":"bank","currency":"INR","opening_balance":{"amount":"100000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let id = bank["id"].as_str().unwrap();
+    let emergency = client.create("investments/goals", json!({"name":"CC emergency","kind":"emergency","currency":"INR","target_amount":"50000.00","essential_monthly":"10000.00","target_months":5,"allocations":[{"asset_kind":"account","asset_id":id,"mode":"fixed","amount":"18462.00","readily_accessible":true}]})).await;
+    client.create("investments/goals", json!({"name":"Holiday","kind":"general","currency":"INR","target_amount":"20000.00","allocations":[{"asset_kind":"account","asset_id":id,"mode":"percent","percent":"10.00","readily_accessible":true}]})).await;
+    let read = || format!("accounts/{id}");
+    let account = client.call("GET", &read(), json!({}), None, None).await.1;
+    assert_eq!(account["balance"]["amount"], "100000.00");
+    assert_eq!(account["funds"]["available"], "71538.00");
+    assert_eq!(account["funds"]["reserved"], "28462.00");
+    assert_eq!(account["funds"]["emergency_reserved"], "18462.00");
+    assert_eq!(account["funds"]["other_reserved"], "10000.00");
+    let dashboard = client.call("GET", "analytics/dashboard?from=2026-09-01&to=2026-10-01&currency=INR&scope=combined", json!({}), None, None).await.1;
+    assert_eq!(dashboard["accounts"]["data"][0]["funds"], account["funds"]);
+    assert_eq!(dashboard["summary"]["net_spending"], "0.00");
+    let ledger = client.call("GET", &format!("accounts/{id}/ledger"), json!({}), None, None).await.1;
+    assert_eq!(ledger["data"].as_array().unwrap().len(), 1); // Only the opening balance.
+    let category = client.category("Spending", "expense").await;
+    client.transaction("expense", "93000.00", &bank, &category, "personal").await;
+    let account = client.call("GET", &read(), json!({}), None, None).await.1;
+    assert_eq!(account["balance"]["amount"], "7000.00");
+    assert_eq!(account["funds"]["available"], "0.00");
+    assert_eq!(account["funds"]["reserved"], "7000.00");
+    assert_eq!(account["funds"]["emergency_reserved"], "7000.00");
+    assert_eq!(account["funds"]["other_reserved"], "0.00");
+    assert_eq!(account["funds"]["reservation_shortfall"], "12162.00");
+    let archived = client.call("POST", &format!("investments/goals/{}/archive", emergency["id"].as_str().unwrap()), json!({}), Some("archive-emergency-reserve"), emergency["revision"].as_i64()).await;
+    assert_eq!(archived.0, StatusCode::OK, "{}", archived.1);
+    let account = client.call("GET", &read(), json!({}), None, None).await.1;
+    assert_eq!(account["funds"]["available"], "6300.00");
+    assert_eq!(account["funds"]["emergency_reserved"], "0.00");
+    let unknown = client.account("No balance", "bank").await;
+    assert_eq!(unknown["funds"]["available"], Value::Null);
+    let card = client.account("Card", "credit_card").await;
+    assert!(card.get("funds").is_none());
+}
+
+#[tokio::test]
+async fn private_goal_reserve_on_shared_account_keeps_its_name_private() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let bank = owner.create("accounts", json!({"name":"Joint savings","subtype":"bank","currency":"INR","visibility":"shared","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    member.create("investments/goals", json!({"name":"Private holiday","kind":"general","currency":"INR","visibility":"private","target_amount":"500.00","allocations":[{"asset_kind":"account","asset_id":bank["id"],"mode":"fixed","amount":"200.00","readily_accessible":true}]})).await;
+    let account = owner.call("GET", &format!("accounts/{}", bank["id"].as_str().unwrap()), json!({}), None, None).await.1;
+    assert_eq!(account["funds"]["available"], "800.00");
+    assert_eq!(account["funds"]["goals"][0]["name"], "Private goal");
+    assert_eq!(account["funds"]["goals"][0]["goal_id"], Value::Null);
+}
+
+#[tokio::test]
 async fn investment_family_funding_stays_with_its_payer() {
     let (owner, _) = setup().await;
     let (member, _) = partner(&owner).await;

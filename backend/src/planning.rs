@@ -751,6 +751,43 @@ fn goal_allocation_amount(allocation: &Value, asset_value: i64, currency: &str) 
         _ => Err(ApiError::invalid("Allocation mode must be fixed or percent.")),
     }
 }
+// Reservations change spendable funds, never the ledger balance. Include all
+// active goals using this account so hidden goals cannot free up reserved money;
+// their names and identifiers remain private.
+pub(crate) async fn account_funds(db: &mut SqliteConnection, p: &Principal, account: &Value) -> Result<Value> {
+    let currency = text(account, "currency")?;
+    let balance = account["balance"]["amount"].as_str().map(|value| money(value, currency)).transpose()?;
+    let documents: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='investment_goals' ORDER BY id")
+        .bind(&p.household_id).fetch_all(&mut *db).await?;
+    let mut reservations = vec![];
+    for document in documents {
+        let goal: Value = serde_json::from_str(&document).map_err(|_| ApiError::invalid("Invalid stored goal."))?;
+        if goal["archived"] == true || goal["deleted"] == true || goal["currency"] != currency { continue; }
+        let visible = storage::visible(db, p, "investment_goals", &goal).await?;
+        for allocation in goal["allocations"].as_array().into_iter().flatten() {
+            if allocation["asset_kind"] != "account" || allocation["asset_id"] != account["id"] { continue; }
+            let requested = balance.map(|value| goal_allocation_amount(allocation, value, currency)).transpose()?;
+            reservations.push((goal["kind"] == "emergency", visible, goal.clone(), requested));
+        }
+    }
+    // Preserve emergency money first if spending has since reduced the balance.
+    reservations.sort_by_key(|(emergency, _, _, _)| !emergency);
+    let mut remaining = balance.unwrap_or(0).max(0);
+    let (mut reserved, mut emergency, mut requested_total) = (0, 0, 0);
+    let mut details = vec![];
+    for (is_emergency, visible, goal, requested) in reservations {
+        let covered = requested.map(|requested| requested.min(remaining));
+        if let (Some(requested), Some(covered)) = (requested, covered) {
+            requested_total = add(requested_total, requested)?;
+            reserved = add(reserved, covered)?;
+            if is_emergency { emergency = add(emergency, covered)?; }
+            remaining -= covered;
+        }
+        details.push(json!({"goal_id":if visible { goal["id"].clone() } else { Value::Null },"name":if visible { goal["name"].clone() } else { json!("Private goal") },"kind":if visible { goal["kind"].clone() } else { json!("private") },"requested":requested.map(|value| format_money(value,currency)).transpose()?,"reserved":covered.map(|value| format_money(value,currency)).transpose()?}));
+    }
+    Ok(json!({"available":balance.map(|value|format_money(value.checked_sub(reserved).ok_or_else(||ApiError::invalid("Available balance is out of range."))?,currency)).transpose()?,"reserved":balance.map(|_|format_money(reserved,currency)).transpose()?,"emergency_reserved":balance.map(|_|format_money(emergency,currency)).transpose()?,"other_reserved":balance.map(|_|format_money(reserved-emergency,currency)).transpose()?,"reservation_shortfall":balance.map(|_|format_money(requested_total-reserved,currency)).transpose()?,"goals":details}))
+}
+
 async fn validate_goal(db: &mut SqliteConnection, p: &Principal, goal: &Value, excluding: Option<&str>) -> Result<()> {
     let name = text(goal, "name")?;
     if name.len() > 100 { return Err(ApiError::invalid("Goal name is too long.")); }
