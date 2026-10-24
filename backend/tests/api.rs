@@ -11,6 +11,72 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn investment_family_funding_stays_with_its_payer() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let owner_id = owner.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    let member_id = member.call("GET", "me", json!({}), None, None).await.1["user"]["id"].clone();
+    let bank = owner.create("accounts", json!({"name":"Shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let category = owner.create("categories", json!({"name":"Investing","kind":"expense","tracking_type":"investment","visibility":"shared"})).await;
+    // Entered by the owner from a shared account, but explicitly paid by the other member.
+    for (amount, payer) in [("25000.00", &member_id), ("2430.54", &owner_id)] {
+        let mut entry = transaction("expense", amount, &bank, &category, "family");
+        entry["effective_date"] = json!("2026-10-03");
+        entry["paid_by_user_id"] = payer.clone();
+        owner.create("transactions", entry).await;
+    }
+    let combined = owner.call("GET", "investments/report?month=2026-10&currency=INR&scope=combined", json!({}), None, None).await;
+    assert_eq!(combined.0, StatusCode::OK, "{}", combined.1);
+    assert_eq!(combined.1["net_invested"], "27430.54");
+    assert_eq!(combined.1["personal_net_invested"], "2430.54");
+    assert_eq!(combined.1["personal_unassigned_net"], "2430.54");
+    let personal = owner.call("GET", "investments/report?month=2026-10&currency=INR&scope=personal", json!({}), None, None).await;
+    assert_eq!(personal.1["net_invested"], "2430.54");
+    let other = member.call("GET", "investments/report?month=2026-10&currency=INR&scope=personal", json!({}), None, None).await;
+    assert_eq!(other.1["net_invested"], "25000.00");
+    let household = owner.call("GET", "analytics/household?from=2026-10-01&to=2026-11-01&currency=INR", json!({}), None, None).await;
+    for (person, expected) in [(&owner_id, "2430.54"), (&member_id, "25000.00")] {
+        let row = household.1["data"].as_array().unwrap().iter().find(|row| row["id"] == *person).unwrap();
+        assert_eq!(row["net_invested"], expected);
+    }
+}
+
+#[tokio::test]
+async fn investment_reports_agree_on_manual_posted_and_unassigned_monthly_flows() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let category = client.create("categories", json!({"name":"Investing","kind":"expense","tracking_type":"investment"})).await;
+    let food = client.category("Food", "expense").await;
+    let manual = client.create("investments", json!({"name":"Monthly record","type":"investment","currency":"INR"})).await;
+    let saved = client.call("PUT", &format!("investments/{}/months/2026-10", manual["id"].as_str().unwrap()), json!({"contribution":"20768.00","withdrawal":"0","value":"20768.00"}), None, Some(1)).await;
+    assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+    let posted = client.create("investments", json!({"name":"Posted","type":"investment","currency":"INR"})).await;
+    let saved = client.call("POST", &format!("investments/{}/contributions", posted["id"].as_str().unwrap()), json!({"amount":"45000.00","account_id":account["id"],"transaction_date":"2026-10-10"}), Some("monthly-flow-post"), Some(1)).await;
+    assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+    // The month-end entry is included even if today is earlier in October.
+    let mut tagged = transaction("expense", "27530.54", &account, &category, "personal");
+    tagged["effective_date"] = json!("2026-10-31");
+    tagged["allocations"] = json!([{"scope":"personal","category_id":category["id"],"amount":"27430.54"},{"scope":"personal","category_id":food["id"],"amount":"100.00"}]);
+    client.create("transactions", tagged).await;
+    let household = client.call("GET", "analytics/household?from=2026-10-01&to=2026-11-01&currency=INR", json!({}), None, None).await;
+    let investments = client.call("GET", "investments/report?month=2026-10&currency=INR&scope=combined", json!({}), None, None).await;
+    assert_eq!(investments.0, StatusCode::OK, "{}", investments.1);
+    assert_eq!(household.1["data"][0]["net_invested"], "93198.54");
+    assert_eq!(investments.1["net_invested"], household.1["data"][0]["net_invested"]);
+    assert_eq!(investments.1["contributed"], "65768.00");
+    assert_eq!(investments.1["unassigned_net"], "27430.54");
+    assert_eq!(household.1["data"][0]["net_spending"], "100.00");
+    let mut refund = transaction("refund", "30.54", &account, &category, "personal");
+    refund["effective_date"] = json!("2026-10-31");
+    client.create("transactions", refund).await;
+    let investments = client.call("GET", "investments/report?month=2026-10&currency=INR&scope=personal", json!({}), None, None).await;
+    let household = client.call("GET", "analytics/household?from=2026-10-01&to=2026-11-01&currency=INR", json!({}), None, None).await;
+    assert_eq!(investments.1["unassigned_net"], "27400.00");
+    assert_eq!(investments.1["net_invested"], "93168.00");
+    assert_eq!(investments.1["net_invested"], household.1["data"][0]["net_invested"]);
+}
+
+#[tokio::test]
 async fn household_counts_linked_investment_funding_once() {
     let (client, _) = setup().await;
     let account = client.account("Bank", "bank").await;
@@ -25,6 +91,8 @@ async fn household_counts_linked_investment_funding_once() {
         let report = client.call("GET", report_path, json!({}), None, None).await;
         assert_eq!(report.0, StatusCode::OK, "{}", report.1);
         assert_eq!(report.1["data"][0]["net_invested"], "80.00");
+        let investments = client.call("GET", "investments/report?month=2026-09&currency=INR", json!({}), None, None).await;
+        assert_eq!(investments.1["net_invested"], report.1["data"][0]["net_invested"]);
         assert_eq!(report.1["data"][0]["net_spending"], "0.00");
     }
 }
@@ -942,6 +1010,9 @@ async fn broker_cash_transfer_and_purchase_count_external_funding_once() {
     assert_eq!(report.0, StatusCode::OK, "{}", report.1);
     assert_eq!(report.1["contributed"], "20000.00");
     assert_eq!(report.1["cash_total"], "8000.00");
+    let household = client.call("GET", "analytics/household?from=2026-10-01&to=2026-11-01&currency=INR", json!({}), None, None).await;
+    assert_eq!(household.1["data"][0]["net_invested"], "20000.00");
+    assert_eq!(report.1["net_invested"], household.1["data"][0]["net_invested"]);
     assert_eq!(report.1["cash_coverage"], 1);
     assert_eq!(bought.1["current_value"], "12000.00");
 }

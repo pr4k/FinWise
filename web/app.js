@@ -140,7 +140,7 @@ function transactionKindLabel(transaction) {
   }
   return transaction.event_type;
 }
-function trackedCategoryPanel(rows,title,month,holdings=null) {
+function trackedCategoryPanel(rows,title,month,holdings=null,showPayer=false) {
   const current=rows.filter(row=>row.transaction.effective_date.startsWith(month));
   const currencies=[...new Set(current.map(row=>row.transaction.currency))];
   const totals=currencies.map(currency=>{
@@ -148,8 +148,9 @@ function trackedCategoryPanel(rows,title,month,holdings=null) {
     return `${amount(analyticsView.sumMoney(values,new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits),currency)} in ${h(month)}`;
   }).join(' · ');
   const linked=holdings?new Map(holdings.flatMap(holding=>holding.records.flatMap(record=>(record.linked_transaction_ids||[]).map(transactionId=>[transactionId,holding])))):null;
-  const history=table(holdings?['Date','Category','Transaction','Amount','Holding','']:['Date','Category','Transaction','Amount',''],rows.map(({transaction,category,allocation})=>[
+  const history=table(['Date','Category','Transaction',...(showPayer?['Paid by']:[]),'Amount',...(holdings?['Holding']:[]),''],rows.map(({transaction,category,allocation})=>[
     h(transaction.effective_date),h(categoryName(category.id)),h(transaction.description||'Untitled'),
+    ...(showPayer?[h(payerName(transaction))+(payerId(transaction)===state.me.user.id?' · You':'')]:[]),
     `${transaction.event_type==='refund'?'− ':''}${amount(allocation.amount,transaction.currency)}`,
     ...(holdings?[h(linked.get(transaction.id)?.name||'Not assigned')]:[]),
     button('Details','transaction-detail',`data-id="${h(transaction.id)}"`)+(holdings?(linked.has(transaction.id)?button('Unlink','unlink-investment',`data-id="${h(linked.get(transaction.id).id)}" data-transaction="${h(transaction.id)}"`):button('Link to holding','link-investment',`data-id="${h(transaction.id)}"`)):(category.tracking_type==='subscription'&&transaction.event_type==='expense'?button('Connect subscription','subscription-link',`data-id="${h(transaction.id)}"`):''))
@@ -675,6 +676,10 @@ function investmentWeighted(value,currency,percent) {
   const text=absolute.toString().padStart(digits+1,'0');
   return `${result<0n?'-':''}${digits?`${text.slice(0,-digits)}.${text.slice(-digits)}`:text}`;
 }
+function investmentPayerId(transaction) {
+  const accountOwner=state.accounts.find(account=>account.id===transaction.movements?.[0]?.account_id)?.owner_id;
+  return transaction.paid_by_user_id||((transaction.source_refs?.length||!['expense','refund'].includes(transaction.event_type))?accountOwner:null)||transaction.entered_by;
+}
 function investmentFunding(holdings,transactions,accounts,month,currency) {
   const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
   const accountById=new Map(accounts.map(account=>[account.id,account]));
@@ -682,6 +687,7 @@ function investmentFunding(holdings,transactions,accounts,month,currency) {
   const contributions=[],withdrawals=[],pending=[];
   for(const transaction of transactions) {
     if(transaction.voided||transaction.currency!==currency||transaction.effective_date?.slice(0,7)!==month)continue;
+    if(state.scope==='personal'&&investmentPayerId(transaction)!==state.me.user.id)continue;
     if(['investment','investment_withdrawal'].includes(transaction.event_type)&&holdingIds.has(transaction.investment_id)) {
       const account=accountById.get(transaction.movements?.[0]?.account_id);
       if(account?.subtype==='investment_cash')continue;
@@ -691,7 +697,7 @@ function investmentFunding(holdings,transactions,accounts,month,currency) {
       const otherLeg=transaction.movements?.find(movement=>accountById.get(movement.account_id)?.subtype!=='investment_cash');
       if(cashLeg&&otherLeg)(cashLeg.amount.startsWith('-')?withdrawals:contributions).push(transaction.amount);
     } else if(['expense','refund'].includes(transaction.event_type)) {
-      const tagged=(transaction.allocations||[]).filter(allocation=>state.categories.some(category=>category.id===allocation.category_id&&category.tracking_type==='investment'));
+      const tagged=(transaction.allocations||[]).filter(allocation=>(state.scope!=='family'||allocation.scope==='family')&&state.categories.some(category=>category.id===allocation.category_id&&category.tracking_type==='investment'));
       if(!tagged.length)continue;
       const allocated=holdings.flatMap(holding=>holding.records.flatMap(record=>(record.linked_allocations||[]).filter(link=>link.transaction_id===transaction.id).map(link=>link.amount).concat((record.linked_transaction_ids||[]).includes(transaction.id)&&!(record.linked_allocations||[]).some(link=>link.transaction_id===transaction.id)?[transaction.amount]:[])).concat((holding.events||[]).filter(event=>!event.reversed).flatMap(event=>(event.funding_allocations||[]).filter(link=>link.transaction_id===transaction.id).map(link=>link.amount))));
       if(allocated.length)(transaction.event_type==='expense'?contributions:withdrawals).push(analyticsView.sumMoney(allocated,scale));
@@ -728,10 +734,11 @@ function investmentContent(holdings,taggedTransactions) {
   const total=known.length||report?.cash_coverage?responsiveAmount(sum([...known.map(row=>attributed(row,row.valued.value)),...(report?.cash_coverage?[report.cash_total]:[])]),currency):'No valuation';
   const valuations=known.map(row=>row.valued.valuation_date||`${row.valued.month}-01`).sort();
   const coverage=`${known.length} of ${local.length} ${h(currency)} holdings valued · ${report?.cash_coverage||0} of ${cash.length} cash balances known${valuations.length?` · dates ${h(valuations[0])}${valuations.at(-1)!==valuations[0]?`–${h(valuations.at(-1))}`:''}`:''}`;
-  const taggedRows=trackedCategoryRows(taggedTransactions,'investment').filter(({allocation})=>state.scope==='combined'||allocation.scope===(state.scope==='family'?'family':'personal'));
-  const taggedPanel=()=>taggedRows.length?trackedCategoryPanel(taggedRows,'Tagged investment transactions',state.month):'';
+  const taggedRows=trackedCategoryRows(taggedTransactions,'investment').filter(({transaction,allocation})=>state.scope==='personal'?investmentPayerId(transaction)===state.me.user.id:state.scope==='family'?allocation.scope==='family':true);
+  const taggedPanel=()=>taggedRows.length?trackedCategoryPanel(taggedRows,`Tagged investment transactions · ${state.scope==='personal'?'Paid by you':state.scope==='family'?'Shared household':'Combined household'}`,state.month,null,true):'';
   const unlinked=taggedRows.filter(({transaction})=>funding.pending.some(item=>item.transaction.id===transaction.id));
-  const unassigned=sum(funding.pending.map(item=>item.transaction.event_type==='refund'?analyticsView.difference('0',item.amount):item.amount));
+  const unassigned=report?.unassigned_net??sum(funding.pending.map(item=>item.transaction.event_type==='refund'?analyticsView.difference('0',item.amount):item.amount));
+  const netInvested=report?.net_invested??sum([net,unassigned]);
   const stale=rows.filter(row=>!row.valued||Math.floor((Date.parse(`${cutoff}T00:00:00`)-Date.parse(`${row.valued.valuation_date||`${row.valued.month}-01`}T00:00:00`))/86400000)>90);
   const overdueSips=rows.filter(row=>{const due=sipDueDate(investmentSipForMonth(row,state.month),state.month);return row.owner_id===state.me.user.id&&due&&Date.parse(`${cutoff}T00:00:00Z`)-Date.parse(`${due}T00:00:00Z`)>3*86400000&&!row.current?.sip_processed&&!row.sip_occurrences?.some(occurrence=>occurrence.month===state.month);});
   const pendingAllotments=rows.filter(row=>row.owner_id===state.me.user.id&&row.sip_occurrences?.some(occurrence=>occurrence.month===state.month&&occurrence.status==='payment_found'&&!row.current?.sip_processed));
@@ -742,7 +749,7 @@ function investmentContent(holdings,taggedTransactions) {
   const tabBar=`<div class="finance-tabs investment-tabs" role="tablist" aria-label="Investment sections">${tabs.map(([key,label])=>`<button type="button" role="tab" class="${state.investmentTab===key?'active':''}" aria-selected="${state.investmentTab===key}" data-action="investment-tab" data-tab="${key}">${h(label)}</button>`).join('')}</div>`;
   const actions=`${button('Update values','investment-update-values')}${button('Link transaction','investment-link-picker')}${button('Add holding','investment')}`;
   const header=heading('Investments',`Portfolio through ${cutoff} · ${state.scope==='personal'?'Your economic share':state.scope==='family'?'Shared household holdings':'Accessible holdings'}`,actions)+`<p class="helper investment-scope-note">Personal values use your dated economic ownership share. Household coverage includes shared holdings only; members' private holdings stay hidden.</p>`+tabBar;
-  const summary=`<section class="finance-hero"><div class="finance-hero-intro"><span class="section-kicker">PORTFOLIO · ${h(cutoff)}</span><h2>What you hold and what needs an update.</h2><p>Values are dated observations, not live prices. Other currencies are listed separately.</p></div><div class="finance-metrics"><article><span>Tracked value</span><strong>${total}</strong><small>${coverage}</small></article><article><span>${state.scope==='personal'?'Paid by you':'Contributed'} in ${h(state.month)}</span><strong>${responsiveAmount(contributed,currency)}</strong><small>Withdrawn ${responsiveAmount(withdrawn,currency)} · net ${responsiveAmount(net,currency)} · tagged, unassigned net ${responsiveAmount(unassigned,currency)}${state.scope==='personal'&&report?` · attributed to your ownership ${responsiveAmount(report.attributed_contributed,currency)}`:''}</small></article><article><span>Result since tracking began</span><strong class="investment-gain ${investmentGainTone(reliable.length?sum(reliable.map(row=>attributed(row,row.valued.gain_loss))):'0',reliable.length>0)}">${reliable.length?responsiveAmount(sum(reliable.map(row=>attributed(row,row.valued.gain_loss))),currency):'Unavailable'}</strong><small>${reliable.length} of ${local.length} holdings covered · lifetime cost basis may be unknown</small></article><article><span>Emergency coverage</span><strong>${emergencyGoals.length?responsiveAmount(emergencyAccessible,currency):'Not set'}</strong><small>${emergencyGoals.length?`Readily accessible of ${responsiveAmount(emergencyTarget,currency)} target · ${emergencyGoals.reduce((count,goal)=>count+goal.valuation_missing+goal.valuation_stale,0)} values need review`:'Create an emergency goal to reserve existing assets'}</small></article></div></section>`;
+  const summary=`<section class="finance-hero"><div class="finance-hero-intro"><span class="section-kicker">PORTFOLIO · ${h(cutoff)}</span><h2>What you hold and what needs an update.</h2><p>Values are dated observations, not live prices. Net invested includes recorded activity for the full selected month. Other currencies are listed separately.</p></div><div class="finance-metrics"><article><span>Tracked value</span><strong>${total}</strong><small>${coverage}</small></article><article><span>Net invested in ${h(state.month)}${state.scope==='personal'?' · You':state.scope==='family'?' · Shared household':' · Combined household'}</span><strong>${responsiveAmount(netInvested,currency)}</strong><small>Recorded contributions ${responsiveAmount(contributed,currency)} · withdrawn ${responsiveAmount(withdrawn,currency)} · tagged, unassigned net ${responsiveAmount(unassigned,currency)}${state.scope!=='personal'&&report?.personal_net_invested!=null?` · Paid by you (net) ${responsiveAmount(report.personal_net_invested,currency)} · your unassigned net ${responsiveAmount(report.personal_unassigned_net,currency)}`:''}${state.scope==='personal'&&report?` · attributed to your ownership ${responsiveAmount(report.attributed_contributed,currency)}`:''}</small></article><article><span>Result since tracking began</span><strong class="investment-gain ${investmentGainTone(reliable.length?sum(reliable.map(row=>attributed(row,row.valued.gain_loss))):'0',reliable.length>0)}">${reliable.length?responsiveAmount(sum(reliable.map(row=>attributed(row,row.valued.gain_loss))),currency):'Unavailable'}</strong><small>${reliable.length} of ${local.length} holdings covered · lifetime cost basis may be unknown</small></article><article><span>Emergency coverage</span><strong>${emergencyGoals.length?responsiveAmount(emergencyAccessible,currency):'Not set'}</strong><small>${emergencyGoals.length?`Readily accessible of ${responsiveAmount(emergencyTarget,currency)} target · ${emergencyGoals.reduce((count,goal)=>count+goal.valuation_missing+goal.valuation_stale,0)} values need review`:'Create an emergency goal to reserve existing assets'}</small></article></div></section>`;
   const holdingRows=()=>rows.filter(row=>state.investmentFilter==='all'||row.type===state.investmentFilter).map(row=>{
     const account=row.account_name||row.platform||'Not specified';
     const value=row.valued?amount(attributed(row,row.valued.value),row.currency):'Unknown';

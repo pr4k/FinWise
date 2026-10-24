@@ -593,6 +593,110 @@ fn visible_linked_amount(holdings: &[Value], transaction_id: &str, currency: &st
     }
     Ok(allocated)
 }
+#[derive(Default)]
+pub(crate) struct InvestmentFlows {
+    pub contributed: i64,
+    pub withdrawn: i64,
+    pub unassigned_in: i64,
+    pub unassigned_out: i64,
+}
+impl InvestmentFlows {
+    pub fn net(&self) -> Result<i64> {
+        add(add(self.contributed, self.unassigned_in)?, -add(self.withdrawn, self.unassigned_out)?)
+    }
+}
+
+// Both monthly reports use recorded flows for the entire requested period.
+// Valuation cutoffs are separate: an observed asset value is not a cash flow.
+pub(crate) async fn investment_flows(
+    db: &mut SqliteConnection, p: &Principal, from: &str, to: &str,
+    currency: &str, scope: &str,
+) -> Result<HashMap<String, InvestmentFlows>> {
+    let accounts = storage::list(db, p, "accounts").await?;
+    let accounts: HashMap<_, _> = accounts.iter().filter_map(|a| a["id"].as_str().map(|id| (id, a))).collect();
+    let holdings: Vec<_> = storage::list(db, p, "investments").await?.into_iter()
+        .filter(|h| h["deleted"] != true && h["currency"] == currency && (scope != "family" || h["visibility"] == "shared")).collect();
+    let categories: HashSet<_> = storage::list(db, p, "categories").await?.into_iter()
+        .filter(|c| c["tracking_type"] == "investment").filter_map(|c| c["id"].as_str().map(str::to_owned)).collect();
+    let mut result: HashMap<String, InvestmentFlows> = HashMap::new();
+    for transaction in storage::transactions_in_period(db, p, from, to, false).await? {
+        if transaction["voided"] == true || transaction["currency"] != currency { continue; }
+        let kind = text(&transaction, "event_type")?;
+        let account = transaction["movements"][0]["account_id"].as_str().and_then(|id| accounts.get(id));
+        let use_account_owner = !matches!(kind, "expense" | "refund")
+            || transaction["source_refs"].as_array().is_some_and(|refs| !refs.is_empty());
+        let mut payer = transaction["paid_by_user_id"].as_str()
+            .or_else(|| if use_account_owner { account.and_then(|a| a["owner_id"].as_str()) } else { None })
+            .or_else(|| transaction["entered_by"].as_str());
+        let amount = positive(&transaction, "amount", currency)?;
+        let (mut contributed, mut withdrawn, mut unassigned_in, mut unassigned_out) = (0, 0, 0, 0);
+        match kind {
+            "investment" | "investment_withdrawal" if holdings.iter().any(|h| h["id"] == transaction["investment_id"]) && !account.is_some_and(|a| a["subtype"] == "investment_cash") => {
+                if kind == "investment" { contributed = amount; } else { withdrawn = amount; }
+            }
+            "transfer" => {
+                let movements: Vec<_> = transaction["movements"].as_array().into_iter().flatten().collect();
+                let cash = movements.iter().find(|m| m["account_id"].as_str().and_then(|id| accounts.get(id)).is_some_and(|a| a["subtype"] == "investment_cash" && (scope != "family" || a["visibility"] == "shared")));
+                let outside = movements.iter().find(|m| m["account_id"].as_str().and_then(|id| accounts.get(id)).is_some_and(|a| a["subtype"] != "investment_cash"));
+                if let (Some(cash), Some(outside)) = (cash, outside) {
+                    payer = outside["account_id"].as_str().and_then(|id| accounts.get(id)).and_then(|a| a["owner_id"].as_str());
+                    if text(cash, "amount")?.starts_with('-') { withdrawn = amount; } else { contributed = amount; }
+                }
+            }
+            "expense" | "refund" => {
+                let linked = visible_linked_amount(&holdings, text(&transaction, "id")?, currency, amount)?;
+                let mut tagged = 0;
+                for line in transaction["allocations"].as_array().into_iter().flatten() {
+                    let visible = line["scope"] == "family" || (line["scope"] == "personal" && transaction["entered_by"] == p.user_id);
+                    if visible && (scope != "family" || line["scope"] == "family") && line["category_id"].as_str().is_some_and(|id| categories.contains(id)) {
+                        tagged = add(tagged, money(text(line, "amount")?, currency)?)?;
+                    }
+                }
+                let unassigned = (tagged - linked).max(0);
+                if kind == "expense" { contributed = linked; unassigned_in = unassigned; }
+                else { withdrawn = linked; unassigned_out = unassigned; }
+            }
+            _ => {}
+        }
+        if let Some(payer) = payer.filter(|payer| scope != "personal" || *payer == p.user_id) {
+            let entry = result.entry(payer.to_owned()).or_default();
+            entry.contributed = add(entry.contributed, contributed)?;
+            entry.withdrawn = add(entry.withdrawn, withdrawn)?;
+            entry.unassigned_in = add(entry.unassigned_in, unassigned_in)?;
+            entry.unassigned_out = add(entry.unassigned_out, unassigned_out)?;
+        }
+    }
+    // Older monthly records can contain contributions with no ledger entry.
+    // Subtract all evidence before including the residual, so posted movements,
+    // linked payments and broker-cash purchases cannot be counted twice.
+    for holding in &holdings {
+        if holding["tracking_mode"] == "full_history" { continue; }
+        let owner = text(holding, "owner_id")?;
+        if scope == "personal" && owner != p.user_id { continue; }
+        for record in holding["records"].as_array().into_iter().flatten() {
+            let date = format!("{}-01", text(record, "month")?);
+            if date.as_str() < from || date.as_str() >= to { continue; }
+            let mut contribution = money(text(record, "contribution")?, currency)?;
+            let mut withdrawal = money(text(record, "withdrawal")?, currency)?;
+            for field in ["transaction_ids", "linked_transaction_ids"] {
+                for id in record[field].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    let transaction = storage::raw(db, p, "transactions", id).await?;
+                    let amount = if field == "linked_transaction_ids" {
+                        record["linked_allocations"].as_array().into_iter().flatten().find(|link| link["transaction_id"] == id)
+                            .map(|link| positive(link, "amount", currency)).transpose()?.unwrap_or(positive(&transaction, "amount", currency)?)
+                    } else { positive(&transaction, "amount", currency)? };
+                    if transaction["event_type"] == "refund" || transaction["event_type"] == "investment_withdrawal" { withdrawal = add(withdrawal, -amount)?; }
+                    else { contribution = add(contribution, -amount)?; }
+                }
+            }
+            let entry = result.entry(owner.to_owned()).or_default();
+            entry.contributed = add(entry.contributed, contribution.max(0))?;
+            entry.withdrawn = add(entry.withdrawn, withdrawal.max(0))?;
+        }
+    }
+    Ok(result)
+}
+
 fn ownership_basis(holding: &Value, date: &str, user_id: &str) -> Result<i64> {
     let shares = holding["ownership_history"].as_array().and_then(|history| history.iter().filter(|entry| entry["effective_date"].as_str().is_some_and(|start| start <= date)).last()).and_then(|entry| entry["shares"].as_array());
     if let Some(shares) = shares {
@@ -1183,26 +1287,19 @@ pub async fn route(
                 }
                 for id in ids { linked_holdings.entry(id).or_default().push(index); }
             }
-            let categories = storage::list(db, p, "categories").await?;
-            let investment_categories: HashSet<_> = categories.iter().filter(|c| c["tracking_type"] == "investment").filter_map(|c| c["id"].as_str()).collect();
-            let mut contributed = 0;
-            let mut withdrawn = 0;
             let mut attributed_contributed = 0;
             let mut attributed_withdrawn = 0;
-            let mut pending = 0;
             for transaction in storage::transactions_in_period(db, p, &from, &to, false).await? {
-                if transaction["voided"] == true || transaction["currency"] != *currency || domain::date(text(&transaction, "effective_date")?)? > cutoff.with_timezone(&tz).date_naive() { continue; }
+                if transaction["voided"] == true || transaction["currency"] != *currency { continue; }
                 let transaction_amount = positive(&transaction, "amount", currency)?;
                 let movement_account = transaction["movements"][0]["account_id"].as_str().and_then(|id| account_types.get(id)).map(String::as_str);
-                let payer = transaction["paid_by_user_id"].as_str().or_else(|| transaction["movements"][0]["account_id"].as_str().and_then(|id| account_owners.get(id).map(String::as_str)));
                 match transaction["event_type"].as_str().unwrap_or("") {
                     "investment" | "investment_withdrawal" if transaction["investment_id"].as_str().is_some_and(|id| visible_ids.contains(id)) && movement_account != Some("investment_cash") => {
                         let holding = holdings.iter().find(|h| h["id"] == transaction["investment_id"]).unwrap();
                         let share = if scope == "personal" { ownership_basis(holding, text(&transaction, "effective_date")?, &p.user_id)? } else { 10000 };
                         let attributed = prorate(transaction_amount, share)?;
-                        let paid = if scope != "personal" || payer == Some(p.user_id.as_str()) { transaction_amount } else { 0 };
-                        if transaction["event_type"] == "investment" { contributed = add(contributed, paid)?; attributed_contributed = add(attributed_contributed, attributed)?; }
-                        else { withdrawn = add(withdrawn, paid)?; attributed_withdrawn = add(attributed_withdrawn, attributed)?; }
+                        if transaction["event_type"] == "investment" { attributed_contributed = add(attributed_contributed, attributed)?; }
+                        else { attributed_withdrawn = add(attributed_withdrawn, attributed)?; }
                     }
                     "transfer" => {
                         let movements = transaction["movements"].as_array().ok_or_else(|| ApiError::invalid("Invalid transfer."))?;
@@ -1211,8 +1308,8 @@ pub async fn route(
                         if let (Some(cash), Some(outside)) = (cash, outside) {
                             let outside_owner = outside["account_id"].as_str().and_then(|id| account_owners.get(id).map(String::as_str));
                             let paid = if scope != "personal" || outside_owner == Some(p.user_id.as_str()) { transaction_amount } else { 0 };
-                            if text(cash, "amount")?.starts_with('-') { withdrawn = add(withdrawn, paid)?; attributed_withdrawn = add(attributed_withdrawn, paid)?; }
-                            else { contributed = add(contributed, paid)?; attributed_contributed = add(attributed_contributed, paid)?; }
+                            if text(cash, "amount")?.starts_with('-') { attributed_withdrawn = add(attributed_withdrawn, paid)?; }
+                            else { attributed_contributed = add(attributed_contributed, paid)?; }
                         }
                     }
                     "expense" | "refund" => {
@@ -1227,16 +1324,25 @@ pub async fn route(
                             allocated = add(allocated, prorate(full, share)?)?;
                         }
                         if linked_full > transaction_amount { return Err(ApiError::invalid("Investment allocations exceed a transaction.")); }
-                        let paid = if scope != "personal" || payer == Some(p.user_id.as_str()) { linked_full } else { 0 };
-                        if transaction["event_type"] == "expense" { contributed = add(contributed, paid)?; attributed_contributed = add(attributed_contributed, allocated)?; }
-                        else { withdrawn = add(withdrawn, paid)?; attributed_withdrawn = add(attributed_withdrawn, allocated)?; }
-                        if transaction["allocations"].as_array().is_some_and(|lines| !lines.is_empty() && lines.iter().all(|line| line["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)))) {
-                            if scope != "personal" || payer == Some(p.user_id.as_str()) { pending = add(pending, transaction_amount - linked_full)?; }
-                        }
+                        if transaction["event_type"] == "expense" { attributed_contributed = add(attributed_contributed, allocated)?; }
+                        else { attributed_withdrawn = add(attributed_withdrawn, allocated)?; }
+
                     }
                     _ => {}
                 }
             }
+            let flows = investment_flows(db, p, &from, &to, currency, scope).await?;
+            let (mut contributed, mut withdrawn, mut pending_in, mut pending_out) = (0, 0, 0, 0);
+            for flow in flows.values() {
+                contributed = add(contributed, flow.contributed)?;
+                withdrawn = add(withdrawn, flow.withdrawn)?;
+                pending_in = add(pending_in, flow.unassigned_in)?;
+                pending_out = add(pending_out, flow.unassigned_out)?;
+            }
+            let personal_net_invested = flows.get(&p.user_id).map(InvestmentFlows::net).transpose()?.unwrap_or(0);
+            let personal_unassigned_net = flows.get(&p.user_id).map(|flow| add(flow.unassigned_in, -flow.unassigned_out)).transpose()?.unwrap_or(0);
+            let pending_net = add(pending_in, -pending_out)?;
+            let net_invested = add(add(contributed, -withdrawn)?, pending_net)?;
             let mut cash_accounts = vec![];
             let mut cash_total = 0;
             let mut cash_known = 0;
@@ -1245,7 +1351,7 @@ pub async fn route(
                 if let Some(value) = balance["amount"].as_str() { cash_total = add(cash_total, money(value, currency)?)?; cash_known += 1; }
                 cash_accounts.push(json!({"id":account["id"],"name":account["name"],"balance":balance["amount"],"as_of":balance["as_of"]}));
             }
-            ok(json!({"month":selected_month,"currency":currency,"scope":scope,"cutoff":cutoff.to_rfc3339(),"contributed":format_money(contributed,currency)?,"withdrawn":format_money(withdrawn,currency)?,"net":format_money(contributed.checked_sub(withdrawn).ok_or_else(|| ApiError::invalid("Net contribution is out of range."))?,currency)?,"attributed_contributed":format_money(attributed_contributed,currency)?,"attributed_withdrawn":format_money(attributed_withdrawn,currency)?,"pending_funding":format_money(pending,currency)?,"cash_accounts":cash_accounts,"cash_total":format_money(cash_total,currency)?,"cash_coverage":cash_known,"limited_household_coverage":scope != "personal"}))
+            ok(json!({"month":selected_month,"currency":currency,"scope":scope,"cutoff":cutoff.to_rfc3339(),"contributed":format_money(contributed,currency)?,"withdrawn":format_money(withdrawn,currency)?,"net":format_money(contributed.checked_sub(withdrawn).ok_or_else(|| ApiError::invalid("Net contribution is out of range."))?,currency)?,"attributed_contributed":format_money(attributed_contributed,currency)?,"attributed_withdrawn":format_money(attributed_withdrawn,currency)?,"pending_funding":format_money(add(pending_in,pending_out)?,currency)?,"unassigned_net":format_money(pending_net,currency)?,"net_invested":format_money(net_invested,currency)?,"personal_net_invested":format_money(personal_net_invested,currency)?,"personal_unassigned_net":format_money(personal_unassigned_net,currency)?,"cash_accounts":cash_accounts,"cash_total":format_money(cash_total,currency)?,"cash_coverage":cash_known,"limited_household_coverage":scope != "personal"}))
         }
         ("GET", ["investments"]) => {
             api::allowed_query(q, &["cursor", "limit"])?;

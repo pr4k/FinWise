@@ -648,7 +648,7 @@
         "x-implemented": true,
         "responses": {
           "200": {
-            "description": "External funding and investment cash at the selected cutoff"
+            "description": "Recorded monthly investment flows, including net_invested and unassigned_net, with investment cash at the valuation cutoff"
           },
           "default": {
             "description": "Standard API error"

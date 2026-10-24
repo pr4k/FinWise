@@ -2378,7 +2378,6 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
         .collect();
     let investment_categories = investment_category_ids(db, p).await?;
     let transactions = storage::transactions_in_period(db, p, from, to, false).await?;
-    let mut counted_tagged = std::collections::HashMap::<String, i64>::new();
     for transaction in transactions {
         if transaction["voided"] == true
             || transaction["currency"] != currency
@@ -2422,9 +2421,6 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
                     value
                 };
                 if allocation["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)) {
-                    member.invested = add(member.invested, signed)?;
-                    let counted = counted_tagged.entry(text(&transaction, "id")?.to_owned()).or_default();
-                    *counted = add(*counted, signed)?;
                     continue;
                 }
                 member.spending = add(member.spending, signed)?;
@@ -2437,51 +2433,9 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
             }
         }
     }
-    let investments =
-        sqlx::query("SELECT document FROM resources WHERE household_id=? AND kind='investments'")
-            .bind(&p.household_id)
-            .fetch_all(&mut *db)
-            .await?;
-    for row in investments {
-        let value: Value = serde_json::from_str(row.get::<&str, _>(0))
-            .map_err(|_| ApiError::invalid("Invalid stored investment."))?;
-        if value["deleted"] == true || value["currency"] != currency {
-            continue;
-        }
-        let Some(member) = members.iter_mut().find(|m| value["owner_id"] == m.id) else {
-            continue;
-        };
-        if member.id != p.user_id && value["visibility"] != "shared" {
-            continue;
-        }
-        for record in value["records"].as_array().into_iter().flatten() {
-            if record["month"].as_str() != Some(&from[..7]) {
-                continue;
-            }
-            let contribution = money(text(record, "contribution")?, currency)?;
-            let withdrawal = money(text(record, "withdrawal")?, currency)?;
-            // Linked evidence is already included under the transaction's payer.
-            // Keep only the portion of the holding record not counted above.
-            let mut linked_net = 0;
-            for id in record["linked_transaction_ids"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-                if let Some(counted) = counted_tagged.get_mut(id) {
-                    let linked = record["linked_allocations"].as_array().into_iter().flatten()
-                        .find(|link| link["transaction_id"] == id)
-                        .map(|link| money(text(link, "amount")?, currency)).transpose()?
-                        .unwrap_or(counted.abs());
-                    let duplicate = counted.signum() * linked.min(counted.abs());
-                    linked_net = add(linked_net, duplicate)?;
-                    *counted -= duplicate;
-                }
-            }
-            member.invested = add(
-                member.invested,
-                contribution
-                    .checked_sub(withdrawal)
-                    .and_then(|net| net.checked_sub(linked_net))
-                    .ok_or_else(|| ApiError::invalid("Money total is out of range."))?,
-            )?;
-        }
+    let flows = planning::investment_flows(db, p, from, to, currency, "combined").await?;
+    for member in &mut members {
+        if let Some(flow) = flows.get(&member.id) { member.invested = flow.net()?; }
     }
     let data = members.into_iter().map(|m| -> Result<Value> {
         let categories = m.categories.into_iter().map(|(category_id,value)| Ok(json!({"category_id":category_id,"amount":format_money(value,currency)?}))).collect::<Result<Vec<_>>>()?;

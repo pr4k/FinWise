@@ -69,9 +69,58 @@ test('standalone and split tagged investments appear in overview and activity',(
   for(const tab of ['overview','activity']) {
     state.investmentTab=tab;
     context.renderInvestmentTab();
-    assert.match(root.innerHTML,/Tagged investment transactionsIndependent fund/);
+    assert.match(root.innerHTML,/Tagged investment transactions · Combined householdIndependent fund/);
   }
   state.investmentTab='overview';
   context.renderInvestmentTab();
   assert.match(root.innerHTML,/tagged, unassigned net 100.00/);
+});
+
+test('monthly investment headline uses the shared report total and breakdown',()=>{
+  const {context,state,root}=workspace();
+  state.investmentTab='overview';
+  state.investmentViewData.report={contributed:'65768.00',withdrawn:'0.00',unassigned_net:'27430.54',net_invested:'93198.54'};
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/Net invested in 2026-10 · Combined household<\/span><strong>93198.54<\/strong>/);
+  assert.match(root.innerHTML,/Recorded contributions 65768.00 · withdrawn 0.00 · tagged, unassigned net 27430.54/);
+});
+
+test('personal investment activity uses payer, including family-scoped payments',()=>{
+  const {context,state,root}=workspace();
+  state.categories=[{id:'invest',tracking_type:'investment'}];
+  state.accounts=[{id:'bank',owner_id:'u'}];
+  const entries=[['other','25000.00','personal'],['u','2430.54','family']].map(([payer,value,scope])=>({id:payer,event_type:'expense',description:payer==='u'?'My payment':'Other member payment',paid_by_user_id:payer,entered_by:'u',movements:[{account_id:'bank'}],effective_date:'2026-10-03',currency:'INR',amount:value,allocations:[{category_id:'invest',scope,amount:value}]}));
+  state.investmentViewData.taggedTransactions=entries;
+  context.trackedCategoryRows=()=>entries.map(transaction=>({transaction,allocation:transaction.allocations[0]}));
+  context.trackedCategoryPanel=(rows,title)=>title+rows.map(row=>row.transaction.description).join(' ');
+  state.investmentTab='activity';
+  state.scope='personal';
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/My payment/);
+  assert.doesNotMatch(root.innerHTML,/Other member payment/);
+  assert.equal(context.investmentFunding([],entries,state.accounts,state.month,'INR').pending[0].amount,'2430.54');
+  assert.equal(context.investmentFunding([],entries,state.accounts,state.month,'INR').pending.length,1);
+  state.scope='combined';
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/Other member payment/);
+  state.investmentTab='overview';
+  state.investmentViewData.report={net_invested:'27430.54',unassigned_net:'27430.54',personal_net_invested:'2430.54',personal_unassigned_net:'2430.54'};
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/Combined household<\/span><strong>27430.54/);
+  assert.match(root.innerHTML,/Paid by you \(net\) 2430.54 · your unassigned net 2430.54/);
+});
+
+test('tagged investment table identifies the payer',()=>{
+  const {context,state}=workspace();
+  context.payerName=()=> 'Other member';
+  context.payerId=()=> 'other';
+  context.categoryName=()=> 'Investing';
+  context.panel=(title,body)=>title+body;
+  context.table=(headers,rows)=>JSON.stringify({headers,rows});
+  vm.runInContext(source.slice(source.indexOf('function trackedCategoryPanel('),source.indexOf('function unlinkedSubscriptionRows(')),context);
+  const row={transaction:{effective_date:'2026-10-03',event_type:'expense',currency:'INR',description:'Payment'},category:{id:'invest'},allocation:{amount:'25000.00'}};
+  const html=context.trackedCategoryPanel([row],'Tagged',state.month,null,true);
+  assert.match(html,/Paid by/);
+  assert.match(html,/Other member/);
+  assert.doesNotMatch(html,/Other member · You/);
 });
