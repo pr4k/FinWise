@@ -37,7 +37,7 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByRole('heading',{name:'Your finances'}).waitFor();
     async function open(view) {
       await page.evaluate(view=>location.hash=view,view);
-      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').textContent.includes('Loading your data'),({imports:'Imports',overview:'Overview',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Analytics',budgets:'Budgets',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
+      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').textContent.includes('Loading your data'),({imports:'Imports',overview:'Overview',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Analytics',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
       catch(error) { throw new Error(`Opening ${view}: ${error.message}`); }
     }
     async function upload(repeat=false) {
@@ -84,10 +84,16 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.evaluate(hash=>location.hash=hash,importHash);
     await page.reload(); await page.getByRole('heading',{name:'Preview summary'}).waitFor();
     await page.getByLabel('Report month').fill(first.month);
-    for(const view of ['overview','transactions','accounts','categories','analytics','statements','budgets','reconcile','settings']) {
+    for(const view of ['overview','transactions','accounts','categories','analytics','statements','budgets','investments','reconcile','settings']) {
       await open(view); assert.equal(await page.locator('.live-error').count(),0,`${view} returned an error`);
       assert.equal(await page.locator('#view-root').getByText('Sample data',{exact:false}).count(),0);
     }
+    await open('investments');
+    const investmentTabs=page.getByRole('tablist',{name:'Investment sections'});
+    assert.equal(await investmentTabs.getByRole('tab').count(),6);
+    await investmentTabs.getByRole('tab',{name:'Goals & Emergency'}).click();
+    await page.getByRole('heading',{name:'Goals & emergency'}).waitFor();
+    assert.equal(await page.locator('.live-error').count(),0,'Investment goals returned an error');
     // The compact overview feed remains keyboard accessible and opens ledger detail.
     await open('overview');
     await page.locator('.recent-item').first().focus();

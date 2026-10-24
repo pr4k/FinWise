@@ -293,6 +293,11 @@ body{background:#f6f7fb}
 @media(max-width:360px){.topbar{flex-wrap:wrap}.topbar .mobile-menu{margin-right:0}.topbar-actions{width:100%;justify-content:space-between}.topbar .scope-picker{flex:1}.topbar .month-filter input{width:125px;max-width:125px}.budget-summary-grid{grid-template-columns:1fr}}
 @media(max-width:430px){.topbar .scope-picker select{max-width:70px}.topbar .month-filter input{width:150px;max-width:150px}.money-manager-list .live-table td[data-label="Initial"],.money-manager-list .live-table td[data-label="New"]{display:block;text-align:left;line-height:1.5}.money-manager-list .live-table td[data-label="Initial"]::before,.money-manager-list .live-table td[data-label="New"]::before{display:block;margin-bottom:4px}.money-manager-list .live-table td[data-label="Initial"] strong,.money-manager-list .live-table td[data-label="New"] strong{display:block;margin-top:3px}.money-manager-list .live-table td[data-label="Initial"]>* ,.money-manager-list .live-table td[data-label="New"]>*{max-width:none}}
 .transaction-quick-fields{display:grid;grid-template-columns:minmax(120px,.75fr) minmax(0,1.25fr);gap:12px}
+.transaction-description-suggestions{grid-column:2;display:grid;gap:4px;margin-top:-8px;padding:6px;border:1px solid #e5e7ed;border-radius:8px;background:#fff}
+.transaction-description-suggestions[hidden]{display:none}
+.transaction-description-suggestions button{border:0;border-radius:6px;padding:8px 10px;background:transparent;text-align:left;color:inherit;cursor:pointer}
+.transaction-description-suggestions button:hover,.transaction-description-suggestions button:focus-visible{background:#f1efff}
+@media(max-width:520px){.transaction-description-suggestions{grid-column:1}}
 .transaction-summary{padding:12px;border-radius:8px;background:#f3f1ff;color:#39315f;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
 .transaction-duplicate{padding:10px 12px;border-radius:8px;background:#fff4dc;color:#754a11;font-size:12px;line-height:1.5}
 .transaction-category-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px}

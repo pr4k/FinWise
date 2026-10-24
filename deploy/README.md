@@ -61,6 +61,16 @@ The NAS checkout must be on `main` with no local changes. On the NAS, make the p
 git -C "$HOME/FinWise" remote set-url origin https://github.com/pr4k/FinWise.git
 ```
 
+If Investments still shows the old **“A clearer view of what you added and what changed”** page, the browser is reaching an older frontend. Check the checkout and the actual JavaScript served by the container:
+
+```sh
+git rev-parse --short HEAD
+sudo docker compose --env-file .env -f deploy/compose.yaml exec -T finwise \
+  sh -c "curl --fail --silent http://127.0.0.1:3000/app.js | grep -o 'Investment sections' | head -1"
+```
+
+The second command prints `Investment sections` when the running container has the six-tab Investments UI (Overview, Holdings, SIPs, Activity, Goals & Emergency, Review). If it prints nothing, run `bash deploy/update.sh` from the NAS checkout. After the update, reload the Investments page. If the container serves the new JavaScript but the browser still shows the old page, reload without cache or reopen the installed app; the service worker only caches the offline fallback and does not cache the application JavaScript.
+
 The script pulls `origin/main` and builds while the old container runs. It then stops the service to archive the entire `/data` volume, including SQLite WAL files, to the ignored `backups/` directory before starting the new image. Set `FINWISE_BACKUP_DIR` if backups belong on another dataset. It refuses to update if it cannot find the expected volume or verify the backup, and restarts the existing container if the backup fails. It reports a startup failure and keeps the backup if the new container does not become healthy. The named `deploy_finwise-data` volume is never removed. Store an additional copy of backups off the NAS for hardware failure protection. Do not use `down --volumes` unless deliberately deleting all household data.
 
 Shell-managed Compose projects do not appear in TrueNAS Apps. Moving management into the Apps UI requires a separate custom-app installation and an image available to TrueNAS; the current repository does not publish one.

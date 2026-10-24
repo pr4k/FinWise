@@ -110,6 +110,7 @@ Bootstrap is disabled permanently after a household owner exists unless an expli
 | `POST /accounts` | Create bank, credit-card, cash, or settle-up account. Requires `Idempotency-Key`; name, subtype, currency, timezone/statement aliases, visibility. |
 | `GET /accounts/{account_id}` | Detail and permissions-safe aliases. |
 | `PATCH /accounts/{account_id}` | Edit name, subtype, card amount/date due, aliases, visibility, or active state; expected revision. Currency or timezone changes with activity still require a migration workflow. |
+| `DELETE /accounts/{account_id}` | Owner retires an account from active lists; requires expected revision. Transactions, balances, and audit history remain. |
 | `PUT /accounts/{account_id}/access/{member_id}` | Grant/revoke account access; owner/admin policy and audit. |
 | `GET /accounts/{account_id}/statements?month=YYYY-MM` | Account/month opening/closing or amount owed, period movements, statement imports, coverage, unresolved count. Never synthesize a statement for cash or settle-up accounts. |
 | `GET /accounts/{account_id}/balance-at?as_of=RFC3339` | Recompute account balance at an exact instant from the latest dated starting balance or check. Returns the anchor source and timestamp. |

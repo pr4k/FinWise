@@ -1097,6 +1097,21 @@ pub(crate) async fn route(
         ("GET", [kind, id, "revisions"]) if ["transactions", "budgets"].contains(kind) => {
             ok(storage::history(db, p, kind, id).await?)
         }
+        ("DELETE", ["accounts", id]) => {
+            allowed_body(body, &[])?;
+            let before = storage::get(db, p, "accounts", id).await?;
+            revision(headers, body, &before)?;
+            if before["owner_id"] != p.user_id {
+                return Err(ApiError::forbidden());
+            }
+            if before["active"] == false {
+                return Err(ApiError::conflict("Account is already deleted."));
+            }
+            let mut after = before.clone();
+            after["active"] = json!(false);
+            storage::update(db, p, &before, after, "delete").await?;
+            no_content()
+        }
         ("POST", ["transactions", id, "void"]) | ("DELETE", ["transactions", id]) => {
             allowed_body(body, &["reason"])?;
             let before = storage::get(db, p, "transactions", id).await?;

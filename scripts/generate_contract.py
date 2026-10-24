@@ -120,6 +120,7 @@ for plural, name in [("accounts", "Account"), ("categories", "Category"), ("tran
     route(f"/{plural}", "post", name, name + "Input")
     route(f"/{plural}/{{id}}", "get", name)
     route(f"/{plural}/{{id}}", "patch", name, name + "Patch", revision=True)
+route("/accounts/{id}", "delete", revision=True)
 route("/planned-items", "get", "PlannedItemCollection", parameters=["month"])
 route("/planned-items", "post", "PlannedItem", "PlannedItemInput")
 route("/planned-items/{id}", "patch", "PlannedItem", "PlannedItemPatch", revision=True)

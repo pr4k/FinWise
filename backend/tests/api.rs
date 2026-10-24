@@ -11,6 +11,24 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn deleting_account_retires_it_and_preserves_transactions() {
+    let (owner, _) = setup().await;
+    let account = owner.account("Old cash", "cash").await;
+    let category = owner.category("Food", "expense").await;
+    let entry = owner.transaction("expense", "42.00", &account, &category, "personal").await;
+    let account_id = account["id"].as_str().unwrap();
+    let path = format!("accounts/{account_id}");
+    assert_eq!(owner.call("DELETE", &path, json!({}), None, Some(999)).await.0, StatusCode::CONFLICT);
+    assert_eq!(owner.call("DELETE", &path, json!({}), None, Some(1)).await.0, StatusCode::NO_CONTENT);
+    let listed = owner.call("GET", "accounts", json!({}), None, None).await.1;
+    assert!(!listed["data"].as_array().unwrap().iter().any(|a| a["id"] == account["id"]));
+    assert_eq!(owner.call("GET", &path, json!({}), None, None).await.1["active"], false);
+    assert_eq!(owner.call("GET", &format!("transactions/{}", entry["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::OK);
+    assert_eq!(owner.call("POST", "transactions", transaction("expense", "1.00", &account, &category, "personal"), None, None).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(owner.call("DELETE", &path, json!({}), None, Some(2)).await.0, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn expense_category_tracking_can_be_changed_without_rewriting_transactions() {
     let (owner, _) = setup().await;
     let account = owner.account("Cash", "cash").await;
