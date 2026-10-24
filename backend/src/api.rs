@@ -1524,7 +1524,7 @@ fn validate_account(v: &Value) -> Result<()> {
             }
         }
     }
-    domain::choice(v, "subtype", &["bank", "credit_card", "cash", "settle_up"])?;
+    domain::choice(v, "subtype", &["bank", "credit_card", "cash", "investment_cash", "settle_up"])?;
     domain::exponent(text(v, "currency")?)?;
     domain::choice(v, "visibility", &["private", "shared"])?;
     if v.get("active").is_some_and(|a| !a.is_boolean()) {
@@ -1814,7 +1814,7 @@ fn validate_transaction_query(q: &Query) -> Result<()> {
         ));
     }
     if let Some(account_type) = q.get("account_type")
-        && !["bank", "credit_card", "cash", "settle_up"].contains(&account_type.as_str())
+        && !["bank", "credit_card", "cash", "investment_cash", "settle_up"].contains(&account_type.as_str())
     {
         return Err(ApiError::invalid("Invalid account_type."));
     }

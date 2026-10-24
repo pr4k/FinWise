@@ -321,7 +321,7 @@ for path, method, request, revision, params in [
     ("/settle-ups/{id}/repayments/{payment_id}","delete",None,True,[]),
     ("/investments","get",None,False,["cursor","limit"]),
     ("/investments","post","InvestmentInput",False,[]),
-    ("/investments/{id}","get",None,False,[]),
+    ("/investments/{id}","get",None,False,["month"]),
     ("/investments/{id}","patch","InvestmentInput",True,[]),
     ("/investments/{id}","delete",None,True,[]),
     ("/investments/{id}/contributions","post","InvestmentContributionInput",True,[]),
@@ -358,6 +358,18 @@ for path, methods in deferred.items():
     for method in methods:
         if path not in paths or method not in paths[path]:
             route(path, method, implemented=False)
+
+# Investment module contracts live in a small, reviewable overlay while the
+# original generated v1 contract remains stable.
+investment_contract = json.loads((ROOT / "scripts/contract_overrides.json").read_text())
+schemas.update(investment_contract["schemas"])
+for path, methods in investment_contract["paths"].items():
+    for operation in methods.values():
+        parameters = operation.setdefault("parameters", [])
+        for segment in path.split("/"):
+            if segment.startswith("{") and not any(parameter.get("in") == "path" and parameter.get("name") == segment[1:-1] for parameter in parameters):
+                parameters.append({"name": segment[1:-1], "in": "path", "required": True, "schema": S})
+    paths[path] = methods
 
 document = {"openapi": "3.1.0", "info": {"title": "FinWise API", "version": "0.1.0", "description": "Core implementation. Check x-implemented for each operation. Deferred workflows return 501; unknown routes return 404."}, "servers": [{"url": "/api/v1"}], "paths": paths, "components": {"securitySchemes": {"session": {"type": "apiKey", "in": "cookie", "name": "finwise_session"}}, "schemas": schemas}}
 

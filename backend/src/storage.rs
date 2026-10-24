@@ -82,8 +82,25 @@ pub async fn visible(
             }
             Ok(true)
         },
-        "settlement_obligations" | "investments" => Ok(v["owner_id"] == p.user_id),
+        "settlement_obligations" => Ok(v["owner_id"] == p.user_id),
+        "investments" => Ok(v["owner_id"] == p.user_id || v["visibility"] == "shared"),
+        "investment_goals" => {
+            if v["owner_id"] != p.user_id && v["visibility"] != "shared" { return Ok(false); }
+            for allocation in v["allocations"].as_array().into_iter().flatten() {
+                let kind = if allocation["asset_kind"] == "holding" { "investments" } else { "accounts" };
+                let asset = raw(db, p, kind, text(allocation, "asset_id")?).await?;
+                if !visible_asset_for_goal(db, p, kind, &asset).await? { return Ok(false); }
+            }
+            Ok(true)
+        },
         _ => Ok(true),
+    }
+}
+async fn visible_asset_for_goal(db: &mut SqliteConnection, p: &Principal, kind: &str, asset: &Value) -> Result<bool> {
+    match kind {
+        "investments" => Ok(asset["owner_id"] == p.user_id || asset["visibility"] == "shared"),
+        "accounts" => account_visible(db, p, asset).await,
+        _ => Ok(false),
     }
 }
 async fn attach_sources(db: &mut SqliteConnection, p: &Principal, value: &mut Value) -> Result<()> {

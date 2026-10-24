@@ -107,6 +107,20 @@ button:disabled {transform:none!important;box-shadow:none!important}
 .recurring-tabs,.finance-tabs {border-color:#dfe9db;border-radius:10px;background:#eef4ea}
 .recurring-tabs button,.finance-tabs button {font-size:12px;font-weight:700}
 .recurring-tabs button.active,.finance-tabs button.active {background:#fff;color:#245b38;box-shadow:0 2px 8px #20422a13}
+.investment-tabs {display:flex;overflow-x:auto;gap:3px;margin:0 0 18px;white-space:nowrap}
+.investment-tabs button {flex:0 0 auto}
+.investment-scope-note {margin:0 0 14px}
+.investment-overview-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.42fr);gap:18px;margin:18px 0}
+.investment-overview-grid .finance-section {margin:0;min-width:0}
+.investment-overview-grid .finance-section h2 {margin-top:0}
+#investment-bulk-values-form .live-table input {min-width:110px;width:100%;box-sizing:border-box;padding:8px;border:1px solid #cfddcf;border-radius:8px}
+#investment-bulk-values-form .live-table select {min-width:125px;padding:8px;border:1px solid #cfddcf;border-radius:8px;background:#fff}
+#investment-bulk-values-form .live-table input[type=date] {min-width:145px}
+.investment-import-table {max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+.investment-import-table table {width:100%;min-width:650px;border-collapse:collapse;font-size:.88rem}
+.investment-import-table th,.investment-import-table td {padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+.investment-import-table th {background:#f4f7f2}
+@media(max-width:760px) {.investment-overview-grid {grid-template-columns:1fr}.investment-tabs {margin-inline:-12px;padding-inline:12px}}
 .analytics-tabs {border-color:#dde8dc}
 .analytics-tab {font-size:12px;font-weight:700;color:#57715b}
 .analytics-tab.active {color:#286b48;border-bottom-color:#3d8c57}

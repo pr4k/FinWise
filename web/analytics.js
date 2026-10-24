@@ -95,15 +95,17 @@
     return {rows,totals};
   }
   function planningSummary(investments,obligations,month,currency,scale=2) {
-    const holdings=investments.map(item=>{
+    const holdings=investments.filter(item=>!item.archived||month<item.archived_at?.slice(0,7)).map(item=>{
       const records=(item.records||[]).filter(record=>record.month<=month).sort((a,b)=>a.month.localeCompare(b.month));
       const opening=item.opening_value!=null&&item.opening_month<=month?{month:item.opening_month,value:item.opening_value,net_contributions:item.opening_value,gain_loss:'0'}:null;
       const valuedIndex=records.findLastIndex(record=>record.value!=null);
       const pending=records.slice(valuedIndex+1).some(record=>record.value==null&&(Number(record.contribution)>0||Number(record.withdrawal)>0));
-      const snapshot=pending?null:(valuedIndex>=0?records[valuedIndex]:opening);
+      const observed=valuedIndex>=0?records[valuedIndex]:opening;
+      const snapshot=pending&&observed?{...observed,gain_loss:null}:observed;
       return {...item,snapshot,monthRecord:records.find(record=>record.month===month)||null};
     });
-    const valued=holdings.filter(item=>item.currency===currency&&item.snapshot?.value!=null&&item.snapshot?.gain_loss!=null);
+    const valued=holdings.filter(item=>item.currency===currency&&item.snapshot?.value!=null);
+    const covered=valued.filter(item=>item.snapshot.gain_loss!=null);
     const selected=holdings.filter(item=>item.currency===currency&&item.monthRecord);
     const settlementRows=obligations.filter(item=>item.date.slice(0,7)<=month).map(item=>{
       const paid=sumMoney((item.repayments||[]).filter(payment=>payment.date.slice(0,7)<=month).map(payment=>payment.amount),new Intl.NumberFormat('en',{style:'currency',currency:item.currency}).resolvedOptions().maximumFractionDigits);
@@ -112,11 +114,11 @@
     return {
       holdings,settlementRows,
       value:sumMoney(valued.map(item=>item.snapshot.value),scale),
-      invested:sumMoney(valued.map(item=>item.snapshot.net_contributions),scale),
-      gain:sumMoney(valued.map(item=>item.snapshot.gain_loss),scale),
+      invested:sumMoney(covered.map(item=>item.snapshot.net_contributions),scale),
+      gain:sumMoney(covered.map(item=>item.snapshot.gain_loss),scale),
       added:sumMoney(selected.map(item=>item.monthRecord.contribution),scale),
       withdrawn:sumMoney(selected.map(item=>item.monthRecord.withdrawal),scale),
-      valuedCount:valued.length,holdingCount:holdings.filter(item=>item.currency===currency).length,
+      valuedCount:valued.length,gainCount:covered.length,holdingCount:holdings.filter(item=>item.currency===currency).length,
       owedToMe:sumMoney(settlementRows.filter(item=>item.currency===currency&&item.direction==='owed_to_me').map(item=>item.asOfRemaining),scale),
       iOwe:sumMoney(settlementRows.filter(item=>item.currency===currency&&item.direction==='i_owe').map(item=>item.asOfRemaining),scale)
     };

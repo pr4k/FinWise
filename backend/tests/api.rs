@@ -609,6 +609,323 @@ async fn investment_months_calculate_net_additions_and_value_change() {
 }
 
 #[tokio::test]
+async fn bulk_investment_values_are_dated_atomic_and_require_zero_confirmation() {
+    let (client, _) = setup().await;
+    let first = client.create("investments", json!({"name":"First","type":"investment","currency":"INR","opening_value":"100000.00","opening_month":"2026-09"})).await;
+    let second = client.create("investments", json!({"name":"Second","type":"investment","currency":"INR"})).await;
+    let first_id = first["id"].as_str().unwrap();
+    let second_id = second["id"].as_str().unwrap();
+    let invalid = client.call("POST", "investments/valuations/bulk", json!({"items":[
+        {"holding_id":first_id,"revision":1,"value":"114000.00","valuation_date":"2026-10-20"},
+        {"holding_id":second_id,"revision":1,"value":"0","valuation_date":"2026-10-20"}
+    ]}), Some("bulk-invalid"), None).await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST, "{}", invalid.1);
+    let unchanged = client.call("GET", &format!("investments/{first_id}"), json!({}), None, None).await.1;
+    assert_eq!(unchanged["revision"], 1);
+    let saved = client.call("POST", "investments/valuations/bulk", json!({"items":[
+        {"holding_id":first_id,"revision":1,"value":"114000.00","valuation_date":"2026-10-20","source":"manual"},
+        {"holding_id":second_id,"revision":1,"value":"0","valuation_date":"2026-10-20","confirm_zero":true}
+    ]}), Some("bulk-valid"), None).await;
+    assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+    assert_eq!(saved.1["data"][0]["current_value"], "114000.00");
+    assert_eq!(saved.1["data"][0]["records"][0]["valuation_date"], "2026-10-20");
+    assert_eq!(saved.1["data"][1]["current_value"], "0.00");
+    let future = client.call("POST", "investments/valuations/bulk", json!({"items":[{"holding_id":first_id,"revision":2,"value":"1.00","valuation_date":"2099-01-01"}]}), Some("bulk-future"), None).await;
+    assert_eq!(future.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn period_performance_requires_boundary_values_and_accounts_for_flows() {
+    let (client, _) = setup().await;
+    for (name, contribution, withdrawal, closing, expected) in [
+        ("Addition", "10000.00", "0.00", "114000.00", "4000.00"),
+        ("Withdrawal", "0.00", "20000.00", "85000.00", "5000.00"),
+    ] {
+        let holding = client.create("investments", json!({"name":name,"type":"investment","currency":"INR","opening_value":"100000.00","opening_month":"2026-09"})).await;
+        let key = holding["id"].as_str().unwrap();
+        let month = client.call("PUT", &format!("investments/{key}/months/2026-09"), json!({"contribution":contribution,"withdrawal":withdrawal,"value":null}), None, Some(1)).await;
+        assert_eq!(month.0, StatusCode::OK, "{}", month.1);
+        let valuation = client.call("POST", "investments/valuations/bulk", json!({"items":[{"holding_id":key,"revision":2,"value":closing,"valuation_date":"2026-09-30"}]}), Some(&format!("period-{name}")), None).await;
+        assert_eq!(valuation.0, StatusCode::OK, "{}", valuation.1);
+        assert_eq!(valuation.1["data"][0]["records"][0]["period_performance"], expected);
+    }
+    let incomplete = client.create("investments", json!({"name":"Incomplete","type":"investment","currency":"INR"})).await;
+    let key = incomplete["id"].as_str().unwrap();
+    let valuation = client.call("POST", "investments/valuations/bulk", json!({"items":[{"holding_id":key,"revision":1,"value":"900.00","valuation_date":"2026-09-30"}]}), Some("period-incomplete"), None).await;
+    assert_eq!(valuation.1["data"][0]["records"][0]["period_performance"], Value::Null);
+}
+
+#[tokio::test]
+async fn full_history_fifo_separates_realized_and_unrealized_result() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments",json!({"name":"Shares","type":"investment","asset_class":"stock_market","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let bought = client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-09-01","amount":"100000.00","units":"100","source_id":"trade-1"}),Some("fifo-buy"),Some(1)).await;
+    assert_eq!(bought.0,StatusCode::CREATED,"{}",bought.1);
+    let duplicate = client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-09-01","amount":"100000.00","units":"100","source_id":"trade-1"}),Some("fifo-duplicate"),Some(2)).await;
+    assert_eq!(duplicate.0,StatusCode::CONFLICT);
+    let sold = client.call("POST",&format!("investments/{key}/events"),json!({"type":"sale","trade_date":"2026-09-15","amount":"60000.00","units":"50"}),Some("fifo-sell"),Some(2)).await;
+    assert_eq!(sold.0,StatusCode::CREATED,"{}",sold.1);
+    assert_eq!(sold.1["remaining_cost_basis"],"50000.00");
+    assert_eq!(sold.1["realized_gain_loss"],"10000.00");
+    assert_eq!(sold.1["remaining_units"],"50.00000000");
+    let valued = client.call("POST","investments/valuations/bulk",json!({"items":[{"holding_id":key,"revision":3,"value":"55000.00","valuation_date":"2026-09-30"}]}),Some("fifo-value"),None).await;
+    assert_eq!(valued.0,StatusCode::OK,"{}",valued.1);
+    assert_eq!(valued.1["data"][0]["unrealized_gain_loss"],"5000.00");
+    assert_eq!(valued.1["data"][0]["gain_loss"],"15000.00");
+}
+
+#[tokio::test]
+async fn investment_csv_preview_commits_selected_rows_once_and_reviews_conflicts() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments",json!({"name":"Imported fund","type":"investment","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let path = format!("investments/{key}/events");
+    let source = "type,trade_date,amount,units,charges,source_id,note\npurchase,2026-09-01,1000.00,10,0,ref-1,First\npurchase,2026-09-02,500.00,5,0,ref-2,Second\n";
+    let payload = json!({"source":"Broker A","csv":source});
+    let preview = client.call("POST",&format!("{path}/import-preview"),payload.clone(),Some("csv-preview"),None).await;
+    assert_eq!(preview.0,StatusCode::OK,"{}",preview.1);
+    assert_eq!(preview.1["ready"],2);
+    let mut commit = payload.clone();
+    commit["preview_hash"] = preview.1["preview_hash"].clone();
+    commit["selected_rows"] = json!([0,1]);
+    let imported = client.call("POST",&format!("{path}/import-commit"),commit,Some("csv-commit"),Some(1)).await;
+    assert_eq!(imported.0,StatusCode::OK,"{}",imported.1);
+    assert_eq!(imported.1["imported"],2);
+    assert_eq!(imported.1["holding"]["remaining_units"],"15.00000000");
+    let repeated = client.call("POST",&format!("{path}/import-preview"),payload.clone(),Some("csv-repeat"),None).await;
+    assert_eq!(repeated.1["rows"][0]["status"],"existing");
+    assert_eq!(repeated.1["rows"][1]["status"],"existing");
+    let changed = client.call("POST",&format!("{path}/import-preview"),json!({"source":"Broker A","csv":source.replace("1000.00","1100.00")}),Some("csv-changed"),None).await;
+    assert_eq!(changed.1["rows"][0]["status"],"changed_source");
+    let ambiguous = client.call("POST",&format!("{path}/import-preview"),json!({"source":"Broker A","csv":"type,trade_date,amount,units\npurchase,2026-09-03,100.00,1\npurchase,2026-09-03,100.00,1\n"}),Some("csv-ambiguous"),None).await;
+    assert_eq!(ambiguous.1["rows"][0]["status"],"needs_reference");
+    assert_eq!(ambiguous.1["rows"][1]["status"],"needs_reference");
+    let another = json!({"source":"Broker A","csv":"type,trade_date,amount,units,source_id\npurchase,2026-09-01,1000.00,10,ref-3\n"});
+    let duplicate_preview = client.call("POST",&format!("{path}/import-preview"),another.clone(),Some("csv-possible-duplicate"),None).await;
+    assert_eq!(duplicate_preview.1["rows"][0]["status"],"possible_duplicate");
+    let mut duplicate_commit = another.clone();
+    duplicate_commit["preview_hash"] = duplicate_preview.1["preview_hash"].clone();
+    duplicate_commit["selected_rows"] = json!([0]);
+    let blocked = client.call("POST",&format!("{path}/import-commit"),duplicate_commit.clone(),Some("csv-duplicate-blocked"),Some(2)).await;
+    assert_eq!(blocked.0,StatusCode::CONFLICT);
+    duplicate_commit["confirmed_duplicate_rows"] = json!([0]);
+    let confirmed = client.call("POST",&format!("{path}/import-commit"),duplicate_commit,Some("csv-duplicate-confirmed"),Some(2)).await;
+    assert_eq!(confirmed.0,StatusCode::OK,"{}",confirmed.1);
+    assert_eq!(confirmed.1["holding"]["remaining_units"],"25.00000000");
+    let invalid_sale = json!({"source":"Broker A","csv":"type,trade_date,amount,units,source_id\nsale,2026-09-04,200.00,2,sale-ok\nsale,2026-09-05,5000.00,50,sale-too-many\n"});
+    let sale_preview = client.call("POST",&format!("{path}/import-preview"),invalid_sale.clone(),Some("csv-sale-preview"),None).await;
+    assert_eq!(sale_preview.1["ready"],2);
+    let mut sale_commit = invalid_sale;
+    sale_commit["preview_hash"] = sale_preview.1["preview_hash"].clone();
+    sale_commit["selected_rows"] = json!([0,1]);
+    let rejected = client.call("POST",&format!("{path}/import-commit"),sale_commit,Some("csv-sale-rejected"),Some(3)).await;
+    assert_eq!(rejected.0,StatusCode::BAD_REQUEST);
+    let unchanged = client.call("GET",&format!("investments/{key}"),json!({}),None,None).await;
+    assert_eq!(unchanged.1["remaining_units"],"25.00000000");
+    assert_eq!(unchanged.1["events"].as_array().unwrap().len(),3);
+    let old_commit = client.call("POST",&format!("{path}/import-commit"),json!({"source":"Broker A","csv":source,"preview_hash":preview.1["preview_hash"],"selected_rows":[0],"revision":1}),Some("csv-stale"),Some(2)).await;
+    assert_eq!(old_commit.0,StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn full_history_xirr_requires_complete_dated_flows_and_current_value() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments",json!({"name":"Annual fund","type":"investment","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let purchase = client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2025-10-01","amount":"1000.00","units":"10"}),Some("xirr-buy"),Some(1)).await;
+    assert_eq!(purchase.0,StatusCode::CREATED,"{}",purchase.1);
+    assert_eq!(purchase.1["xirr_percent"],Value::Null);
+    let valued = client.call("POST","investments/valuations/bulk",json!({"items":[{"holding_id":key,"revision":2,"value":"1100.00","valuation_date":"2026-10-01"}]}),Some("xirr-value"),None).await;
+    assert_eq!(valued.0,StatusCode::OK,"{}",valued.1);
+    assert_eq!(valued.1["data"][0]["xirr_percent"],"10.00");
+    assert_eq!(valued.1["data"][0]["xirr_as_of"],"2026-10-01");
+    let newer = client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-10-02","amount":"100.00","units":"1"}),Some("xirr-newer"),Some(3)).await;
+    assert_eq!(newer.0,StatusCode::CREATED,"{}",newer.1);
+    assert_eq!(newer.1["xirr_percent"],Value::Null);
+    assert_eq!(newer.1["xirr_reason"],"valuation_predates_activity");
+}
+
+#[tokio::test]
+async fn historical_holding_detail_excludes_future_trades_and_fifo_results() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments",json!({"name":"Historical fund","type":"investment","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-09-01","amount":"1000.00","units":"10"}),Some("history-buy"),Some(1)).await;
+    client.call("POST","investments/valuations/bulk",json!({"items":[{"holding_id":key,"revision":2,"value":"1200.00","valuation_date":"2026-09-30"}]}),Some("history-value"),None).await;
+    let sale = client.call("POST",&format!("investments/{key}/events"),json!({"type":"sale","trade_date":"2026-10-01","amount":"600.00","units":"5"}),Some("history-sale"),Some(3)).await;
+    assert_eq!(sale.0,StatusCode::CREATED,"{}",sale.1);
+    assert_eq!(sale.1["remaining_units"],"5.00000000");
+    let september = client.call("GET",&format!("investments/{key}?month=2026-09"),json!({}),None,None).await;
+    assert_eq!(september.0,StatusCode::OK,"{}",september.1);
+    assert_eq!(september.1["events"].as_array().unwrap().len(),1);
+    assert_eq!(september.1["remaining_units"],"10.00000000");
+    assert_eq!(september.1["remaining_cost_basis"],"1000.00");
+    assert_eq!(september.1["current_value"],"1200.00");
+    assert_eq!(september.1["unrealized_gain_loss"],"200.00");
+    assert_eq!(september.1["realized_gain_loss"],"0.00");
+    assert_eq!(client.call("GET",&format!("investments/{key}?month=2026-99"),json!({}),None,None).await.0,StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unit_price_valuation_uses_units_on_observation_date_and_exact_rounding() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments",json!({"name":"Unit fund","type":"investment","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-09-01","amount":"100.00","units":"1.25"}),Some("price-first"),Some(1)).await;
+    client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-10-01","amount":"100.00","units":"1"}),Some("price-later"),Some(2)).await;
+    let price = client.call("POST","investments/valuations/bulk",json!({"items":[{"holding_id":key,"revision":3,"price":"1000.12345678","valuation_date":"2026-09-30"}]}),Some("price-value"),None).await;
+    assert_eq!(price.0,StatusCode::OK,"{}",price.1);
+    let september = price.1["data"][0]["records"].as_array().unwrap().iter().find(|record| record["month"]=="2026-09").unwrap();
+    assert_eq!(september["value"],"1250.15");
+    assert_eq!(september["unit_price"],"1000.12345678");
+    assert_eq!(september["valuation_mode"],"unit_price");
+    let zero = client.call("POST","investments/valuations/bulk",json!({"items":[{"holding_id":key,"revision":4,"price":"0","valuation_date":"2026-10-02"}]}),Some("price-zero"),None).await;
+    assert_eq!(zero.0,StatusCode::BAD_REQUEST);
+    let confirmed = client.call("POST","investments/valuations/bulk",json!({"items":[{"holding_id":key,"revision":4,"price":"0","valuation_date":"2026-10-02","confirm_zero":true}]}),Some("price-zero-confirmed"),None).await;
+    assert_eq!(confirmed.0,StatusCode::OK,"{}",confirmed.1);
+    assert_eq!(confirmed.1["data"][0]["current_value"],"0.00");
+}
+
+#[tokio::test]
+async fn full_history_evidence_links_without_a_second_trade_or_debit() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank","bank").await;
+    let category = client.create("categories",json!({"name":"Investments","kind":"expense","tracking_type":"investment"})).await;
+    let debit = client.transaction("expense","1000.00",&bank,&category,"personal").await;
+    let holding = client.create("investments",json!({"name":"Fund","type":"investment","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let purchase = client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-09-15","amount":"1000.00","units":"10"}),Some("event-purchase"),Some(1)).await;
+    assert_eq!(purchase.0,StatusCode::CREATED,"{}",purchase.1);
+    let event_id = purchase.1["events"][0]["id"].as_str().unwrap();
+    let linked = client.call("POST",&format!("investments/{key}/events/{event_id}/evidence"),json!({"transaction_id":debit["id"],"amount":"1000.00"}),Some("event-evidence"),Some(2)).await;
+    assert_eq!(linked.0,StatusCode::OK,"{}",linked.1);
+    assert_eq!(linked.1["remaining_units"],"10.00000000");
+    assert_eq!(linked.1["events"].as_array().unwrap().len(),1);
+    let report = client.call("GET","investments/report?month=2026-09&currency=INR&scope=personal",json!({}),None,None).await;
+    assert_eq!(report.1["contributed"],"1000.00");
+    assert_eq!(client.call("GET","transactions?event_type=investment",json!({}),None,None).await.1["data"].as_array().unwrap().len(),0);
+    let blocked = client.call("POST",&format!("investments/{key}/events/{event_id}/reverse"),json!({"reason":"Correction"}),Some("event-blocked-reversal"),Some(3)).await;
+    assert_eq!(blocked.0,StatusCode::CONFLICT);
+    let unlinked = client.call("DELETE",&format!("investments/{key}/events/{event_id}/evidence/{}",debit["id"].as_str().unwrap()),json!({}),None,Some(3)).await;
+    assert_eq!(unlinked.0,StatusCode::OK,"{}",unlinked.1);
+    assert_eq!(unlinked.1["remaining_units"],"10.00000000");
+    let reversed = client.call("POST",&format!("investments/{key}/events/{event_id}/reverse"),json!({"reason":"Duplicate trade"}),Some("event-reversal"),Some(4)).await;
+    assert_eq!(reversed.0,StatusCode::OK,"{}",reversed.1);
+    assert_eq!(reversed.1["remaining_units"],"0.00000000");
+}
+
+#[tokio::test]
+async fn full_history_broker_cash_purchase_is_internal_after_external_funding() {
+    let (client, _) = setup().await;
+    let bank = client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"20000.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
+    let wallet = client.create("accounts",json!({"name":"Broker cash","subtype":"investment_cash","currency":"INR","opening_balance":{"amount":"0.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
+    client.create("transactions",json!({"event_type":"transfer","amount":"20000.00","currency":"INR","effective_date":"2026-10-05","description":"Fund broker","movements":[{"account_id":bank["id"],"amount":"-20000.00"},{"account_id":wallet["id"],"amount":"20000.00"}],"allocations":[]})).await;
+    let holding = client.create("investments",json!({"name":"Stock","type":"investment","asset_class":"stock_market","tracking_mode":"full_history","currency":"INR"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let bought = client.call("POST",&format!("investments/{key}/events"),json!({"type":"purchase","trade_date":"2026-10-10","amount":"12000.00","units":"10","account_id":wallet["id"]}),Some("broker-event"),Some(1)).await;
+    assert_eq!(bought.0,StatusCode::CREATED,"{}",bought.1);
+    assert!(bought.1["events"][0]["transaction_id"].is_string());
+    let report = client.call("GET","investments/report?month=2026-10&currency=INR",json!({}),None,None).await;
+    assert_eq!(report.1["contributed"],"20000.00");
+    assert_eq!(report.1["cash_total"],"8000.00");
+    let reversed = client.call("POST",&format!("investments/{key}/events/{}/reverse",bought.1["events"][0]["id"].as_str().unwrap()),json!({"reason":"Trade cancelled"}),Some("reverse-broker-event"),Some(2)).await;
+    assert_eq!(reversed.0,StatusCode::OK,"{}",reversed.1);
+    let restored = client.call("GET","investments/report?month=2026-10&currency=INR",json!({}),None,None).await;
+    assert_eq!(restored.1["cash_total"],"20000.00");
+}
+
+#[tokio::test]
+async fn archived_holding_keeps_history_and_blocks_new_activity() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments", json!({"name":"Old fund","type":"investment","currency":"INR","opening_value":"100.00","opening_month":"2026-09"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let archived = client.call("POST", &format!("investments/{key}/archive"), json!({}), Some("archive-fund"), Some(1)).await;
+    assert_eq!(archived.0, StatusCode::OK, "{}", archived.1);
+    assert_eq!(archived.1["archived"], true);
+    assert_eq!(archived.1["current_value"], "100.00");
+    let detail = client.call("GET", &format!("investments/{key}"), json!({}), None, None).await;
+    assert_eq!(detail.0, StatusCode::OK);
+    let attempted = client.call("PUT", &format!("investments/{key}/months/2026-10"), json!({"contribution":"0","withdrawal":"0","value":"110.00"}), None, Some(2)).await;
+    assert_eq!(attempted.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn holding_with_history_must_be_archived_instead_of_deleted() {
+    let (client, _) = setup().await;
+    let holding = client.create("investments", json!({"name":"Tracked fund","type":"investment","currency":"INR","opening_value":"100.00","opening_month":"2026-09"})).await;
+    let key = holding["id"].as_str().unwrap();
+    let deleted = client.call("DELETE", &format!("investments/{key}"), json!({}), None, Some(1)).await;
+    assert_eq!(deleted.0, StatusCode::CONFLICT, "{}", deleted.1);
+    let archived = client.call("POST", &format!("investments/{key}/archive"), json!({}), Some("archive-tracked"), Some(1)).await;
+    assert_eq!(archived.0, StatusCode::OK, "{}", archived.1);
+    assert_eq!(archived.1["opening_value"], "100.00");
+}
+
+#[tokio::test]
+async fn shared_holding_keeps_dated_economic_ownership_and_private_holdings_hidden() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let own_id = owner.call("GET", "me", json!({}), None, None).await.1["user"]["id"].as_str().unwrap().to_owned();
+    let member_id = member.call("GET", "me", json!({}), None, None).await.1["user"]["id"].as_str().unwrap().to_owned();
+    let private = owner.create("investments", json!({"name":"Hidden","type":"investment","currency":"INR"})).await;
+    let shared = owner.create("investments", json!({"name":"Joint","type":"investment","currency":"INR","visibility":"shared","ownership":[{"user_id":own_id,"percent":"60.00"},{"user_id":member_id,"percent":"40.00"}]})).await;
+    let list = member.call("GET", "investments", json!({}), None, None).await.1;
+    assert_eq!(list["data"].as_array().unwrap().len(), 1);
+    assert_eq!(list["data"][0]["id"], shared["id"]);
+    assert_eq!(member.call("GET", &format!("investments/{}", private["id"].as_str().unwrap()), json!({}), None, None).await.0, StatusCode::NOT_FOUND);
+    let path = format!("investments/{}/ownership-changes", shared["id"].as_str().unwrap());
+    let changed = owner.call("POST", &path, json!({"effective_date":"2026-10-15","shares":[{"user_id":own_id,"percent":"20.00"},{"user_id":member_id,"percent":"80.00"}]}), Some("change-joint-shares"), Some(1)).await;
+    assert_eq!(changed.0, StatusCode::OK, "{}", changed.1);
+    assert_eq!(changed.1["ownership_history"][0]["shares"][0]["percent"], "60.00");
+    assert_eq!(changed.1["ownership_history"][1]["shares"][0]["percent"], "20.00");
+    let bank = owner.create("accounts", json!({"name":"Shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let posted = owner.call("POST", &format!("investments/{}/contributions", shared["id"].as_str().unwrap()), json!({"amount":"10000.00","account_id":bank["id"],"transaction_date":"2026-10-10"}), Some("joint-contribution"), Some(2)).await;
+    assert_eq!(posted.0, StatusCode::OK, "{}", posted.1);
+    let owner_report = owner.call("GET", "investments/report?month=2026-10&currency=INR&scope=personal", json!({}), None, None).await;
+    let member_report = member.call("GET", "investments/report?month=2026-10&currency=INR&scope=personal", json!({}), None, None).await;
+    assert_eq!(owner_report.1["contributed"], "10000.00");
+    assert_eq!(member_report.1["contributed"], "0.00");
+    assert_eq!(owner_report.1["attributed_contributed"], "6000.00");
+    assert_eq!(member_report.1["attributed_contributed"], "4000.00");
+    assert_eq!(member.call("POST", &path, json!({"effective_date":"2026-11-01","shares":[{"user_id":own_id,"percent":"100.00"}]}), Some("member-change-shares"), Some(2)).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn broker_cash_transfer_and_purchase_count_external_funding_once() {
+    let (client, _) = setup().await;
+    let bank = client.create("accounts", json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"20000.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
+    let wallet = client.create("accounts", json!({"name":"Broker cash","subtype":"investment_cash","currency":"INR","opening_balance":{"amount":"0.00","as_of":"2026-10-01T00:00:00+05:30"}})).await;
+    let transfer = client.create("transactions", json!({"event_type":"transfer","amount":"20000.00","currency":"INR","effective_date":"2026-10-05","description":"Fund broker","movements":[{"account_id":bank["id"],"amount":"-20000.00"},{"account_id":wallet["id"],"amount":"20000.00"}],"allocations":[]})).await;
+    assert_eq!(transfer["event_type"], "transfer");
+    let holding = client.create("investments", json!({"name":"Stock","type":"investment","asset_class":"stock_market","currency":"INR"})).await;
+    let bought = client.call("POST", &format!("investments/{}/contributions",holding["id"].as_str().unwrap()), json!({"amount":"12000.00","account_id":wallet["id"],"transaction_date":"2026-10-10","value":"12000.00"}), Some("broker-purchase"), Some(1)).await;
+    assert_eq!(bought.0, StatusCode::OK, "{}", bought.1);
+    let report = client.call("GET", "investments/report?month=2026-10&currency=INR", json!({}), None, None).await;
+    assert_eq!(report.0, StatusCode::OK, "{}", report.1);
+    assert_eq!(report.1["contributed"], "20000.00");
+    assert_eq!(report.1["cash_total"], "8000.00");
+    assert_eq!(report.1["cash_coverage"], 1);
+    assert_eq!(bought.1["current_value"], "12000.00");
+}
+
+#[tokio::test]
+async fn emergency_goal_reserves_existing_asset_once_and_caps_other_goals() {
+    let (client, _) = setup().await;
+    let savings = client.create("accounts", json!({"name":"Savings","subtype":"bank","currency":"INR","opening_balance":{"amount":"1000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let asset = json!({"asset_kind":"account","asset_id":savings["id"],"mode":"fixed","amount":"600.00","readily_accessible":true});
+    let emergency = client.create("investments/goals", json!({"name":"Emergency","kind":"emergency","currency":"INR","target_amount":"6000.00","target_months":6,"essential_monthly":"1000.00","allocations":[asset]})).await;
+    assert_eq!(emergency["allocated_value"], "600.00");
+    assert_eq!(emergency["months_covered"], "0.60");
+    let over = client.call("POST", "investments/goals", json!({"name":"Holiday","kind":"general","currency":"INR","target_amount":"500.00","allocations":[{"asset_kind":"account","asset_id":savings["id"],"mode":"fixed","amount":"500.00","readily_accessible":false}]}), Some("goal-over"), None).await;
+    assert_eq!(over.0, StatusCode::CONFLICT, "{}", over.1);
+    let second = client.create("investments/goals", json!({"name":"Holiday","kind":"general","currency":"INR","target_amount":"400.00","allocations":[{"asset_kind":"account","asset_id":savings["id"],"mode":"fixed","amount":"400.00","readily_accessible":false}]})).await;
+    assert_eq!(second["allocated_value"], "400.00");
+    let balance = client.call("GET", &format!("accounts/{}",savings["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(balance["balance"]["amount"], "1000.00");
+}
+
+#[tokio::test]
 async fn investment_sip_schedule_is_validated_and_does_not_record_contributions() {
     let (client, _) = setup().await;
     let created = client.create("investments", json!({"name":"Index fund","type":"investment","currency":"INR","sip":{"amount":"1500.00","day":31,"start_month":"2026-10","status":"active"}})).await;
@@ -627,6 +944,56 @@ async fn investment_sip_schedule_is_validated_and_does_not_record_contributions(
     assert_eq!(removed.1["sip"], Value::Null);
     let fund = client.call("POST", "investments", json!({"name":"Reserve","type":"emergency_fund","currency":"INR","sip":{"amount":"100.00","day":1,"start_month":"2026-10","status":"active"}}), Some("sip-fund-invalid"), None).await;
     assert_eq!(fund.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn sip_changes_keep_prior_month_schedule() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank","bank").await;
+    let holding = client.create("investments",json!({"name":"Fund","type":"investment","currency":"INR","sip":{"amount":"500.00","day":15,"start_month":"2026-09","status":"active"}})).await;
+    let key = holding["id"].as_str().unwrap();
+    let changed = client.call("PATCH",&format!("investments/{key}"),json!({"sip":{"amount":"700.00","day":20,"start_month":"2026-09","status":"active"},"sip_effective_month":"2026-10"}),None,Some(1)).await;
+    assert_eq!(changed.0,StatusCode::OK,"{}",changed.1);
+    assert_eq!(changed.1["sip_history"].as_array().unwrap().len(),2);
+    let september = client.call("POST",&format!("investments/{key}/sip/2026-09/process"),json!({"account_id":bank["id"],"transaction_date":"2026-09-15"}),Some("old-sip"),Some(2)).await;
+    assert_eq!(september.0,StatusCode::OK,"{}",september.1);
+    assert_eq!(september.1["records"][0]["contribution"],"500.00");
+    let october = client.call("POST",&format!("investments/{key}/sip/2026-10/process"),json!({"account_id":bank["id"],"transaction_date":"2026-10-20"}),Some("new-sip"),Some(3)).await;
+    assert_eq!(october.0,StatusCode::OK,"{}",october.1);
+    assert_eq!(october.1["records"][1]["contribution"],"700.00");
+}
+
+#[tokio::test]
+async fn sip_payment_match_waits_for_allotment_without_posting_activity() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let category = client.create("categories",json!({"name":"Investment","kind":"expense","tracking_type":"investment"})).await;
+    let debit = client.transaction("expense","500.00",&bank,&category,"personal").await;
+    let holding = client.create("investments",json!({"name":"Fund","type":"investment","currency":"INR","sip":{"amount":"500.00","day":15,"start_month":"2026-09","status":"active"}})).await;
+    let key = holding["id"].as_str().unwrap();
+    let matched = client.call("POST",&format!("investments/{key}/sip/2026-09/status"),json!({"status":"payment_found","transaction_id":debit["id"]}),Some("sip-found"),Some(1)).await;
+    assert_eq!(matched.0,StatusCode::OK,"{}",matched.1);
+    assert_eq!(matched.1["sip_occurrences"][0]["status"],"payment_found");
+    assert_eq!(matched.1["net_contributions"],"0.00");
+    assert_eq!(matched.1["current_value"],Value::Null);
+    assert_eq!(matched.1["records"].as_array().unwrap().len(),0);
+    let other = client.create("investments",json!({"name":"Other fund","type":"investment","currency":"INR","sip":{"amount":"500.00","day":15,"start_month":"2026-09","status":"active"}})).await;
+    let duplicate = client.call("POST",&format!("investments/{}/sip/2026-09/status",other["id"].as_str().unwrap()),json!({"status":"payment_found","transaction_id":debit["id"]}),Some("sip-duplicate-match"),Some(1)).await;
+    assert_eq!(duplicate.0,StatusCode::CONFLICT,"{}",duplicate.1);
+    let blocked = client.call("DELETE",&format!("transactions/{}",debit["id"].as_str().unwrap()),json!({"reason":"Remove"}),None,Some(1)).await;
+    assert_eq!(blocked.0,StatusCode::CONFLICT,"{}",blocked.1);
+    let skipped = client.call("POST",&format!("investments/{key}/sip/2026-09/status"),json!({"status":"skipped"}),Some("sip-skipped"),Some(2)).await;
+    assert_eq!(skipped.0,StatusCode::OK,"{}",skipped.1);
+    assert_eq!(skipped.1["sip_occurrences"][0]["transaction_id"],Value::Null);
+    let restored = client.call("POST",&format!("investments/{key}/sip/2026-09/status"),json!({"status":"payment_found","transaction_id":debit["id"]}),Some("sip-restored"),Some(3)).await;
+    assert_eq!(restored.0,StatusCode::OK,"{}",restored.1);
+    let invested = client.call("POST",&format!("investments/{key}/sip/2026-09/process"),json!({"account_id":bank["id"],"transaction_date":"2026-09-15"}),Some("sip-allotted"),Some(4)).await;
+    assert_eq!(invested.0,StatusCode::OK,"{}",invested.1);
+    assert_eq!(invested.1["records"][0]["contribution"],"500.00");
+    assert_eq!(invested.1["records"][0]["linked_transaction_ids"][0],debit["id"]);
+    assert_eq!(invested.1["current_value"],Value::Null);
+    let duplicate_debits = client.call("GET","transactions?event_type=investment",json!({}),None,None).await;
+    assert!(duplicate_debits.1["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -732,6 +1099,30 @@ async fn investment_refund_links_as_withdrawal_without_changing_current_value() 
 }
 
 #[tokio::test]
+async fn one_bank_debit_can_be_split_between_holdings_without_overallocation() {
+    let (client, _) = setup().await;
+    let bank = client.account("Bank", "bank").await;
+    let category = client.create("categories", json!({"name":"Investment","kind":"expense","tracking_type":"investment"})).await;
+    let debit = client.create("transactions", transaction("expense", "15000.00", &bank, &category, "personal")).await;
+    let a = client.create("investments", json!({"name":"Fund A","type":"investment","currency":"INR"})).await;
+    let b = client.create("investments", json!({"name":"Fund B","type":"investment","currency":"INR"})).await;
+    let a_path = format!("investments/{}/linked-transactions", a["id"].as_str().unwrap());
+    let b_path = format!("investments/{}/linked-transactions", b["id"].as_str().unwrap());
+    let first = client.call("POST", &a_path, json!({"transaction_id":debit["id"],"amount":"5000.00"}), Some("split-a"), Some(1)).await;
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    let too_much = client.call("POST", &b_path, json!({"transaction_id":debit["id"],"amount":"10001.00"}), Some("split-over"), Some(1)).await;
+    assert_eq!(too_much.0, StatusCode::CONFLICT);
+    let second = client.call("POST", &b_path, json!({"transaction_id":debit["id"],"amount":"10000.00"}), Some("split-b"), Some(1)).await;
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1["net_contributions"], "5000.00");
+    assert_eq!(second.1["net_contributions"], "10000.00");
+    assert_eq!(second.1["records"][0]["linked_allocations"][0]["amount"], "10000.00");
+    let unlinked = client.call("DELETE", &a_path.replace("linked-transactions", &format!("linked-transactions/{}", debit["id"].as_str().unwrap())), json!({}), None, Some(2)).await;
+    assert_eq!(unlinked.0, StatusCode::OK, "{}", unlinked.1);
+    assert_eq!(unlinked.1["net_contributions"], "0.00");
+}
+
+#[tokio::test]
 async fn investment_shortcut_adds_separate_contributions_and_stock_holdings() {
     let (client, _) = setup().await;
     let bank=client.create("accounts",json!({"name":"Bank","subtype":"bank","currency":"INR","opening_balance":{"amount":"200.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
@@ -825,7 +1216,8 @@ async fn existing_valuation_can_gain_an_opening_baseline_without_an_account_debi
     let holding = client.create("investments", json!({"name":"Old portfolio","type":"investment","currency":"INR"})).await;
     let id = holding["id"].as_str().unwrap();
     let valued = client.call("PUT", &format!("investments/{id}/months/2026-10"), json!({"contribution":"0","withdrawal":"0","value":"750.00"}), None, Some(1)).await;
-    assert_eq!(valued.1["gain_loss"], "750.00");
+    assert_eq!(valued.1["gain_loss"], Value::Null);
+    assert_eq!(valued.1["performance_coverage"], "unknown_starting_basis");
     let fixed = client.call("PATCH", &format!("investments/{id}"), json!({"opening_value":"750.00","opening_month":"2026-10"}), None, Some(valued.1["revision"].as_i64().unwrap())).await;
     assert_eq!(fixed.0, StatusCode::OK, "{}", fixed.1);
     assert_eq!(fixed.1["gain_loss"], "0.00");
@@ -981,24 +1373,12 @@ async fn investment_month_and_holding_deletion_recalculate_and_hide() {
             Some(4),
         )
         .await;
-    assert_eq!(deleted.0, StatusCode::NO_CONTENT);
-    assert!(
-        client
-            .call("GET", "investments", json!({}), None, None)
-            .await
-            .1["data"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(
-        client
-            .call("GET", &format!("investments/{key}"), json!({}), None, None)
-            .await
-            .0,
-        StatusCode::NOT_FOUND
-    );
-    let audit_count:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id=? AND action IN ('monthly_valuation_removed','delete')").bind(key).fetch_one(&pool).await.unwrap();
+    assert_eq!(deleted.0, StatusCode::CONFLICT);
+    let archived = client.call("POST", &format!("investments/{key}/archive"), json!({}), Some("archive-after-month-delete"), Some(4)).await;
+    assert_eq!(archived.0, StatusCode::OK, "{}", archived.1);
+    assert_eq!(archived.1["archived"], true);
+    assert_eq!(archived.1["records"].as_array().unwrap().len(), 1);
+    let audit_count:i64=sqlx::query_scalar("SELECT count(*) FROM audit_events WHERE resource_id=? AND action IN ('monthly_valuation_removed','investment_archived')").bind(key).fetch_one(&pool).await.unwrap();
     assert_eq!(audit_count, 2);
 }
 

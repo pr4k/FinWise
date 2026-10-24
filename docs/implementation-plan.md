@@ -4,7 +4,7 @@ Implementation update: a runnable Rust core now exists; see [backend coverage](.
 
 Status: responsive front-end preview and several backend slices are implemented; the milestones below remain the target release plan. SQLite is confirmed for v1. Read with [architecture.md](architecture.md) and the [analytics and budget module specification](analytics-and-budgets.md).
 
-## Progress tracker (2026-09-30)
+## Progress tracker (2026-10-24)
 
 This tracker marks delivered code, not milestone acceptance. A milestone is **partial** until its UI, real-file/device validation, and release checks pass. See [backend/README.md](../backend/README.md) for route-level coverage and limitations.
 
@@ -29,6 +29,32 @@ This tracker marks delivered code, not milestone acceptance. A milestone is **pa
 | M5 — reconciliation | Partial | Deterministic matching, corrections/duplicate merges, closure snapshots and dated balance checks exist; review UI, provider closing-balance verification, broader formats and real-file validation remain. |
 | M6 — PDF and AI | Not started | PDF/OCR adapters, optional AI providers, secret handling and evaluation. |
 | M7 — NAS release | Partial | Docker/Compose baseline exists; image/runtime validation, backup/restore, export, benchmarks and NAS release validation remain. |
+| Investment module — [product spec](FinWise_Investment_Module_Product_Spec.md) | Partial | Finish the task list below and validate all 18 investment acceptance criteria. This is an added module beyond the original v1 milestone sequence. |
+
+### Investment module task tracker (2026-10-24)
+
+These entries describe the current working tree, including uncommitted changes. A checked item means that a usable implementation exists; it does not mean the entire investment milestone has passed acceptance. The [product spec](FinWise_Investment_Module_Product_Spec.md) is the source for behavior and acceptance criteria.
+
+- [x] Add the six Investments tabs and flows for holdings, activity, SIPs, goals, valuation updates, and review.
+- [x] Add private/shared holding visibility, economic ownership shares and history, asset classes, instrument metadata, archive behavior, and investment cash account subtype.
+- [x] Support baseline and full-history holding modes, dated manual valuations including confirmed zero values, purchase/sale/distribution/fee events, unit quantities, FIFO basis, and auditable event reversals.
+- [x] Link ledger transactions to investment activity with partial and split funding amounts, evidence references, and separate payer versus owner reporting. Support the basic broker cash path.
+- [x] Add SIP occurrence states, payment matching, pending allotment, and effective-dated schedule changes for a single plan per holding.
+- [x] Add emergency/general goals with allocations to eligible holdings or accounts, reservation caps, historical valuation cutoff, and coverage measures.
+- [x] Add a full-history investment CSV preview and selective commit for standardized/mapped trade columns, stable source-reference fingerprints, explicit possible-duplicate confirmation, and repeat-import suppression. Imported events still need evidence linking and valuation updates.
+- [x] Calculate holding-level annualized money-weighted return from full-history dated flows and an eligible terminal valuation, with an unavailable reason when coverage is insufficient.
+- [x] Project holding details through a selected historical month so later trades, units, basis, and valuations do not appear in that detail.
+- [x] Accept dated per-unit valuations for full-history holdings and calculate the observed total from confirmed units held on that date with exact decimal rounding.
+- [x] Surface unmatched trade funding and SIP payments awaiting allotment in the Investments review tab with direct actions.
+- [ ] Complete investment accounts and canonical instruments as distinct entities, including multiple folios, aggregated instrument view, and safe migration from existing holdings.
+- [ ] Complete transaction connection from both Transactions and Investments, including bulk entry, all activity types, reciprocal details, review of accounting impact, and atomic correction when linked ledger transactions change.
+- [ ] Complete investment import support: broker-specific/unit-level formats, persisted source files and evidence, cross-source matching, duplicate resolution, and idempotent funding-link reconciliation.
+- [ ] Support multiple SIP plans, split payment matching, configurable due/grace dates, and calendar views.
+- [ ] Finish return analytics and coverage policy: portfolio-level XIRR, TWR where supported, incomplete-history suppression, stale/mixed-date totals, and ownership/person/funded-by filters.
+- [ ] Complete the review queue for unlinked entries, unmatched events, remainders, duplicates, missing units/basis, stale values, ownership conflicts, and backdated corrections.
+- [ ] Finish goal beneficiary and liquidity assumptions, suggested essential expense basis, and the remaining emergency-fund UX.
+- [ ] Implement explicit adjustment/corporate-action handling and the later-scope FX, valuation import, market price, and broker automation work when prioritized.
+- [ ] Validate the spec's 18 acceptance criteria end to end, including browser/device coverage, privacy checks, real export fixtures, and release checks.
 
 ## 1. Delivery strategy
 
