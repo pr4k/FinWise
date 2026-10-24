@@ -11,6 +11,25 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn household_counts_linked_investment_funding_once() {
+    let (client, _) = setup().await;
+    let account = client.account("Bank", "bank").await;
+    let category = client.create("categories", json!({"name":"Investing","kind":"expense","tracking_type":"investment"})).await;
+    let expense = client.transaction("expense", "100.00", &account, &category, "personal").await;
+    let refund = client.transaction("refund", "20.00", &account, &category, "personal").await;
+    let holding = client.create("investments", json!({"name":"Fund","type":"investment","currency":"INR"})).await;
+    let report_path = "analytics/household?from=2026-09-01&to=2026-10-01&currency=INR";
+    for (revision, entry, amount) in [(1, expense, "60.00"), (2, refund, "20.00")] {
+        let linked = client.call("POST", &format!("investments/{}/linked-transactions", holding["id"].as_str().unwrap()), json!({"transaction_id":entry["id"],"amount":amount}), Some(&format!("link-{revision}")), Some(revision)).await;
+        assert_eq!(linked.0, StatusCode::OK, "{}", linked.1);
+        let report = client.call("GET", report_path, json!({}), None, None).await;
+        assert_eq!(report.0, StatusCode::OK, "{}", report.1);
+        assert_eq!(report.1["data"][0]["net_invested"], "80.00");
+        assert_eq!(report.1["data"][0]["net_spending"], "0.00");
+    }
+}
+
+#[tokio::test]
 async fn deleting_account_retires_it_and_preserves_transactions() {
     let (owner, _) = setup().await;
     let account = owner.account("Old cash", "cash").await;
@@ -7331,4 +7350,69 @@ async fn investment_pages_keep_calculations_and_reject_changed_snapshots() {
     assert_eq!(second.1["data"][0]["gain_loss"], "25.00");
     client.create("investments", json!({"name":"New fund","type":"investment","currency":"INR"})).await;
     assert_eq!(client.call("GET", &path, json!({}), None, None).await.0, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn explicit_subscriptions_group_different_descriptions_without_duplicate_payments() {
+    let (client, _) = setup().await;
+    let account = client.account("Card", "credit_card").await;
+    let category = client.create("categories", json!({"name":"Subscriptions","kind":"expense","tracking_type":"subscription"})).await;
+    let mut first = transaction("expense", "99.00", &account, &category, "personal");
+    first["description"] = json!("A");
+    first["subscription"] = json!({"name":"Music membership"});
+    let first = client.create("transactions", first).await;
+    let rows = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    assert_eq!(rows["data"].as_array().unwrap().len(), 1);
+    let key = rows["data"][0]["key"].as_str().unwrap();
+    assert_eq!(rows["data"][0]["name"], "Music membership");
+    assert_eq!(rows["data"][0]["count"], 1);
+    let mut second = transaction("expense", "109.00", &account, &category, "personal");
+    second["description"] = json!("Different billing reference");
+    let second = client.create("transactions", second).await;
+    let link = json!({"transaction_id":second["id"],"key":key});
+    let saved = client.call("POST", "recurring-transactions/link", link.clone(), Some("connect-payment"), None).await;
+    assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+    let replay = client.call("POST", "recurring-transactions/link", link, Some("connect-payment"), None).await;
+    assert_eq!(saved.1, replay.1);
+    let rows = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    assert_eq!(rows["data"].as_array().unwrap().len(), 1);
+    assert_eq!(rows["data"][0]["count"], 2);
+    assert_eq!(rows["data"][0]["min_amount"], "99.00");
+    assert_eq!(rows["data"][0]["max_amount"], "109.00");
+    let path = format!("transactions/{}", second["id"].as_str().unwrap());
+    let edited = client.call("PATCH", &path, json!({"subscription":{"name":"Separate service"}}), None, Some(1)).await;
+    assert_eq!(edited.0, StatusCode::OK, "{}", edited.1);
+    let rows = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    assert_eq!(rows["data"].as_array().unwrap().len(), 2);
+    assert!(rows["data"].as_array().unwrap().iter().all(|row| row["count"] == 1));
+    let deleted = client.call("DELETE", &format!("transactions/{}", first["id"].as_str().unwrap()), json!({"reason":"Removed payment"}), None, Some(1)).await;
+    assert_eq!(deleted.0, StatusCode::NO_CONTENT);
+    let rows = client.call("GET", "recurring-transactions", json!({}), None, None).await.1;
+    assert_eq!(rows["data"].as_array().unwrap().len(), 1);
+    assert_eq!(rows["data"][0]["name"], "Separate service");
+}
+
+#[tokio::test]
+async fn subscription_assignment_is_atomic_and_respects_account_privacy() {
+    let (owner, pool) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let account = owner.create("accounts", json!({"name":"Private","subtype":"bank","currency":"INR","visibility":"private"})).await;
+    let category = owner.category("Subscriptions", "expense").await;
+    let mut body = transaction("expense", "20.00", &account, &category, "personal");
+    body["subscription"] = json!({"name":"Private service"});
+    let saved = owner.create("transactions", body.clone()).await;
+    let key = owner.call("GET", "recurring-transactions", json!({}), None, None).await.1["data"][0]["key"].as_str().unwrap().to_owned();
+    assert!(member.call("GET", "recurring-transactions", json!({}), None, None).await.1["data"].as_array().unwrap().is_empty());
+    assert_eq!(member.call("POST", "recurring-transactions/link", json!({"transaction_id":saved["id"],"name":"Hidden"}), Some("private-link-attempt"), None).await.0, StatusCode::NOT_FOUND);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM resources WHERE kind='transactions'").fetch_one(&pool).await.unwrap();
+    body["subscription"] = json!({"key":"inaccessible-subscription"});
+    assert_eq!(owner.call("POST", "transactions", body, Some("invalid-subscription-create"), None).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM resources WHERE kind='transactions'").fetch_one(&pool).await.unwrap(), count);
+    let other_account = owner.account("Other card", "credit_card").await;
+    let other = owner.transaction("expense", "20.00", &other_account, &category, "personal").await;
+    assert_eq!(owner.call("POST", "recurring-transactions/link", json!({"transaction_id":other["id"],"key":key}), Some("different-account-link"), None).await.0, StatusCode::BAD_REQUEST);
+    let path = format!("transactions/{}", saved["id"].as_str().unwrap());
+    let invalid = owner.call("PATCH", &path, json!({"description":"Should roll back","subscription":{"name":" "}}), None, Some(1)).await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+    assert_eq!(owner.call("GET", &path, json!({}), None, None).await.1["revision"], 1);
 }

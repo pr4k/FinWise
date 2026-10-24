@@ -4,7 +4,7 @@ Snapshot prepared 23 October 2026 from the repository. This folder is a reviewab
 
 | File | Contents | Authority |
 | --- | --- | --- |
-| [db-schema.sql](db-schema.sql) | Executable DDL for an **empty** SQLite database | Snapshot of `backend/migrations/0001_core.sql`–`0013_transaction_sources.sql` |
+| [db-schema.sql](db-schema.sql) | Executable DDL for an **empty** SQLite database | Snapshot of `backend/migrations/0001_core.sql`–`0014_subscription_links.sql` |
 | [db-schema-export.md](db-schema-export.md) | All tables, columns, foreign keys, indexes, and storage conventions | Derived from the migrated SQLite schema |
 | [openapi.json](openapi.json) | Full machine-readable OpenAPI 3.1 contract | Snapshot of `backend/openapi.json` |
 | [api-spec-export.md](api-spec-export.md) | Calling conventions and every API operation with implementation status | Derived from `openapi.json` |

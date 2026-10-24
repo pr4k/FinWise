@@ -76,7 +76,9 @@ fn frequency(items: &[Payment]) -> Option<&'static str> {
 
 async fn payments(db: &mut SqliteConnection, p: &Principal) -> Result<Vec<Payment>> {
     let mut result = Vec::new();
-    for t in storage::list(db, p, "transactions").await? {
+    let explicitly_linked: HashSet<String> = sqlx::query_scalar("SELECT transaction_id FROM recurring_payment_links WHERE household_id=?")
+        .bind(&p.household_id).fetch_all(&mut *db).await?.into_iter().collect();
+    for t in storage::transactions_in_range(db, p, None, None, false).await? {
         if t["voided"] == true || t["event_type"] != "expense" {
             continue;
         }
@@ -85,9 +87,7 @@ async fn payments(db: &mut SqliteConnection, p: &Principal) -> Result<Vec<Paymen
             .filter(|s| !s.trim().is_empty())
             .or_else(|| t["description"].as_str())
             .unwrap_or("");
-        if normalize(name).len() < 3 {
-            continue;
-        }
+        if normalize(name).len() < 3 && !explicitly_linked.contains(text(&t,"id")?) { continue; }
         let currency = text(&t, "currency")?;
         let account_id = t["movements"]
             .as_array()
@@ -184,9 +184,18 @@ pub async fn list(db: &mut SqliteConnection, p: &Principal) -> Result<Value> {
                 )
             })
             .collect();
+    let definitions: BTreeMap<String, (String, String, String)> = sqlx::query("SELECT key,name,account_id,currency FROM recurring_subscriptions WHERE household_id=?")
+        .bind(&p.household_id).fetch_all(&mut *db).await?.into_iter()
+        .map(|r| (r.get(0), (r.get(1), r.get(2), r.get(3)))).collect();
+    let links: BTreeMap<String, String> = sqlx::query("SELECT transaction_id,key FROM recurring_payment_links WHERE household_id=?")
+        .bind(&p.household_id).fetch_all(&mut *db).await?.into_iter()
+        .map(|r| (r.get(0), r.get(1))).collect();
     let mut groups: BTreeMap<String, Vec<Payment>> = BTreeMap::new();
-    for payment in payments(db, p).await? {
-        groups.entry(key(&payment)).or_default().push(payment);
+    for mut payment in payments(db, p).await? {
+        let assigned = (payment.source == "money_manager_or_ledger").then(|| links.get(&payment.id)).flatten();
+        let payment_key = assigned.filter(|key| definitions.get(*key).is_some_and(|(_, account, currency)| account == &payment.account_id && currency == &payment.currency)).cloned().unwrap_or_else(|| key(&payment));
+        if let Some((name, _, _)) = definitions.get(&payment_key) { payment.name = name.clone(); }
+        groups.entry(payment_key).or_default().push(payment);
     }
     let mut data = Vec::new();
     for (key, mut items) in groups {
@@ -315,4 +324,107 @@ mod tests {
         };
         assert_eq!(frequency(&[mk(1), mk(2), mk(3)]), Some("monthly"));
     }
+}
+
+/// Called inside the same API transaction as the ledger write.
+pub async fn assign(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    transaction: &Value,
+    assignment: &Value,
+) -> Result<Value> {
+    let transaction_id = text(transaction, "id")?;
+    let previous: Option<String> = sqlx::query_scalar(
+        "SELECT key FROM recurring_payment_links WHERE household_id=? AND transaction_id=?",
+    )
+    .bind(&p.household_id)
+    .bind(transaction_id)
+    .fetch_optional(&mut *db)
+    .await?;
+    if assignment.is_null() {
+        sqlx::query(
+            "DELETE FROM recurring_payment_links WHERE household_id=? AND transaction_id=?",
+        )
+        .bind(&p.household_id)
+        .bind(transaction_id)
+        .execute(&mut *db)
+        .await?;
+        if previous.is_some() {
+            storage::audit(
+                db,
+                p,
+                transaction_id,
+                "subscription_unlinked",
+                Some(&json!({"key":previous})),
+                None,
+            )
+            .await?;
+        }
+        return Ok(json!({"transaction_id":transaction_id,"key":null}));
+    }
+    crate::api::allowed_body(assignment, &["key", "name"])?;
+    if assignment.get("key").is_some() == assignment.get("name").is_some() {
+        return Err(ApiError::invalid("Choose an existing subscription or a new name."));
+    }
+    if assignment.get("key").is_some() { text(assignment, "key")?; }
+
+    if transaction["event_type"] != "expense" || transaction["voided"] == true {
+        return Err(ApiError::invalid(
+            "Choose an active expense transaction for a subscription.",
+        ));
+    }
+    let account_id = transaction["movements"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|m| m["amount"].as_str().is_some_and(|v| v.starts_with('-')))
+        .and_then(|m| m["account_id"].as_str())
+        .ok_or_else(|| ApiError::invalid("Subscription payment needs an expense account."))?;
+    let currency = text(transaction, "currency")?;
+    let (key, name) = if let Some(key) = assignment.get("key").and_then(Value::as_str) {
+        if assignment.get("name").is_some() {
+            return Err(ApiError::invalid(
+                "Choose an existing subscription or a new name.",
+            ));
+        }
+        let item = list(db, p).await?["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| {
+                item["key"] == key && item["subscription"] == true && item["ignored"] != true
+            })
+            .cloned()
+            .ok_or_else(ApiError::missing)?;
+        if item["account_id"] != account_id || item["currency"] != currency {
+            return Err(ApiError::invalid(
+                "Choose a subscription on the same account and in the same currency.",
+            ));
+        }
+        (key.to_owned(), text(&item, "name")?.to_owned())
+    } else {
+        let name = text(assignment, "name")?.trim();
+        if name.is_empty() || name.chars().count() > 100 {
+            return Err(ApiError::invalid(
+                "Enter a subscription name of 1 to 100 characters.",
+            ));
+        }
+        (storage::id(), name.to_owned())
+    };
+    sqlx::query("INSERT INTO recurring_subscriptions(household_id,key,account_id,currency,name) VALUES(?,?,?,?,?) ON CONFLICT(household_id,key) DO NOTHING")
+        .bind(&p.household_id).bind(&key).bind(account_id).bind(currency).bind(&name).execute(&mut *db).await?;
+    sqlx::query("INSERT INTO recurring_payment_links(household_id,transaction_id,key) VALUES(?,?,?) ON CONFLICT(household_id,transaction_id) DO UPDATE SET key=excluded.key")
+        .bind(&p.household_id).bind(transaction_id).bind(&key).execute(&mut *db).await?;
+    sqlx::query("INSERT INTO recurring_labels(household_id,key,subscription,ignored,updated_by,updated_at) VALUES(?,?,1,0,?,?) ON CONFLICT(household_id,key) DO UPDATE SET subscription=1,ignored=0,updated_by=excluded.updated_by,updated_at=excluded.updated_at")
+        .bind(&p.household_id).bind(&key).bind(&p.user_id).bind(storage::now()).execute(&mut *db).await?;
+    storage::audit(
+        db,
+        p,
+        transaction_id,
+        "subscription_linked",
+        Some(&json!({"key":previous})),
+        Some(&json!({"key":key,"name":name})),
+    )
+    .await?;
+    Ok(json!({"transaction_id":transaction_id,"key":key,"name":name}))
 }

@@ -56,3 +56,22 @@ test('investment workspace initially requests the selected month',async()=>{
   assert.equal(await context.view.investments(),'workspace');
   assert.deepEqual(calls,['transactions?from=2026-10-01&to=2026-11-01']);
 });
+
+test('standalone and split tagged investments appear in overview and activity',()=>{
+  const {context,state,root}=workspace();
+  state.categories=[{id:'invest',tracking_type:'investment'}];
+  const transaction={id:'tagged',description:'Independent fund',event_type:'expense',currency:'INR',effective_date:'2026-10-12',amount:'150.00',allocations:[{category_id:'invest',scope:'personal',amount:'100.00'},{category_id:'food',scope:'personal',amount:'50.00'}]};
+  state.investmentViewData.taggedTransactions=[transaction];
+  context.trackedCategoryRows=()=>[{transaction,allocation:transaction.allocations[0]}];
+  context.trackedCategoryPanel=(rows,title)=>title+rows.map(row=>row.transaction.description).join('');
+  const funding=context.investmentFunding([], [transaction], [], state.month,'INR');
+  assert.equal(funding.pending[0].amount,'100.00');
+  for(const tab of ['overview','activity']) {
+    state.investmentTab=tab;
+    context.renderInvestmentTab();
+    assert.match(root.innerHTML,/Tagged investment transactionsIndependent fund/);
+  }
+  state.investmentTab='overview';
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/tagged, unassigned net 100.00/);
+});

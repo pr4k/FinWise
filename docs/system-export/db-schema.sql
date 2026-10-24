@@ -1,4 +1,4 @@
--- FinWise schema-only export. Generated from backend/migrations/0001_core.sql through 0013_transaction_sources.sql.
+-- FinWise schema-only export. Generated from backend/migrations/0001_core.sql through 0014_subscription_links.sql.
 -- Empty SQLite database; no user data. Do not apply this file on an existing database.
 -- Runtime migrations remain authoritative. JSON resource shapes are defined in API/domain code.
 
@@ -227,3 +227,21 @@ CREATE UNIQUE INDEX widgets_one_enabled ON widget_settings(enabled) WHERE enable
 -- The existing fingerprint index cannot serve this lookup beyond household_id.
 CREATE INDEX import_occurrences_transaction
 ON import_occurrences(household_id, transaction_id);
+
+-- Explicit subscriptions retain their identity when payment descriptions change.
+CREATE TABLE recurring_subscriptions (
+ household_id TEXT NOT NULL REFERENCES households(id),
+ key TEXT NOT NULL,
+ account_id TEXT NOT NULL REFERENCES resources(id),
+ currency TEXT NOT NULL,
+ name TEXT NOT NULL,
+ PRIMARY KEY(household_id,key)
+);
+CREATE TABLE recurring_payment_links (
+ household_id TEXT NOT NULL,
+ transaction_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+ key TEXT NOT NULL,
+ PRIMARY KEY(household_id,transaction_id),
+ FOREIGN KEY(household_id,key) REFERENCES recurring_subscriptions(household_id,key)
+);
+CREATE INDEX recurring_payment_links_subscription ON recurring_payment_links(household_id,key);

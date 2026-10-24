@@ -513,6 +513,7 @@ const TRANSACTION_FIELDS: &[&str] = &[
     "movements",
     "allocations",
     "paid_by_user_id",
+    "subscription",
 ];
 const BUDGET_FIELDS: &[&str] = &[
     "name",
@@ -637,6 +638,12 @@ pub(crate) async fn route(
         ("GET", ["recurring-transactions"]) => {
             allowed_query(q, &[])?;
             ok(recurring::list(db, p).await?)
+        }
+        ("POST", ["recurring-transactions", "link"]) => {
+            allowed_body(body, &["transaction_id", "key", "name"])?;
+            let transaction = storage::get(db, p, "transactions", text(body,"transaction_id")?).await?;
+            let assignment = project(body, &["key", "name"]);
+            ok(recurring::assign(db, p, &transaction, &assignment).await?)
         }
         ("PUT", ["recurring-transactions", key]) => ok(recurring::tag(db, p, key, body).await?),
         ("POST", ["transactions", "bulk-scope"]) => {
@@ -943,6 +950,7 @@ pub(crate) async fn route(
             };
             allowed_body(body, fields)?;
             let mut value = project(body, fields);
+            if *kind == "transactions" { value.as_object_mut().unwrap().remove("subscription"); }
             if family_only(db, p).await? { force_family(kind, &mut value); }
             match *kind {
                 "accounts" => {
@@ -979,6 +987,9 @@ pub(crate) async fn route(
                 _ => unreachable!(),
             }
             let mut result = storage::create(db, p, kind, value).await?;
+            if *kind == "transactions" {
+                if let Some(assignment) = body.get("subscription") { recurring::assign(db,p,&result,assignment).await?; }
+            }
             if *kind == "accounts" {
                 balances::decorate(db, p, &mut result).await?;
             }
@@ -1097,7 +1108,16 @@ pub(crate) async fn route(
                     after["money_manager_manual_edit"] = json!({"updated_at":storage::now()});
                 }
             }
+            if *kind == "transactions" { after.as_object_mut().unwrap().remove("subscription"); }
             let mut result = storage::update(db, p, &before, after, "update").await?;
+            if *kind == "transactions" {
+                if let Some(assignment) = body.get("subscription") { recurring::assign(db,p,&result,assignment).await?; }
+                else if before["movements"] != result["movements"] || before["event_type"] != result["event_type"] {
+                    // Account/type edits must not leave a payment attached to an incompatible subscription.
+                    let previous_account = before["movements"][0]["account_id"].as_str();
+                    if result["event_type"] != "expense" || previous_account != result["movements"][0]["account_id"].as_str() { recurring::assign(db,p,&result,&Value::Null).await?; }
+                }
+            }
             if *kind == "accounts" {
                 balances::decorate(db, p, &mut result).await?;
             } else if *kind == "transactions" {
@@ -2358,6 +2378,7 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
         .collect();
     let investment_categories = investment_category_ids(db, p).await?;
     let transactions = storage::transactions_in_period(db, p, from, to, false).await?;
+    let mut counted_tagged = std::collections::HashMap::<String, i64>::new();
     for transaction in transactions {
         if transaction["voided"] == true
             || transaction["currency"] != currency
@@ -2402,6 +2423,8 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
                 };
                 if allocation["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)) {
                     member.invested = add(member.invested, signed)?;
+                    let counted = counted_tagged.entry(text(&transaction, "id")?.to_owned()).or_default();
+                    *counted = add(*counted, signed)?;
                     continue;
                 }
                 member.spending = add(member.spending, signed)?;
@@ -2437,10 +2460,25 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
             }
             let contribution = money(text(record, "contribution")?, currency)?;
             let withdrawal = money(text(record, "withdrawal")?, currency)?;
+            // Linked evidence is already included under the transaction's payer.
+            // Keep only the portion of the holding record not counted above.
+            let mut linked_net = 0;
+            for id in record["linked_transaction_ids"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                if let Some(counted) = counted_tagged.get_mut(id) {
+                    let linked = record["linked_allocations"].as_array().into_iter().flatten()
+                        .find(|link| link["transaction_id"] == id)
+                        .map(|link| money(text(link, "amount")?, currency)).transpose()?
+                        .unwrap_or(counted.abs());
+                    let duplicate = counted.signum() * linked.min(counted.abs());
+                    linked_net = add(linked_net, duplicate)?;
+                    *counted -= duplicate;
+                }
+            }
             member.invested = add(
                 member.invested,
                 contribution
                     .checked_sub(withdrawal)
+                    .and_then(|net| net.checked_sub(linked_net))
                     .ok_or_else(|| ApiError::invalid("Money total is out of range."))?,
             )?;
         }

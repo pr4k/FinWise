@@ -1,8 +1,8 @@
 # Database schema export
 
-Schema-only snapshot from all 13 committed migrations. The runnable DDL is in [db-schema.sql](db-schema.sql). This export has no personal records, credentials, or upload contents.
+Schema-only snapshot from all 14 committed migrations. The runnable DDL is in [db-schema.sql](db-schema.sql). This export has no personal records, credentials, or upload contents.
 
-**Physical objects:** 25 tables and 20 explicit indexes (SQLite also creates indexes for some primary keys and unique constraints).
+**Physical objects:** 27 tables and 21 explicit indexes (SQLite also creates indexes for some primary keys and unique constraints).
 
 ## Tables and columns
 
@@ -363,3 +363,27 @@ Foreign keys: `user_id` → `users.id`; `household_id` → `households.id`.
 | `source_files_account_hash` | `source_files` |
 | `source_files_batch` | `source_files` |
 | `widgets_one_enabled` | `widget_settings` |
+
+## Explicit subscription linking (migration 0014)
+
+### `recurring_subscriptions`
+
+| Column | SQLite type | Required | Key/default |
+| --- | --- | --- | --- |
+| `household_id` | `TEXT` | Yes | PK; FK → households.id |
+| `key` | `TEXT` | Yes | PK 2 |
+| `account_id` | `TEXT` | Yes | FK → resources.id |
+| `currency` | `TEXT` | Yes | |
+| `name` | `TEXT` | Yes | |
+
+Named subscriptions retain their identity when transaction descriptions change. Existing detected patterns can acquire an explicit definition under their existing key. A subscription belongs to one account and currency; its payments follow that account's visibility.
+
+### `recurring_payment_links`
+
+| Column | SQLite type | Required | Key/default |
+| --- | --- | --- | --- |
+| `household_id` | `TEXT` | Yes | PK |
+| `transaction_id` | `TEXT` | Yes | PK 2; FK → resources.id, ON DELETE CASCADE |
+| `key` | `TEXT` | Yes | |
+
+Composite FK `(household_id,key)` → recurring_subscriptions. One explicit subscription per transaction. Index `recurring_payment_links_subscription` covers `(household_id,key)`. Links group existing expense payments; they never post additional ledger activity. Voided or inaccessible transactions are excluded from the recurring projection.

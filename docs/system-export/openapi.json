@@ -791,6 +791,56 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "delete_accounts_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Success"
+          }
+        }
       }
     },
     "/categories": {
@@ -2191,6 +2241,67 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BulkScopeInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recurring-transactions/link": {
+      "post": {
+        "operationId": "post_recurring_transactions_link",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionLink"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionLinkInput"
               }
             }
           }
@@ -9570,6 +9681,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "x-implemented": true,
@@ -11217,6 +11335,783 @@
           }
         }
       }
+    },
+    "/investments/goals": {
+      "get": {
+        "operationId": "get_investment_goals",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "Goals with dated allocation coverage"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_investment_goals",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Goal created"
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/investments/goals/{id}": {
+      "get": {
+        "operationId": "get_investment_goal",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "Goal details"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patch_investment_goal",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "Goal updated"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/investments/goals/{id}/archive": {
+      "post": {
+        "operationId": "post_investment_goal_archive",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "Goal archived"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/investments/report": {
+      "get": {
+        "operationId": "get_investments_report",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "personal",
+                "family",
+                "combined"
+              ]
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "External funding and investment cash at the selected cutoff"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/archive": {
+      "post": {
+        "operationId": "post_investments_id_archive",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "Holding archived without changing activity"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/events": {
+      "post": {
+        "operationId": "post_investments_id_events",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "trade_date",
+                  "amount"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "purchase",
+                      "sale",
+                      "distribution",
+                      "fee"
+                    ]
+                  },
+                  "trade_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "units": {
+                    "type": "string"
+                  },
+                  "charges": {
+                    "type": "string"
+                  },
+                  "account_id": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "source_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Audited full-history economic event"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/events/import-preview": {
+      "post": {
+        "operationId": "post_investment_event_import_preview",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "source",
+                  "csv"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "csv": {
+                    "type": "string"
+                  },
+                  "mapping": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "CSV rows with ready, existing, changed-source, or reference-needed status and a preview hash"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/events/import-commit": {
+      "post": {
+        "operationId": "post_investment_event_import_commit",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "source",
+                  "csv",
+                  "preview_hash",
+                  "selected_rows"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "csv": {
+                    "type": "string"
+                  },
+                  "mapping": {
+                    "type": "object"
+                  },
+                  "preview_hash": {
+                    "type": "string"
+                  },
+                  "selected_rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Selected new economic events imported atomically"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/events/{event_id}/reverse": {
+      "post": {
+        "operationId": "post_investments_id_events_event_id_reverse",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Audited event reversal"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/events/{event_id}/evidence": {
+      "post": {
+        "operationId": "post_investments_id_events_event_id_evidence",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "transaction_id"
+                ],
+                "properties": {
+                  "transaction_id": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Funding evidence linked without creating another economic event"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/events/{event_id}/evidence/{transaction_id}": {
+      "delete": {
+        "operationId": "delete_investments_id_events_event_id_evidence_transaction_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "transaction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "200": {
+            "description": "Evidence removed while the economic event remains"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/sip/{month}/status": {
+      "post": {
+        "operationId": "post_investments_id_sip_month_status",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "month",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "payment_found",
+                      "skipped",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "transaction_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SIP occurrence marked without posting a ledger entry or units"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/{id}/ownership-changes": {
+      "post": {
+        "operationId": "post_investments_id_ownership_changes",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "effective_date",
+                  "shares"
+                ],
+                "properties": {
+                  "effective_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "shares": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "user_id",
+                        "percent"
+                      ],
+                      "properties": {
+                        "user_id": {
+                          "type": "string"
+                        },
+                        "percent": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dated economic ownership change"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        }
+      }
+    },
+    "/investments/valuations/bulk": {
+      "post": {
+        "operationId": "post_investments_valuations_bulk",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-implemented": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "items"
+                ],
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "holding_id",
+                        "revision",
+                        "valuation_date"
+                      ],
+                      "properties": {
+                        "holding_id": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "type": "integer"
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "valuation_date": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "confirm_zero": {
+                          "type": "boolean"
+                        },
+                        "price": {
+                          "type": "string",
+                          "description": "Per-unit price with up to eight decimal places; server multiplies confirmed units on the valuation date."
+                        }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "value"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "price"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated holdings"
+          },
+          "default": {
+            "description": "Standard API error"
+          }
+        },
+        "parameters": []
+      }
     }
   },
   "components": {
@@ -11421,6 +12316,7 @@
               "bank",
               "credit_card",
               "cash",
+              "investment_cash",
               "settle_up"
             ]
           },
@@ -11626,6 +12522,16 @@
           },
           "paid_by_user_id": {
             "type": "string"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionAssignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12498,6 +13404,7 @@
                     "bank",
                     "credit_card",
                     "cash",
+                    "investment_cash",
                     "settle_up"
                   ]
                 },
@@ -12653,6 +13560,7 @@
               "bank",
               "credit_card",
               "cash",
+              "investment_cash",
               "settle_up"
             ]
           },
@@ -12792,6 +13700,7 @@
               "bank",
               "credit_card",
               "cash",
+              "investment_cash",
               "settle_up"
             ]
           },
@@ -13227,6 +14136,16 @@
           },
           "expected_revision": {
             "type": "integer"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionAssignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": []
@@ -13650,6 +14569,72 @@
           }
         },
         "required": []
+      },
+      "SubscriptionAssignment": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        ]
+      },
+      "SubscriptionLinkInput": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_id"
+        ]
+      },
+      "SubscriptionLink": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_id",
+          "key"
+        ]
       },
       "DatedBalance": {
         "type": "object",
@@ -15455,6 +16440,36 @@
           "name": {
             "type": "string"
           },
+          "instrument": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "folio": {
+            "type": "string"
+          },
+          "ownership": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "user_id",
+                "percent"
+              ],
+              "properties": {
+                "user_id": {
+                  "type": "string"
+                },
+                "percent": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "type": {
             "type": "string",
             "enum": [
@@ -15466,7 +16481,19 @@
             "type": "string",
             "enum": [
               "mutual_fund",
-              "stock_market"
+              "stock_market",
+              "etf",
+              "deposit",
+              "retirement",
+              "investment_cash",
+              "manual_asset"
+            ]
+          },
+          "tracking_mode": {
+            "type": "string",
+            "enum": [
+              "baseline",
+              "full_history"
             ]
           },
           "currency": {
@@ -15501,6 +16528,10 @@
                 "type": "null"
               }
             ]
+          },
+          "sip_effective_month": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
           },
           "opening_value": {
             "type": "string",
@@ -15597,6 +16628,11 @@
         "properties": {
           "transaction_id": {
             "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d+)?$",
+            "description": "Portion of the bank transaction allocated to this holding."
           },
           "replace_movement_id": {
             "type": "string"

@@ -2247,6 +2247,67 @@
         }
       }
     },
+    "/recurring-transactions/link": {
+      "post": {
+        "operationId": "post_recurring_transactions_link",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionLink"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionLinkInput"
+              }
+            }
+          }
+        }
+      }
+    },
     "/recurring-transactions": {
       "get": {
         "operationId": "get_recurring_transactions",
@@ -12461,6 +12522,16 @@
           },
           "paid_by_user_id": {
             "type": "string"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionAssignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -14065,6 +14136,16 @@
           },
           "expected_revision": {
             "type": "integer"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionAssignment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": []
@@ -14488,6 +14569,72 @@
           }
         },
         "required": []
+      },
+      "SubscriptionAssignment": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        ]
+      },
+      "SubscriptionLinkInput": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_id"
+        ]
+      },
+      "SubscriptionLink": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_id",
+          "key"
+        ]
       },
       "DatedBalance": {
         "type": "object",

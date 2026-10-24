@@ -139,6 +139,13 @@ schemas["RecurringOccurrence"] = obj({"id": S, "source": enum("money_manager_or_
 schemas["RecurringTransaction"] = obj({"key": S, "name": S, "account_id": S, "currency": S, "frequency": enum("weekly", "monthly", "quarterly", "yearly", "unconfirmed"), "subscription": B, "ignored": B, "count": I, "first_date": D, "last_date": D, "min_amount": M, "max_amount": M, "occurrences": arr(ref("RecurringOccurrence"))}, ("key", "name", "account_id", "currency", "frequency", "subscription", "ignored", "count", "first_date", "last_date", "min_amount", "max_amount", "occurrences"))
 schemas["RecurringCollection"] = obj({"data": arr(ref("RecurringTransaction")), "page": obj({}), "meta": obj({})}, ("data", "page", "meta"))
 schemas["RecurringTagInput"] = obj({"subscription": B, "ignored": B})
+schemas["SubscriptionAssignment"] = {"oneOf": [obj({"key": S}, ("key",)), obj({"name": {"type":"string","minLength":1,"maxLength":100}}, ("name",))]}
+schemas["SubscriptionLinkInput"] = obj({"transaction_id": S, "key": S, "name": S}, ("transaction_id",))
+schemas["SubscriptionLink"] = obj({"transaction_id": S, "key": {"type":["string","null"]}, "name": S}, ("transaction_id","key"))
+schemas["TransactionInput"]["properties"]["subscription"] = {"oneOf": [ref("SubscriptionAssignment"), {"type":"null"}]}
+schemas["TransactionPatch"]["properties"]["subscription"] = schemas["TransactionInput"]["properties"]["subscription"]
+route("/recurring-transactions/link", "post", "SubscriptionLink", "SubscriptionLinkInput")
+
 route("/recurring-transactions", "get", "RecurringCollection")
 route("/recurring-transactions/{key}", "put", "RecurringTransaction", "RecurringTagInput")
 for action in ["archive", "restore"]:
