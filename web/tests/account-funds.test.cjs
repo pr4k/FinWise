@@ -68,3 +68,29 @@ test('dashboard renders available account balances and reserves separately',asyn
   assert.match(html,/INR 18462.00/);
   assert.doesNotMatch(html,/100000.00/);
 });
+
+test('opened account leads with the reduced available balance and retains the recorded breakdown',async()=>{
+  const context=helpers();
+  const selected={...account,visibility:'private',balance:{...account.balance,source:'opening_balance',as_of:'2026-10-25T00:00:00Z'}};
+  Object.assign(context,{
+    state:{accounts:[selected],month:'2026-10',categories:[],me:{user:{id:'u'}}},
+    Date,Map,URLSearchParams,period:()=>({from:'2026-10-01',to:'2026-11-01'}),
+    id:encodeURIComponent,viewState:{transactionsPath:()=> 'transactions'},
+    api:{collection:async()=>({data:[]}),request:async()=>({data:[]})},
+    button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>'',moneyTone:()=>''
+  });
+  context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
+  context.analyticsView.negate=value=>String(-Number(value));
+  context.analyticsView.subscriptionMonth=()=>({rows:[]});
+  const start=source.indexOf('  async accounts(parts) {');
+  const end=source.indexOf('\n  async changes()',start);
+  vm.runInContext('var view={'+source.slice(start,end)+'};',context);
+  const html=await context.view.accounts(['bank']);
+  assert.match(html,/<span>Available to use<\/span>INR 71538.00/);
+  assert.match(html,/Recorded balance INR 100000.00 · earmarked INR 28462.00/);
+  assert.match(html,/Available and earmarked money/);
+  selected.subtype='credit_card';
+  delete selected.funds;
+  const card=await context.view.accounts(['bank']);
+  assert.match(card,/<span>Amount owed<\/span>INR 100000.00/);
+});
