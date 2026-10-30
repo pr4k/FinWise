@@ -302,7 +302,14 @@ h1,h2,h3,.stat-value,.metric-number,.money-figure {font-family:var(--display)}
 .reconcile-choice #transfer-option {background:#f1f3ed;border-color:#dce3d7;color:#6d718f}
 .reconcile-choice #transfer-option:hover {background:#eaece5}
 .ledger-filters,.ledger-workspace .activity-table th {background:#f8faf4}
-.ledger-filter-disclosure>summary {display:none}
+.ledger-filter-disclosure>summary {display:list-item;list-style:none;min-height:44px;padding:13px 20px;border-top:1px solid var(--line);background:#f8faf4;color:#356c4d;font-size:13px;font-weight:700;cursor:pointer}
+.ledger-filter-disclosure>summary::-webkit-details-marker {display:none}
+.ledger-filter-disclosure>summary::after {content:'⌄';float:right;font-size:18px;line-height:16px}
+.ledger-filter-disclosure[open]>summary::after {transform:rotate(180deg)}
+.ledger-filter-disclosure>summary:focus-visible {outline:2px solid #356c4d;outline-offset:-3px}
+.ledger-filter-disclosure .ledger-filters {border-top:0}
+.ledger-filter-disclosure .classification-sort {padding:12px 20px;border-top:1px solid var(--line)}
+.ledger-filter-disclosure:not([open])>:not(summary) {display:none}
 .activity-table .activity-title strong,.activity-table .activity-account-name {color:#344332}
 .activity-table .transaction-indicator.amended,.activity-table .transaction-indicator.created {color:#887faa}
 .activity-table .activity-marker-row,.activity-table .activity-marker-row:hover {background:#f5f8ed}
