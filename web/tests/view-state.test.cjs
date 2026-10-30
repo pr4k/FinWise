@@ -40,3 +40,15 @@ test('account, account type, and transaction type filters combine and survive re
   assert.equal(view.transactionsPath('2026-09',true,filters),'transactions?from=2026-09-01&to=2026-10-01&account_id=account-1&account_type=bank&event_type=expense');
   assert.equal(view.transactionsPath('2026-09',false,filters),'transactions?account_id=account-1&account_type=bank&event_type=expense');
 });
+
+test('economic filters, date bounds and secondary sorting compose and persist in the URL',()=>{
+  const view=state();let next;
+  const filters={account:'a',accountType:'bank',eventType:'',transactionType:'investment',status:'suggested',category:'sip',person:'u',direction:'debit',minAmount:'0.01',maxAmount:'10000.01',search:'Fund & broker',from:'2026-08-15',to:'2026-10-02',currency:'INR',sort:'amount',secondarySort:'-confidence'};
+  view.save('2026-09','combined','http://localhost/#transactions/all',value=>next=value,filters);
+  const restored=view.readFilters(new URL(next,'http://localhost').search);
+  assert.deepEqual({...restored},filters);
+  const query=new URL(view.transactionsPath('2026-09',true,restored,'combined'),'http://localhost').searchParams;
+  assert.equal(query.get('scope'),'combined');assert.equal(query.get('from'),'2026-08-15');assert.equal(query.get('to'),'2026-10-02');assert.equal(query.get('q'),'Fund & broker');assert.equal(query.get('sort'),'amount');assert.equal(query.get('secondary_sort'),'-confidence');assert.equal(query.get('classification_status'),'suggested');
+  view.save('2026-09','combined','http://localhost'+next,value=>next=value,{account:'',accountType:'',eventType:''});
+  const cleared=new URL(next,'http://localhost').searchParams;assert.equal(cleared.has('sort'),false);assert.equal(cleared.has('classification_status'),false);assert.equal(cleared.has('from'),false);
+});

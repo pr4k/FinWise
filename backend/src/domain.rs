@@ -72,6 +72,9 @@ pub fn add(a: i64, b: i64) -> Result<i64> {
     a.checked_add(b)
         .ok_or_else(|| ApiError::invalid("Money total is out of range."))
 }
+pub fn subtract(a: i64,b: i64) -> Result<i64> {
+    a.checked_sub(b).ok_or_else(||ApiError::invalid("Money total is out of range."))
+}
 pub fn date(value: &str) -> Result<NaiveDate> {
     let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|_| ApiError::invalid("Date must be YYYY-MM-DD."))?;
@@ -147,6 +150,11 @@ pub fn validate_transaction(v: &Value) -> Result<()> {
         }
         let mut total = 0;
         for allocation in allocations {
+            if allocation.get("transaction_type").is_some() {
+                choice(allocation,"transaction_type",crate::classification::TYPES)?;
+                let incoming=!matches!(kind,"expense"|"investment");
+                if (allocation["transaction_type"]=="expense" && incoming) || (matches!(allocation["transaction_type"].as_str(),Some("income"|"refund"|"reimbursement")) && !incoming) {return Err(ApiError::invalid("Economic classification must match the account movement direction."));}
+            }
             if allocation
                 .get("category_id")
                 .is_some_and(|v| !v.is_string() && !v.is_null())

@@ -382,6 +382,24 @@ for path, methods in investment_contract["paths"].items():
                 parameters.append({"name": segment[1:-1], "in": "path", "required": True, "schema": S})
     paths[path] = methods
 
+# Economic purpose is independent from ledger event direction.
+economic_type = enum("income","expense","investment","transfer","reimbursement","refund","debt","adjustment","unknown")
+schemas["TransactionClassification"] = obj({"transaction_type":economic_type,"status":enum("confirmed","suggested","needs_review"),"confidence_score":{"type":"integer","minimum":0,"maximum":100},"classification_source":enum("manual","rule","system"),"confirmed_at":S,"linked_transaction_id":S,"investment_id":S,"reason":S,"suggested_link_id":S}, ("transaction_type","status","confidence_score","classification_source"))
+schemas["ClassificationSplit"] = obj({"amount":M,"transaction_type":economic_type,"category_id":{"type":["string","null"]},"scope":enum("personal","family"),"member_id":S,"offset_expense":B}, ("amount","transaction_type","scope"))
+schemas["ClassificationInput"] = obj({"transaction_type":economic_type,"category_id":{"type":["string","null"]},"splits":arr(ref("ClassificationSplit")),"linked_transaction_id":S,"investment_id":S,"expected_revision":I}, ("transaction_type",))
+schemas["ClassificationRulePreviewInput"] = obj({"contains":S,"transaction_type":economic_type}, ("contains","transaction_type"))
+schemas["ClassificationRuleApplyInput"] = obj({"contains":S,"transaction_type":economic_type,"save_rule":B,"transactions":arr(obj({"id":S,"revision":I}, ("id","revision")))}, ("contains","transaction_type","transactions"))
+schemas["Transaction"]["properties"]["classification"] = ref("TransactionClassification")
+schemas["Allocation"]["properties"].update({"transaction_type":economic_type,"member_id":S,"offset_expense":B})
+schemas["EconomicSummary"] = obj(dict({key:M for key in ["income","net_spending","recorded_surplus","earned_income","actual_spending","gross_expenses","expense_offsets","net_invested","economic_surplus","after_investment_cash_flow","raw_credits","raw_debits","transfer_volume"]},unresolved_count=I,currency=S,reconciliation=obj({}),breakdown=arr(obj({"transaction_id":S,"transaction_type":economic_type,"category_id":{"type":["string","null"]},"amount":M,"income":M,"spending":M,"net_invested":M})),meta=obj({})))
+route("/analytics/summary","get","EconomicSummary",parameters=["from","to","scope","currency","account_id","category_id","member_id"])
+route("/classification-reviews","get",parameters=["from","to","scope","currency","limit"])
+route("/transactions/{id}/classification","post","Transaction","ClassificationInput",revision=True)
+route("/transactions/{id}/classification-undo","post","Transaction","Revision",revision=True)
+route("/classification-rules/preview","post",request="ClassificationRulePreviewInput")
+route("/classification-rules/apply","post",request="ClassificationRuleApplyInput")
+paths["/transactions"]["get"]["parameters"] += [{"name":key,"in":"query","schema":S} for key in ["transaction_type","classification_status","direction","min_amount","max_amount","currency","secondary_sort"]]
+
 document = {"openapi": "3.1.0", "info": {"title": "FinWise API", "version": "0.1.0", "description": "Core implementation. Check x-implemented for each operation. Deferred workflows return 501; unknown routes return 404."}, "servers": [{"url": "/api/v1"}], "paths": paths, "components": {"securitySchemes": {"session": {"type": "apiKey", "in": "cookie", "name": "finwise_session"}}, "schemas": schemas}}
 
 # Structural validation of generated references, operation IDs and path parameters.

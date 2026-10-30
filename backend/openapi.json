@@ -1174,6 +1174,55 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "transaction_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "classification_status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_amount",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_amount",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "secondary_sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "x-implemented": true,
@@ -3321,13 +3370,6 @@
         ],
         "parameters": [
           {
-            "name": "scope",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "from",
             "in": "query",
             "schema": {
@@ -3336,6 +3378,13 @@
           },
           {
             "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3368,27 +3417,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "grain",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "x-implemented": true,
@@ -3408,9 +3436,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {},
-                  "required": []
+                  "$ref": "#/components/schemas/EconomicSummary"
                 }
               }
             }
@@ -12112,6 +12138,358 @@
         },
         "parameters": []
       }
+    },
+    "/classification-reviews": {
+      "get": {
+        "operationId": "get_classification_reviews",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/{id}/classification": {
+      "post": {
+        "operationId": "post_transactions_id_classification",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transactions/{id}/classification-undo": {
+      "post": {
+        "operationId": "post_transactions_id_classification_undo",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/classification-rules/preview": {
+      "post": {
+        "operationId": "post_classification_rules_preview",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationRulePreviewInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/classification-rules/apply": {
+      "post": {
+        "operationId": "post_classification_rules_apply",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationRuleApplyInput"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12467,6 +12845,26 @@
           },
           "budget_destination": {
             "type": "string"
+          },
+          "transaction_type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "investment",
+              "transfer",
+              "reimbursement",
+              "refund",
+              "debt",
+              "adjustment",
+              "unknown"
+            ]
+          },
+          "member_id": {
+            "type": "string"
+          },
+          "offset_expense": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -14159,6 +14557,9 @@
               }
             },
             "required": []
+          },
+          "classification": {
+            "$ref": "#/components/schemas/TransactionClassification"
           }
         },
         "required": [
@@ -16800,6 +17201,371 @@
         "required": [
           "account_id"
         ]
+      },
+      "TransactionClassification": {
+        "type": "object",
+        "properties": {
+          "transaction_type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "investment",
+              "transfer",
+              "reimbursement",
+              "refund",
+              "debt",
+              "adjustment",
+              "unknown"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "suggested",
+              "needs_review"
+            ]
+          },
+          "confidence_score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "classification_source": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "rule",
+              "system"
+            ]
+          },
+          "confirmed_at": {
+            "type": "string"
+          },
+          "linked_transaction_id": {
+            "type": "string"
+          },
+          "investment_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "suggested_link_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_type",
+          "status",
+          "confidence_score",
+          "classification_source"
+        ]
+      },
+      "ClassificationSplit": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "transaction_type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "investment",
+              "transfer",
+              "reimbursement",
+              "refund",
+              "debt",
+              "adjustment",
+              "unknown"
+            ]
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "family"
+            ]
+          },
+          "member_id": {
+            "type": "string"
+          },
+          "offset_expense": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "amount",
+          "transaction_type",
+          "scope"
+        ]
+      },
+      "ClassificationInput": {
+        "type": "object",
+        "properties": {
+          "transaction_type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "investment",
+              "transfer",
+              "reimbursement",
+              "refund",
+              "debt",
+              "adjustment",
+              "unknown"
+            ]
+          },
+          "category_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "splits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClassificationSplit"
+            }
+          },
+          "linked_transaction_id": {
+            "type": "string"
+          },
+          "investment_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "transaction_type"
+        ]
+      },
+      "ClassificationRulePreviewInput": {
+        "type": "object",
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "transaction_type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "investment",
+              "transfer",
+              "reimbursement",
+              "refund",
+              "debt",
+              "adjustment",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "contains",
+          "transaction_type"
+        ]
+      },
+      "ClassificationRuleApplyInput": {
+        "type": "object",
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "transaction_type": {
+            "type": "string",
+            "enum": [
+              "income",
+              "expense",
+              "investment",
+              "transfer",
+              "reimbursement",
+              "refund",
+              "debt",
+              "adjustment",
+              "unknown"
+            ]
+          },
+          "save_rule": {
+            "type": "boolean"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "revision"
+              ]
+            }
+          }
+        },
+        "required": [
+          "contains",
+          "transaction_type",
+          "transactions"
+        ]
+      },
+      "EconomicSummary": {
+        "type": "object",
+        "properties": {
+          "income": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "net_spending": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "recorded_surplus": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "earned_income": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "actual_spending": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "gross_expenses": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "expense_offsets": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "net_invested": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "economic_surplus": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "after_investment_cash_flow": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "raw_credits": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "raw_debits": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "transfer_volume": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "unresolved_count": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "reconciliation": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          },
+          "breakdown": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transaction_id": {
+                  "type": "string"
+                },
+                "transaction_type": {
+                  "type": "string",
+                  "enum": [
+                    "income",
+                    "expense",
+                    "investment",
+                    "transfer",
+                    "reimbursement",
+                    "refund",
+                    "debt",
+                    "adjustment",
+                    "unknown"
+                  ]
+                },
+                "category_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "amount": {
+                  "type": "string",
+                  "pattern": "^-?\\d+(\\.\\d+)?$",
+                  "description": "Exact decimal money; never a JSON number."
+                },
+                "income": {
+                  "type": "string",
+                  "pattern": "^-?\\d+(\\.\\d+)?$",
+                  "description": "Exact decimal money; never a JSON number."
+                },
+                "spending": {
+                  "type": "string",
+                  "pattern": "^-?\\d+(\\.\\d+)?$",
+                  "description": "Exact decimal money; never a JSON number."
+                },
+                "net_invested": {
+                  "type": "string",
+                  "pattern": "^-?\\d+(\\.\\d+)?$",
+                  "description": "Exact decimal money; never a JSON number."
+                }
+              },
+              "required": []
+            }
+          },
+          "meta": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        "required": []
       }
     }
   }

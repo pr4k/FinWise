@@ -616,8 +616,6 @@ pub(crate) async fn investment_flows(
     let accounts: HashMap<_, _> = accounts.iter().filter_map(|a| a["id"].as_str().map(|id| (id, a))).collect();
     let holdings: Vec<_> = storage::list(db, p, "investments").await?.into_iter()
         .filter(|h| h["deleted"] != true && h["currency"] == currency && (scope != "family" || h["visibility"] == "shared")).collect();
-    let categories: HashSet<_> = storage::list(db, p, "categories").await?.into_iter()
-        .filter(|c| c["tracking_type"] == "investment").filter_map(|c| c["id"].as_str().map(str::to_owned)).collect();
     let mut result: HashMap<String, InvestmentFlows> = HashMap::new();
     for transaction in storage::transactions_in_period(db, p, from, to, false).await? {
         if transaction["voided"] == true || transaction["currency"] != currency { continue; }
@@ -648,7 +646,7 @@ pub(crate) async fn investment_flows(
                 let mut tagged = 0;
                 for line in transaction["allocations"].as_array().into_iter().flatten() {
                     let visible = line["scope"] == "family" || (line["scope"] == "personal" && transaction["entered_by"] == p.user_id);
-                    if visible && (scope != "family" || line["scope"] == "family") && line["category_id"].as_str().is_some_and(|id| categories.contains(id)) {
+                    if visible && (scope != "family" || line["scope"] == "family") && crate::classification::kind(&transaction,line)=="investment" {
                         tagged = add(tagged, money(text(line, "amount")?, currency)?)?;
                     }
                 }
@@ -1890,21 +1888,12 @@ pub async fn route(
             api::revision(headers, body, &before)?;
             let transaction_id = text(body, "transaction_id")?;
             let transaction = storage::get(db, p, "transactions", transaction_id).await?;
-            if transaction["voided"] == true || !["expense", "refund"].contains(&text(&transaction, "event_type")?) || transaction["currency"] != before["currency"] {
-                return Err(ApiError::invalid("Choose an active expense or refund in the holding currency."));
-            }
-            let allocations = transaction["allocations"].as_array().ok_or_else(|| ApiError::invalid("Invalid transaction allocations."))?;
-            if allocations.is_empty() || allocations.iter().any(|allocation| allocation["category_id"].is_null()) {
-                return Err(ApiError::invalid("Assign the whole transaction to investment categories first."));
-            }
-            for allocation in allocations {
-                let category = storage::get(db, p, "categories", text(allocation, "category_id")?).await?;
-                if category["tracking_type"] != "investment" {
-                    return Err(ApiError::invalid("All allocations must use investment categories."));
-                }
+            if transaction["voided"] == true || transaction["currency"] != before["currency"] || transaction["movements"].as_array().is_none_or(|legs|legs.len()!=1) {
+                return Err(ApiError::invalid("Choose an active investment flow in the holding currency."));
             }
             let currency = text(&before, "currency")?;
-            let transaction_amount = positive(&transaction, "amount", currency)?;
+            let transaction_amount = transaction["allocations"].as_array().into_iter().flatten().filter(|a|crate::classification::kind(&transaction,a)=="investment").try_fold(0,|sum,a|add(sum,money(text(a,"amount")?,currency)?))?;
+            if transaction_amount==0 {return Err(ApiError::invalid("Classify an investment allocation before linking this transaction."));}
             let amount = if body.get("amount").is_some() { positive(body, "amount", currency)? } else { transaction_amount };
             let allocated = linked_amount(db, p, transaction_id, currency, transaction_amount).await?;
             if amount > transaction_amount.checked_sub(allocated).ok_or_else(|| ApiError::invalid("Existing investment allocations exceed the transaction."))? {
@@ -1921,7 +1910,7 @@ pub async fn route(
             if record["linked_transaction_ids"].as_array().is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(transaction_id))) {
                 return Err(ApiError::conflict("This transaction is already linked to this holding."));
             }
-            let field = if transaction["event_type"] == "expense" { "contribution" } else { "withdrawal" };
+            let field = if crate::classification::credit(&transaction) { "withdrawal" } else { "contribution" };
             let mut previous = 0;
             let mut replaced = None;
             if let Some(movement_id) = body["replace_movement_id"].as_str() {

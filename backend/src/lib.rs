@@ -1,4 +1,5 @@
 pub mod api;
+pub mod classification;
 pub mod auth;
 pub mod budget_forecast;
 pub mod balances;
@@ -36,6 +37,27 @@ pub async fn connect(url: &str) -> Result<SqlitePool, sqlx::Error> {
         .max_connections(1)
         .connect_with(options)
         .await?;
+    // SQLite creates a consistent backup, including WAL contents, before the additive migration.
+    let mut db = pool.acquire().await?;
+    let existing: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name='resources'").fetch_one(&mut *db).await?;
+    if existing > 0 {
+        let applied: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_migrations WHERE version=15").fetch_one(&mut *db).await?;
+        if applied == 0 {
+            let path: String = sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name='main'").fetch_one(&mut *db).await?;
+            if !path.is_empty() {
+                let backup = format!("{}.before-classification-{}.sqlite",path,uuid::Uuid::new_v4());
+                let mut backup_options = std::fs::OpenOptions::new();
+                backup_options.write(true).create_new(true);
+                #[cfg(unix)] {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    backup_options.mode(0o600);
+                }
+                backup_options.open(&backup).map_err(sqlx::Error::Io)?;
+                sqlx::query("VACUUM INTO ?").bind(backup).execute(&mut *db).await?;
+            }
+        }
+    }
+    drop(db);
     sqlx::migrate!("./migrations").run(&pool).await?;
     imports::recover(&pool)
         .await

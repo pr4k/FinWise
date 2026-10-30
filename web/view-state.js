@@ -4,13 +4,16 @@
   const validScope = value => ['personal','family','combined'].includes(value);
   const accountTypes = ['bank','credit_card','cash','settle_up'];
   const eventTypes = ['expense','income','refund','transfer','investment','investment_withdrawal'];
+  const extraFilters={transactionType:'transaction_type',status:'classification_status',category:'category_id',person:'member_id',direction:'direction',minAmount:'min_amount',maxAmount:'max_amount',search:'q',from:'from',to:'to',currency:'currency',sort:'sort',secondarySort:'secondary_sort'};
   function readFilters(search) {
     const params=new URLSearchParams(search);
-    return {
+    const result = {
       account:params.get('account') || '',
       accountType:accountTypes.includes(params.get('account_type'))?params.get('account_type'):'',
       eventType:eventTypes.includes(params.get('event_type'))?params.get('event_type'):''
     };
+    for(const [key,param] of Object.entries(extraFilters)) if(params.get(param)) result[key]=params.get(param);
+    return result;
   }
   function read(search, fallbackMonth) {
     const params = new URLSearchParams(search);
@@ -24,7 +27,7 @@
     url.searchParams.set('month',month);
     url.searchParams.set('scope',scope);
     if(filters) {
-      for(const [param,value] of [['account',filters.account],['account_type',filters.accountType],['event_type',filters.eventType]]) {
+      for(const [param,value] of [['account',filters.account],['account_type',filters.accountType],['event_type',filters.eventType],...Object.entries(extraFilters).map(([key,param])=>[param,filters[key]])]) {
         if(value) url.searchParams.set(param,value); else url.searchParams.delete(param);
       }
     }
@@ -51,6 +54,7 @@
       if(!eventTypes.includes(filters.eventType)) throw new Error('Invalid transaction type.');
       params.set('event_type',filters.eventType);
     }
+    for(const [key,param] of Object.entries(extraFilters)) if(filters[key]) params.set(param,filters[key]);
     return `transactions${params.size?`?${params}`:''}`;
   }
   window.finwiseViewState = { read, readFilters, save, transactionsPath };

@@ -23,7 +23,7 @@ async fn fixture(db: &mut SqliteConnection, count: i64) -> Principal {
         sqlx::query("INSERT INTO resources(id,household_id,owner_id,kind,document,created_at) VALUES(?,'h','u','accounts',?,'')")
             .bind(id).bind(document.to_string()).execute(&mut *db).await.unwrap();
     }
-    sqlx::query("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?) INSERT INTO resources(id,household_id,owner_id,kind,document,created_at) SELECT printf('t%05d',i),'h','u','transactions',json_object('id',printf('t%05d',i),'currency','INR','effective_date',CASE WHEN i%60=0 THEN '2026-10-15' ELSE '2025-01-01' END,'source_refs',json('[]'),'movements',json('[{\"account_id\":\"a\",\"amount\":\"-10.00\"}]')),'' FROM n")
+    sqlx::query("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?) INSERT INTO resources(id,household_id,owner_id,kind,document,created_at) SELECT printf('t%05d',i),'h','u','transactions',json_object('id',printf('t%05d',i),'currency','INR','amount','10.00','event_type','expense','allocations',json('[]'),'effective_date',CASE WHEN i%60=0 THEN '2026-10-15' ELSE '2025-01-01' END,'source_refs',json('[]'),'movements',json('[{\"account_id\":\"a\",\"amount\":\"-10.00\"}]')),'' FROM n")
         .bind(count).execute(&mut *db).await.unwrap();
     sqlx::query("INSERT INTO import_occurrences(id,household_id,account_id,fingerprint,occurrence,transaction_id,source_refs_json) SELECT id,'h','a',id,1,id,'[{\"file_id\":\"synthetic\",\"row_number\":1}]' FROM resources WHERE kind='transactions'")
         .execute(&mut *db).await.unwrap();

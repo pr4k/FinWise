@@ -53,11 +53,13 @@ test('dashboard renders available account balances and reserves separately',asyn
   const context=helpers();
   Object.assign(context,{
     state:{month:'2026-10',scope:'combined',me:{household:{base_currency:'INR'}},accounts:[account],categories:[]},
-    reportQuery:()=>'',Date,Map,
-    api:{request:async path=>path.startsWith('analytics/dashboard')?{summary:{recorded_surplus:'0.00',income:'0.00',net_spending:'0.00'},categories:{data:[]},accounts:{data:[account]}}:{data:[]},collection:async()=>({data:[]})},
+    reportQuery:()=>'',period:()=>({from:'2026-10-01',to:'2026-11-01'}),Date,Map,URLSearchParams,smartReviewPanel:()=>'',
+    api:{request:async path=>path.startsWith('analytics/dashboard')?{summary:{recorded_surplus:'0.00',income:'0.00',net_spending:'0.00',after_investment_cash_flow:'0.00',unresolved_count:0},series:{data:[]},categories:{data:[]},accounts:{data:[account]}}:{data:[]},collection:async()=>({data:[]})},
     allInvestments:async()=>[],categoryView:{rollup:()=>new Map()},moneyTone:()=>'',
-    responsiveAmount:String,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
+    responsiveAmount:String,field:(_label,control)=>control,option:(value,label)=>`<option value="${value}">${label}</option>`,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
   });
+  context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
+  context.analyticsView.groupedBars=()=>'';
   const start=source.indexOf('  async overview() {');
   const end=source.indexOf('\n  async analytics()',start);
   vm.runInContext('var view={'+source.slice(start,end)+'};',context);

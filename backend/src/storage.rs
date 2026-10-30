@@ -47,6 +47,7 @@ pub async fn visible(
     v: &Value,
 ) -> Result<bool> {
     match kind {
+        "classification_rules" => Ok(v["owner_id"] == p.user_id),
         "accounts" => account_visible(db, p, v).await,
         "categories" => Ok(v["owner_id"] == p.user_id || v["visibility"] != "private"),
         "transactions" => {
@@ -99,6 +100,7 @@ pub async fn visible(
 async fn visible_asset_for_goal(db: &mut SqliteConnection, p: &Principal, kind: &str, asset: &Value) -> Result<bool> {
     match kind {
         "investments" => Ok(asset["owner_id"] == p.user_id || asset["visibility"] == "shared"),
+        "classification_rules" => Ok(asset["owner_id"] == p.user_id),
         "accounts" => account_visible(db, p, asset).await,
         _ => Ok(false),
     }
@@ -145,6 +147,7 @@ pub async fn get(db: &mut SqliteConnection, p: &Principal, kind: &str, id: &str)
         return Err(ApiError::missing());
     }
     if kind == "transactions" {
+        Box::pin(crate::classification::enrich(db,p,std::slice::from_mut(&mut value))).await?;
         decorate_transactions(db, p, std::slice::from_mut(&mut value)).await?;
     }
     Ok(value)
@@ -175,6 +178,7 @@ pub async fn list(db: &mut SqliteConnection, p: &Principal, kind: &str) -> Resul
         }
     }
     if kind == "transactions" {
+        Box::pin(crate::classification::enrich(db,p,&mut result)).await?;
         decorate_transactions(db, p, &mut result).await?;
     }
     Ok(result)
@@ -224,6 +228,7 @@ pub async fn transactions_in_range(
             result.push(value);
         }
     }
+    Box::pin(crate::classification::enrich(db,p,&mut result)).await?;
     if decorate {
         decorate_transactions(db, p, &mut result).await?;
     }
@@ -289,6 +294,9 @@ pub async fn create(
             value["money_manager_excluded"] = json!(true);
         }
     }
+    if kind == "transactions" && value["classification"].is_null() {
+        value["classification"] = crate::classification::baseline(&value,value["source_refs"].as_array().is_some_and(Vec::is_empty));
+    }
     let id = id();
     value["id"] = json!(id);
     value["revision"] = json!(1);
@@ -306,6 +314,10 @@ pub async fn update(
     mut value: Value,
     action: &str,
 ) -> Result<Value> {
+    if value.get("event_type").is_some() && value["event_type"] != before["event_type"] && value["classification"] == before["classification"] {
+        value["classification"] = crate::classification::baseline(&value,true);
+    }
+    crate::classification::validate_dependents(db,p,before,&value).await?;
     let id = text(before, "id")?;
     let revision = before["revision"].as_i64().unwrap_or(1) + 1;
     value["id"] = before["id"].clone();

@@ -225,15 +225,10 @@ pub async fn expense_calendar(state: &AppState, query: &Query) -> Result<Reply> 
     let last = std::cmp::min(month_end, today);
     let mut days = Vec::new();
     if last >= month_start {
-        let categories = storage::list(&mut db, &p, "categories").await?;
-        let by_id: HashMap<String, Value> = categories
-            .into_iter()
-            .filter_map(|c| c["id"].as_str().map(|id| (id.to_owned(), c.clone())))
-            .collect();
         let from = month_start.to_string();
         let to = (last + Duration::days(1)).to_string();
         let mut amounts = vec![0_i64; (last - month_start).num_days() as usize + 1];
-        for tx in storage::transactions_in_period(&mut db, &p, &from, &to, false).await? {
+        for tx in crate::classification::reporting(storage::transactions_in_period(&mut db, &p, &from, &to, false).await?) {
             if tx["voided"] == true
                 || tx["currency"] != currency
                 || !matches!(tx["event_type"].as_str(), Some("expense" | "refund"))
@@ -257,13 +252,7 @@ pub async fn expense_calendar(state: &AppState, query: &Query) -> Result<Reply> 
             }
             let mut amount = 0_i64;
             for allocation in tx["allocations"].as_array().into_iter().flatten() {
-                if !allocation_in_scope(allocation, &tx, &p, scope)
-                    || is_card_settlement(
-                        allocation["category_id"].as_str().unwrap_or("uncategorized"),
-                        &by_id,
-                    )
-                    || by_id.get(allocation["category_id"].as_str().unwrap_or("")).is_some_and(|category| category["tracking_type"] == "investment")
-                {
+                if !allocation_in_scope(allocation, &tx, &p, scope) {
                     continue;
                 }
                 let value = money(text(allocation, "amount")?, currency)?;
@@ -451,7 +440,7 @@ async fn calculate(
     let mut grouped: HashMap<String, i64> = HashMap::new();
     let from = std::cmp::min(std::cmp::min(monday, month_start), seven_start).to_string();
     let to = (today + Duration::days(1)).to_string();
-    for tx in storage::transactions_in_period(db, p, &from, &to, false).await? {
+    for tx in crate::classification::reporting(storage::transactions_in_period(db, p, &from, &to, false).await?) {
         if tx["voided"] == true
             || tx["currency"] != currency
             || !matches!(tx["event_type"].as_str(), Some("expense" | "refund"))
@@ -480,9 +469,6 @@ async fn calculate(
             let category_id = allocation["category_id"]
                 .as_str()
                 .unwrap_or("uncategorized");
-            if is_card_settlement(category_id, &by_id) || by_id.get(category_id).is_some_and(|category| category["tracking_type"] == "investment") {
-                continue;
-            }
             let amount = money(text(allocation, "amount")?, currency)?;
             let signed = if sign < 0 { -amount } else { amount };
             eligible = add(eligible, signed)?;
@@ -573,7 +559,7 @@ async fn calculate(
 }
 
 fn allocation_in_scope(allocation: &Value, tx: &Value, p: &Principal, scope: &str) -> bool {
-    let personal = allocation["scope"] == "personal" && tx["entered_by"] == p.user_id;
+    let personal = allocation["scope"] == "personal" && allocation["member_id"].as_str().or_else(||tx["entered_by"].as_str()) == Some(p.user_id.as_str());
     let family = allocation["scope"] == "family";
     match scope {
         "personal" => personal,
@@ -619,33 +605,6 @@ fn category_group(id: &str, categories: &HashMap<String, Value>, include_childre
     current
 }
 
-fn is_card_settlement(id: &str, categories: &HashMap<String, Value>) -> bool {
-    let mut current = id.to_owned();
-    let mut seen = HashSet::new();
-    while seen.insert(current.clone()) {
-        let Some(category) = categories.get(&current) else {
-            break;
-        };
-        if category["name"].as_str().is_some_and(|name| {
-            matches!(
-                name.trim().to_ascii_lowercase().as_str(),
-                "credit card settlement"
-                    | "card settlement"
-                    | "credit card payment"
-                    | "card payment"
-                    | "credit card repayment"
-                    | "card repayment"
-            )
-        }) {
-            return true;
-        }
-        let Some(parent) = category["parent_id"].as_str() else {
-            break;
-        };
-        current = parent.to_owned();
-    }
-    false
-}
 
 #[cfg(test)]
 mod tests {

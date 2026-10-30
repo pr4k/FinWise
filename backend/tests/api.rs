@@ -4698,6 +4698,8 @@ async fn xlsx_import_exact_money_multiplicity_pairing_and_repeat_upload() {
         )
         .await;
     assert_eq!(replay.1, committed.1);
+    // A correction must survive exact re-import without creating another transaction.
+    let corrected=classify(&client,txs["data"].as_array().unwrap().iter().find(|v|v["event_type"]=="expense").unwrap(),json!({"transaction_type":"investment"})).await;
     let (status, second) =
         upload_file(&client, manifest, "month.xlsx", fixture, "second-upload").await;
     assert_eq!(status, StatusCode::ACCEPTED);
@@ -4733,6 +4735,9 @@ async fn xlsx_import_exact_money_multiplicity_pairing_and_repeat_upload() {
     assert_eq!(repeat.0, StatusCode::OK, "{}", repeat.1);
     assert_eq!(repeat.1["counts"]["created"], 0);
     assert_eq!(repeat.1["counts"]["paired_transfers"], 0);
+    let preserved=client.call("GET",&format!("transactions/{}",corrected["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(preserved["classification"],corrected["classification"]);
+    assert_eq!(preserved["revision"],corrected["revision"]);
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM resources WHERE kind='transactions'")
         .fetch_one(&pool)
         .await
@@ -7594,4 +7599,153 @@ async fn subscription_assignment_is_atomic_and_respects_account_privacy() {
     let invalid = owner.call("PATCH", &path, json!({"description":"Should roll back","subscription":{"name":" "}}), None, Some(1)).await;
     assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
     assert_eq!(owner.call("GET", &path, json!({}), None, None).await.1["revision"], 1);
+}
+
+// Classification is independent from the imported ledger and applies to all report consumers.
+async fn classify(client: &Client, tx: &Value, body: Value) -> Value {
+    let result=client.call("POST",&format!("transactions/{}/classification",tx["id"].as_str().unwrap()),body,Some(&uuid::Uuid::new_v4().to_string()),tx["revision"].as_i64()).await;
+    assert_eq!(result.0,StatusCode::OK,"{}",result.1);result.1
+}
+async fn classified_summary(client: &Client, scope: &str) -> Value {
+    let result=client.call("GET",&format!("analytics/summary?from=2026-09-01&to=2026-10-01&scope={scope}"),json!({}),None,None).await;
+    assert_eq!(result.0,StatusCode::OK,"{}",result.1);result.1
+}
+#[tokio::test]
+async fn classification_splits_reimbursements_debt_and_exact_reporting() {
+    let (c,_)=setup().await;
+    let bank=c.account("Bank","bank").await;let food=c.category("Food","expense").await;let salary=c.category("Salary","income").await;
+    c.transaction("income","1000.01",&bank,&salary,"personal").await;
+    let expense=c.transaction("expense","100.03",&bank,&food,"personal").await;
+    let expense=classify(&c,&expense,json!({"transaction_type":"expense","splits":[{"amount":"60.01","scope":"personal","transaction_type":"expense","category_id":food["id"]},{"amount":"40.02","scope":"personal","transaction_type":"debt"}]})).await;
+    let reimb=c.transaction("income","40.02",&bank,&salary,"personal").await;
+    classify(&c,&reimb,json!({"transaction_type":"reimbursement","linked_transaction_id":expense["id"]})).await;
+    let offset=c.transaction("income","10.01",&bank,&salary,"personal").await;
+    classify(&c,&offset,json!({"transaction_type":"reimbursement","linked_transaction_id":expense["id"],"splits":[{"amount":"10.01","scope":"personal","transaction_type":"reimbursement","offset_expense":true}]})).await;
+    let investment=c.transaction("expense","20.02",&bank,&food,"personal").await;
+    classify(&c,&investment,json!({"transaction_type":"investment"})).await;
+    let debt=c.transaction("income","300.03",&bank,&salary,"personal").await;
+    classify(&c,&debt,json!({"transaction_type":"debt"})).await;
+    let unknown=c.transaction("expense","7.07",&bank,&food,"personal").await;
+    classify(&c,&unknown,json!({"transaction_type":"unknown"})).await;
+    let summary=classified_summary(&c,"personal").await;
+    assert_eq!(summary["earned_income"],"1000.01");assert_eq!(summary["actual_spending"],"50.00");assert_eq!(summary["net_invested"],"20.02");assert_eq!(summary["economic_surplus"],"950.01");assert_eq!(summary["after_investment_cash_flow"],"929.99");
+    assert_eq!(summary["reconciliation"]["unknown_debits"],"7.07");
+    assert_eq!(summary["raw_credits"],"1350.07");assert_eq!(summary["raw_debits"],"127.12");
+    let category=c.call("GET","analytics/categories?from=2026-09-01&to=2026-10-01",json!({}),None,None).await.1;
+    let net=category["data"].as_array().unwrap().iter().map(|r|finwise_api::domain::money(r["amount"].as_str().unwrap(),"INR").unwrap()).sum::<i64>();assert_eq!(net,5000);
+    let read=c.call("GET",&format!("transactions/{}",expense["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(read["amount"],"100.03");assert_eq!(read["movements"][0]["amount"],"-100.03");assert_eq!(read["event_type"],"expense");
+    let excessive=c.transaction("income","60.01",&bank,&salary,"personal").await;
+    let rejected=c.call("POST",&format!("transactions/{}/classification",excessive["id"].as_str().unwrap()),json!({"transaction_type":"reimbursement","linked_transaction_id":expense["id"],"splits":[{"amount":"60.01","scope":"personal","transaction_type":"reimbursement","offset_expense":true}]}),Some("excess-offset"),Some(1)).await;
+    assert_eq!(rejected.0,StatusCode::BAD_REQUEST,"{}",rejected.1);
+}
+#[tokio::test]
+async fn classification_transfer_pair_card_payment_audit_and_undo() {
+    let (c,_)=setup().await;let bank=c.account("Bank","bank").await;let card=c.account("Card","credit_card").await;
+    let expense_category=c.category("Purchase","expense").await;let income_category=c.category("Incoming","income").await;
+    c.transaction("expense","25.01",&card,&expense_category,"personal").await;
+    let debit=c.transaction("expense","25.01",&bank,&expense_category,"personal").await;
+    let credit=c.transaction("income","25.01",&card,&income_category,"personal").await;
+    let saved=classify(&c,&debit,json!({"transaction_type":"transfer","linked_transaction_id":credit["id"]})).await;
+    let summary=classified_summary(&c,"combined").await;
+    assert_eq!(summary["income"],"0.00");assert_eq!(summary["net_spending"],"25.01");
+    assert_eq!(summary["reconciliation"]["transfer_debits"],"25.01");assert_eq!(summary["reconciliation"]["transfer_credits"],"25.01");
+    let undo=c.call("POST",&format!("transactions/{}/classification-undo",debit["id"].as_str().unwrap()),json!({}),Some("undo-transfer-pair"),saved["revision"].as_i64()).await;
+    assert_eq!(undo.0,StatusCode::OK,"{}",undo.1);
+    let summary=classified_summary(&c,"combined").await;assert_eq!(summary["income"],"25.01");assert_eq!(summary["net_spending"],"50.02");
+    let history=c.call("GET",&format!("transactions/{}/revisions",debit["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert!(history["data"].as_array().unwrap().iter().any(|v|v["action"]=="classification_undo"));
+}
+#[tokio::test]
+async fn classification_review_matching_is_suggested_and_ranked_not_amount_confirmed() {
+    let (c,pool)=setup().await;let a=c.account("A","bank").await;let b=c.account("B","bank").await;let expense=c.category("Expense","expense").await;let income=c.category("Income","income").await;
+    let debit=c.transaction("expense","500.00",&a,&expense,"personal").await;
+    let credit=c.transaction("income","500.00",&b,&income,"personal").await;
+    for tx in [&debit,&credit] {sqlx::query("UPDATE resources SET document=json_set(document,'$.classification.classification_source','system','$.classification.status','needs_review','$.classification.confidence_score',50) WHERE id=?").bind(tx["id"].as_str().unwrap()).execute(&pool).await.unwrap();}
+    for amount in ["1.00","2.00","3.00","4.00","5.00","6.00"] {
+        let t=c.transaction("expense",amount,&a,&expense,"personal").await;
+        sqlx::query("UPDATE resources SET document=json_set(document,'$.classification.classification_source','system','$.classification.status','needs_review','$.classification.transaction_type','unknown','$.classification.confidence_score',30) WHERE id=?").bind(t["id"].as_str().unwrap()).execute(&pool).await.unwrap();
+    }
+    let review=c.call("GET","classification-reviews?from=2026-09-01&to=2026-10-01&scope=personal&currency=INR",json!({}),None,None).await;
+    assert_eq!(review.0,StatusCode::OK,"{}",review.1);assert_eq!(review.1["data"].as_array().unwrap().len(),5);assert_eq!(review.1["pending_count"],8);
+    assert_eq!(review.1["data"][0]["classification"]["transaction_type"],"transfer");assert_eq!(review.1["data"][0]["classification"]["status"],"suggested");
+    let before=review.1["data"][0].clone();classify(&c,&before,json!({"transaction_type":"transfer","linked_transaction_id":before["classification"]["suggested_link_id"]})).await;
+    let review=c.call("GET","classification-reviews",json!({}),None,None).await.1;assert_eq!(review["pending_count"],6);assert_eq!(review["data"].as_array().unwrap().len(),5);
+}
+#[tokio::test]
+async fn classification_filters_sort_all_rows_before_cursor_pagination() {
+    let (c,_)=setup().await;let bank=c.account("Bank","bank").await;let food=c.category("Food","expense").await;
+    for (amount,merchant) in [("100.00","Zed"),("2.00","Bee"),("10.00","Aye"),("2.00","Aye")] {let mut tx=transaction("expense",amount,&bank,&food,"family");tx["merchant"]=json!(merchant);c.create("transactions",tx).await;}
+    let query="transactions?scope=family&transaction_type=expense&classification_status=confirmed&direction=debit&min_amount=2.00&max_amount=100.00&sort=amount&secondary_sort=merchant&limit=2";
+    let first=c.call("GET",query,json!({}),None,None).await;assert_eq!(first.0,StatusCode::OK,"{}",first.1);assert_eq!(first.1["data"][0]["merchant"],"Aye");assert_eq!(first.1["data"][1]["merchant"],"Bee");
+    let cursor=first.1["page"]["next_cursor"].as_str().unwrap();let next=c.call("GET",&format!("{query}&cursor={cursor}"),json!({}),None,None).await;assert_eq!(next.0,StatusCode::OK,"{}",next.1);assert_eq!(next.1["data"][0]["amount"],"10.00");assert_eq!(next.1["data"][1]["amount"],"100.00");
+    assert_eq!(classified_summary(&c,"combined").await["net_spending"],"114.00");assert_eq!(classified_summary(&c,"family").await["net_spending"],"114.00");assert_eq!(classified_summary(&c,"personal").await["net_spending"],"0.00");
+}
+#[tokio::test]
+async fn classification_bulk_preview_revision_approval_and_private_access() {
+    let (c,_)=setup().await;let (other,_)=partner(&c).await;let bank=c.account("Private","bank").await;let food=c.category("Food","expense").await;
+    let mut tx=transaction("expense","50.00",&bank,&food,"personal");tx["description"]=json!("Synthetic broker");let tx=c.create("transactions",tx).await;
+    let preview=c.call("POST","classification-rules/preview",json!({"contains":"broker","transaction_type":"investment"}),Some("rule-preview"),None).await;
+    assert_eq!(preview.0,StatusCode::OK,"{}",preview.1);assert_eq!(preview.1["data"].as_array().unwrap().len(),1);
+    let denied=other.call("POST",&format!("transactions/{}/classification",tx["id"].as_str().unwrap()),json!({"transaction_type":"investment"}),Some("private-classify"),Some(1)).await;assert_eq!(denied.0,StatusCode::NOT_FOUND);
+    let stale=c.call("POST","classification-rules/apply",json!({"contains":"broker","transaction_type":"investment","transactions":[{"id":tx["id"],"revision":99}]}),Some("stale-rule"),None).await;assert_eq!(stale.0,StatusCode::CONFLICT);
+    let applied=c.call("POST","classification-rules/apply",json!({"contains":"broker","transaction_type":"investment","save_rule":true,"transactions":[{"id":tx["id"],"revision":1}]}),Some("apply-rule"),None).await;assert_eq!(applied.0,StatusCode::OK,"{}",applied.1);
+    assert_eq!(classified_summary(&c,"personal").await["net_invested"],"50.00");
+}
+
+#[tokio::test]
+async fn classification_migration_backs_up_legacy_database_without_changing_ledger() {
+    let temporary=tempfile::tempdir().unwrap();let path=temporary.path().join("legacy.sqlite");let url=format!("sqlite://{}",path.display());
+    let pool=connect(&url).await.unwrap();
+    sqlx::query("INSERT INTO households(id,document) VALUES('h','{}')").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO users(id,email,name,password_hash) VALUES('u','migration@example.test','Migration','unused')").execute(&pool).await.unwrap();
+    let document=json!({"id":"tx","event_type":"expense","amount":"10.01","currency":"INR","effective_date":"2026-09-15","movements":[{"account_id":"a","amount":"-10.01"}],"allocations":[{"amount":"10.01","scope":"personal"}],"source_refs":[{"file_id":"original-statement"}]});
+    sqlx::query("INSERT INTO resources(id,household_id,owner_id,kind,document,created_at) VALUES('tx','h','u','transactions',?,'2026-09-15')").bind(document.to_string()).execute(&pool).await.unwrap();
+    sqlx::query("DROP INDEX classification_review").execute(&pool).await.unwrap();sqlx::query("DELETE FROM _sqlx_migrations WHERE version=15").execute(&pool).await.unwrap();pool.close().await;
+    let pool=connect(&url).await.unwrap();let migrated:String=sqlx::query_scalar("SELECT document FROM resources WHERE id='tx'").fetch_one(&pool).await.unwrap();let migrated:Value=serde_json::from_str(&migrated).unwrap();
+    assert_eq!(migrated["movements"],document["movements"]);assert_eq!(migrated["allocations"],document["allocations"]);assert_eq!(migrated["source_refs"],document["source_refs"]);assert_eq!(migrated["classification"]["status"],"needs_review");
+    let backups:Vec<_>=std::fs::read_dir(temporary.path()).unwrap().filter_map(|v|v.ok()).filter(|v|v.file_name().to_string_lossy().contains("before-classification")).collect();assert_eq!(backups.len(),1);
+    let backup=sqlx::SqlitePool::connect(&format!("sqlite://{}",backups[0].path().display())).await.unwrap();let original:String=sqlx::query_scalar("SELECT document FROM resources WHERE id='tx'").fetch_one(&backup).await.unwrap();assert_eq!(serde_json::from_str::<Value>(&original).unwrap(),document);backup.close().await;pool.close().await;
+    let pool=connect(&url).await.unwrap();assert_eq!(std::fs::read_dir(temporary.path()).unwrap().filter_map(|v|v.ok()).filter(|v|v.file_name().to_string_lossy().contains("before-classification")).count(),1);pool.close().await;
+}
+
+#[tokio::test]
+async fn classification_investment_link_and_budget_consumers_share_split_amounts() {
+    let (c,_)=setup().await;let bank=c.account("Bank","bank").await;let food=c.category("Food","expense").await;
+    let budget=c.create("budgets",json!({"month":"2026-09","scope":"personal","currency":"INR","expected_income":"1000.00","lines":[{"category_id":food["id"],"amount":"25.00"}]})).await;
+    let holding=c.create("investments",json!({"name":"Fund","type":"investment","currency":"INR"})).await;
+    let tx=c.transaction("expense","100.03",&bank,&food,"personal").await;
+    classify(&c,&tx,json!({"transaction_type":"expense","investment_id":holding["id"],"splits":[{"transaction_type":"expense","amount":"30.01","category_id":food["id"],"scope":"personal"},{"transaction_type":"investment","amount":"70.02","scope":"personal"}]})).await;
+    let summary=classified_summary(&c,"personal").await;assert_eq!(summary["net_spending"],"30.01");assert_eq!(summary["net_invested"],"70.02");
+    let root=format!("budgets/{}",budget["id"].as_str().unwrap());
+    for endpoint in ["tracking","people","matrix","forecast","allocations"] {
+        let response=c.call("GET",&format!("{root}/{endpoint}"),json!({}),None,None).await;assert_eq!(response.0,StatusCode::OK,"{}",response.1);
+        match endpoint {"tracking"=>{assert_eq!(response.1["data"][0]["actual"],"30.01");assert!(response.1["data"][0]["utilization"].as_f64().unwrap()>1.0);},"matrix"|"people"=>assert_eq!(response.1["total_spent"],"30.01"),"allocations"=>assert_eq!(response.1["data"][0]["amount"],"30.01"),_=>{}}
+    }
+    let read=c.call("GET",&format!("investments/{}",holding["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(read["records"][0]["contribution"],"70.02");
+    let report=c.call("GET","investments/report?month=2026-09&scope=personal&currency=INR",json!({}),None,None).await.1;assert_eq!(report["net_invested"],"70.02");
+}
+#[tokio::test]
+async fn classification_matching_is_identical_across_month_filters_and_detail_reads() {
+    let (c,pool)=setup().await;let a=c.account("A","bank").await;let b=c.account("B","bank").await;let food=c.category("Food","expense").await;let income=c.category("Income","income").await;
+    let mut debit=transaction("expense","50.00",&a,&food,"personal");debit["effective_date"]=json!("2026-09-30");let debit=c.create("transactions",debit).await;
+    let mut credit=transaction("income","50",&b,&income,"personal");credit["effective_date"]=json!("2026-10-01");let credit=c.create("transactions",credit).await;
+    for tx in [&debit,&credit] {sqlx::query("UPDATE resources SET document=json_set(document,'$.classification.classification_source','system','$.classification.status','needs_review','$.classification.confidence_score',50) WHERE id=?").bind(tx["id"].as_str().unwrap()).execute(&pool).await.unwrap();}
+    let detail=c.call("GET",&format!("transactions/{}",debit["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    let month=c.call("GET","transactions?from=2026-09-01&to=2026-10-01",json!({}),None,None).await.1;
+    assert_eq!(month["data"][0]["classification"],detail["classification"]);assert_eq!(detail["classification"]["transaction_type"],"transfer");assert_eq!(detail["classification"]["status"],"suggested");assert_eq!(detail["classification"]["suggested_link_id"],credit["id"]);
+}
+
+#[tokio::test]
+async fn classification_offsets_follow_original_categories_members_and_scope() {
+    let (c,_)=setup().await;let bank=c.account("Bank","bank").await;let food=c.category("Food","expense").await;let rent=c.category("Rent","expense").await;let earnings=c.category("Income","income").await;
+    let expense=c.transaction("expense","100.00",&bank,&food,"family").await;
+    let expense=classify(&c,&expense,json!({"transaction_type":"expense","splits":[{"transaction_type":"expense","scope":"family","category_id":food["id"],"amount":"40.00"},{"transaction_type":"expense","scope":"family","category_id":rent["id"],"amount":"60.00"}]})).await;
+    let reimbursement=c.transaction("income","100.00",&bank,&earnings,"family").await;
+    classify(&c,&reimbursement,json!({"transaction_type":"reimbursement","linked_transaction_id":expense["id"],"splits":[{"transaction_type":"reimbursement","scope":"family","category_id":food["id"],"amount":"40.00","offset_expense":true},{"transaction_type":"reimbursement","scope":"family","category_id":rent["id"],"amount":"60.00","offset_expense":true}]})).await;
+    assert_eq!(classified_summary(&c,"family").await["net_spending"],"0.00");assert_eq!(classified_summary(&c,"personal").await["net_spending"],"0.00");
+    let incorrect=c.call("PATCH",&format!("transactions/{}",expense["id"].as_str().unwrap()),json!({"allocations":[{"transaction_type":"expense","scope":"family","category_id":rent["id"],"amount":"100.00"}]}),None,expense["revision"].as_i64()).await;
+    assert_eq!(incorrect.0,StatusCode::CONFLICT,"{}",incorrect.1);
+    let deleted=c.call("DELETE",&format!("transactions/{}",expense["id"].as_str().unwrap()),json!({"reason":"Test linked expense protection"}),None,expense["revision"].as_i64()).await;assert_eq!(deleted.0,StatusCode::CONFLICT,"{}",deleted.1);
 }

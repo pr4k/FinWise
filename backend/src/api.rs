@@ -4,7 +4,7 @@ use crate::{
     balances,
     domain::{self, add, format_money, money, text},
     error::{ApiError, Result},
-    imports, planning, quick, reconciliation, recurring, storage, widgets,
+    imports, planning, quick, reconciliation, recurring, storage, widgets, classification,
 };
 use axum::{
     Json,
@@ -536,6 +536,9 @@ pub(crate) async fn route(
     headers: &HeaderMap,
     body: &Value,
 ) -> Result<Reply> {
+    if path.starts_with("classification-") || path.ends_with("/classification") || path.ends_with("/classification-undo") {
+        return ok(classification::route(db,p,method,path,q,headers,body).await?);
+    }
     if method == "POST" && ["data/reset-preview", "data/reset"].contains(&path) {
         return ok(crate::reset::run(db, p, body, path == "data/reset").await?);
     }
@@ -906,15 +909,9 @@ pub(crate) async fn route(
                     });
                 }
                 if *kind == "transfers" {
-                    values.retain(|v| v["event_type"] == "transfer");
+                    values.retain(|v| v["classification"]["transaction_type"] == "transfer" || v["allocations"].as_array().is_some_and(|lines|lines.iter().any(|a|classification::kind(v,a)=="transfer")));
                 }
-                values.sort_by(|a, b| {
-                    (b["effective_date"].as_str(), b["id"].as_str())
-                        .cmp(&(a["effective_date"].as_str(), a["id"].as_str()))
-                });
-                if q.get("sort").is_some_and(|v| v == "effective_date") {
-                    values.reverse();
-                }
+                sort_transactions(db,p,&mut values,q).await?;
             } else {
                 let allowed: &[&str] = match source {
                     "accounts" => &["include_archived", "cursor", "limit"],
@@ -1084,6 +1081,9 @@ pub(crate) async fn route(
                         after.as_object_mut().unwrap().remove("paid_by_user_id");
                     } else if after["paid_by_user_id"].is_null() {
                         after["paid_by_user_id"] = json!(p.user_id);
+                    }
+                    if after["event_type"] != before["event_type"] || after["allocations"] != before["allocations"] {
+                        after["classification"] = classification::baseline(&after,true);
                     }
                     validate_ledger_with_history(db, p, &after, Some(&before)).await?;
                 }
@@ -1736,6 +1736,7 @@ pub(crate) async fn validate_ledger_with_history(
     before: Option<&Value>,
 ) -> Result<()> {
     domain::validate_transaction(v)?;
+    if v["allocations"].as_array().into_iter().flatten().any(|a|a["offset_expense"]==true) && before.is_none_or(|old|old["allocations"]!=v["allocations"]) {return Err(ApiError::invalid("Use transaction classification to verify expense offsets."));}
     if let Some(payer) = v.get("paid_by_user_id") {
         let payer = payer.as_str().ok_or_else(|| ApiError::invalid("Paid by must be a household member."))?;
         let active: i64 = sqlx::query_scalar("SELECT count(*) FROM memberships WHERE household_id=? AND user_id=? AND active=1")
@@ -1846,7 +1847,7 @@ fn validate_transaction_query(q: &Query) -> Result<()> {
             "account_type",
             "member_id",
             "category_id",
-            "event_type",
+            "event_type", "transaction_type", "classification_status", "direction", "min_amount", "max_amount", "currency", "secondary_sort",
             "reconciliation_state",
             "from",
             "to",
@@ -1857,13 +1858,16 @@ fn validate_transaction_query(q: &Query) -> Result<()> {
             "scope",
         ],
     )?;
-    if let Some(sort) = q.get("sort")
-        && !["effective_date", "-effective_date"].contains(&sort.as_str())
-    {
-        return Err(ApiError::invalid(
-            "sort must be effective_date or -effective_date.",
-        ));
+    for key in ["sort","secondary_sort"] {
+        if let Some(sort)=q.get(key) {
+            if !["effective_date","amount","merchant","category","account","person","transaction_type","confidence","review_status"].contains(&sort.trim_start_matches('-')) {return Err(ApiError::invalid("Invalid sort column."));}
+        }
     }
+    if let Some(value)=q.get("transaction_type") {if !classification::TYPES.contains(&value.as_str()) {return Err(ApiError::invalid("Invalid transaction_type."));}}
+    if let Some(value)=q.get("classification_status") {if !["confirmed","suggested","needs_review","pending"].contains(&value.as_str()) {return Err(ApiError::invalid("Invalid classification_status."));}}
+    if let Some(value)=q.get("direction") {if !["credit","debit"].contains(&value.as_str()) {return Err(ApiError::invalid("Invalid direction."));}}
+    if let Some(currency)=q.get("currency") {domain::exponent(currency)?;}
+    for key in ["min_amount","max_amount"] {if let Some(value)=q.get(key) {if money(value,q.get("currency").map(String::as_str).unwrap_or("INR"))?<0 {return Err(ApiError::invalid("Amount bounds must be nonnegative."));}}}
     if let Some(account_type) = q.get("account_type")
         && !["bank", "credit_card", "cash", "investment_cash", "settle_up"].contains(&account_type.as_str())
     {
@@ -1886,23 +1890,23 @@ fn validate_transaction_query(q: &Query) -> Result<()> {
     }
     Ok(())
 }
-fn filter_transactions(mut values: Vec<Value>, q: &Query, p: &Principal) -> Result<Vec<Value>> {
-    if let Some(member) = q.get("member_id")
-        && member != &p.user_id
-    {
-        return Err(ApiError::forbidden());
-    }
+fn filter_transactions(mut values: Vec<Value>, q: &Query, _p: &Principal) -> Result<Vec<Value>> {
     values.retain(|v| {
         if v["voided"] == true {
             return false;
         }
+        if q.get("transaction_type").is_some_and(|f| v["classification"]["transaction_type"]!=f.as_str() && !v["allocations"].as_array().is_some_and(|a| a.iter().any(|a|a["transaction_type"]==f.as_str()))) {return false;}
+        if q.get("classification_status").is_some_and(|f| if f=="pending" {v["classification"]["status"]=="confirmed"}else{v["classification"]["status"]!=f.as_str()}) {return false;}
+        if q.get("currency").is_some_and(|f|v["currency"]!=f.as_str()) {return false;}
+        if q.get("direction").is_some_and(|f| !v["movements"].as_array().is_some_and(|legs|legs.iter().any(|m|q.get("account_id").is_none_or(|id|m["account_id"]==id.as_str()) && m["amount"].as_str().is_some_and(|n|(f=="credit")==!n.starts_with('-'))))) {return false;}
+        for (key,minimum) in [("min_amount",true),("max_amount",false)] {if let Some(bound)=q.get(key) {let c=v["currency"].as_str().unwrap_or("INR");let n=money(v["amount"].as_str().unwrap_or("0"),c).unwrap_or(0);let Ok(b)=money(bound,c) else{return false;};if (minimum && n<b)||(!minimum && n>b) {return false;}}}
         for key in ["event_type", "reconciliation_state"] {
             if q.get(key).is_some_and(|f| v[key] != f.as_str()) {
                 return false;
             }
         }
         if q.get("member_id")
-            .is_some_and(|f| v["entered_by"] != f.as_str())
+            .is_some_and(|f| v["entered_by"] != f.as_str() && v["paid_by_user_id"]!=f.as_str() && !v["allocations"].as_array().is_some_and(|a|a.iter().any(|a|a["member_id"]==f.as_str())))
         {
             return false;
         }
@@ -1941,19 +1945,19 @@ fn filter_transactions(mut values: Vec<Value>, q: &Query, p: &Principal) -> Resu
     });
     Ok(values)
 }
-fn validate_report_scope(scope: &str) -> Result<()> {
+pub(crate) fn validate_report_scope(scope: &str) -> Result<()> {
     if ["personal", "family", "combined"].contains(&scope) {
         Ok(())
     } else {
         Err(ApiError::invalid("Invalid report scope."))
     }
 }
-fn retain_scope(values: &mut Vec<Value>, scope: &str, p: &Principal, category: Option<&String>) {
+pub(crate) fn retain_scope(values: &mut Vec<Value>, scope: &str, p: &Principal, category: Option<&String>) {
     for v in values.iter_mut() {
         let entered_by = v["entered_by"].as_str().unwrap_or_default().to_owned();
         if let Some(allocations) = v["allocations"].as_array_mut() {
             allocations.retain(|a| {
-                let personal = a["scope"] == "personal" && entered_by == p.user_id;
+                let personal = a["scope"] == "personal" && a["member_id"].as_str().unwrap_or(&entered_by) == p.user_id;
                 let family = a["scope"] == "family";
                 (match scope {
                     "personal" => personal,
@@ -1968,7 +1972,7 @@ fn retain_scope(values: &mut Vec<Value>, scope: &str, p: &Principal, category: O
         v["allocations"].as_array().is_some_and(|a| !a.is_empty())
             || (["transfer", "investment", "investment_withdrawal"].contains(&v["event_type"].as_str().unwrap_or(""))
                 && category.is_none()
-                && (scope != "personal" || v["entered_by"] == p.user_id))
+                && (if scope=="family" {v["report_scope"]=="family"}else if scope=="personal" {v["entered_by"]==p.user_id && v["report_scope"]!="family"}else{v["entered_by"]==p.user_id || v["report_scope"]=="family"}))
     });
 }
 pub(crate) fn paginate(values: Vec<Value>, q: &Query) -> Result<Value> {
@@ -2210,12 +2214,6 @@ async fn budget_category_parents(db: &mut SqliteConnection, p: &Principal) -> Re
         Some((category["id"].as_str()?.to_owned(), category["parent_id"].as_str()?.to_owned()))
     }).collect())
 }
-async fn investment_category_ids(db: &mut SqliteConnection, p: &Principal) -> Result<HashSet<String>> {
-    Ok(storage::list(db, p, "categories").await?.into_iter()
-        .filter(|category| category["tracking_type"] == "investment")
-        .filter_map(|category| category["id"].as_str().map(str::to_owned))
-        .collect())
-}
 
 fn category_within(category: &str, root: &str, parents: &HashMap<String, String>) -> bool {
     let mut current = category;
@@ -2292,14 +2290,7 @@ async fn report_inputs(
     )?;
     values.retain(|v| v["currency"] == currency);
     retain_scope(&mut values, scope, p, q.get("category_id"));
-    let investment_categories = investment_category_ids(db, p).await?;
-    for transaction in &mut values {
-        if matches!(transaction["event_type"].as_str(), Some("expense" | "refund")) {
-            if let Some(allocations) = transaction["allocations"].as_array_mut() {
-                allocations.retain(|allocation| !allocation["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)));
-            }
-        }
-    }
+    if let Some(member)=q.get("member_id") {for v in &mut values {let fallback=v["paid_by_user_id"].as_str().or_else(||v["entered_by"].as_str()).unwrap_or("").to_owned();if let Some(lines)=v["allocations"].as_array_mut() {lines.retain(|a|a["member_id"].as_str().unwrap_or(&fallback)==member);}}}
     let ledger_revision: i64 =
         sqlx::query_scalar("SELECT coalesce(max(id),0) FROM audit_events WHERE household_id=?")
             .bind(&p.household_id)
@@ -2309,34 +2300,7 @@ async fn report_inputs(
     Ok((values, currency, meta))
 }
 fn totals(values: &[Value], currency: &str) -> Result<Value> {
-    let (mut income, mut spending, mut transfers) = (0_i64, 0_i64, 0_i64);
-    for v in values {
-        if v["event_type"] == "transfer" {
-            transfers = add(transfers, money(text(v, "amount")?, currency)?)?;
-            continue;
-        }
-        for a in v["allocations"].as_array().unwrap() {
-            let amount = money(text(a, "amount")?, currency)?;
-            if v["event_type"] == "income" {
-                income = add(income, amount)?;
-            } else {
-                spending = add(
-                    spending,
-                    if v["event_type"] == "refund" {
-                        -amount
-                    } else {
-                        amount
-                    },
-                )?;
-            }
-        }
-    }
-    let surplus = income
-        .checked_sub(spending)
-        .ok_or_else(|| ApiError::invalid("Money total is out of range."))?;
-    Ok(
-        json!({"income":format_money(income,currency)?,"net_spending":format_money(spending,currency)?,"recorded_surplus":format_money(surplus,currency)?,"transfer_volume":format_money(transfers,currency)?}),
-    )
+    classification::summary(values,currency)
 }
 
 async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -> Result<Reply> {
@@ -2381,9 +2345,8 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
             categories: std::collections::BTreeMap::new(),
         })
         .collect();
-    let investment_categories = investment_category_ids(db, p).await?;
     let transactions = storage::transactions_in_period(db, p, from, to, false).await?;
-    for transaction in transactions {
+    for transaction in classification::reporting(transactions) {
         if transaction["voided"] == true
             || transaction["currency"] != currency
             || transaction["event_type"] == "transfer"
@@ -2403,12 +2366,6 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
                 .or_else(|| imported_payer.as_ref().and_then(Value::as_str))
                 .or_else(|| transaction["entered_by"].as_str())
         };
-        let Some(member) = members
-            .iter_mut()
-            .find(|m| attribution == Some(m.id.as_str()))
-        else {
-            continue;
-        };
         for allocation in transaction["allocations"].as_array().into_iter().flatten() {
             // A member's personal allocations are visible only to that member.
             if allocation["scope"] != "family"
@@ -2416,6 +2373,8 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
             {
                 continue;
             }
+            let owner=allocation["member_id"].as_str().or(attribution);
+            let Some(member)=members.iter_mut().find(|m|owner==Some(m.id.as_str())) else {continue;};
             let value = money(text(allocation, "amount")?, currency)?;
             if transaction["event_type"] == "income" {
                 member.income = add(member.income, value)?;
@@ -2425,9 +2384,6 @@ async fn household_report(db: &mut SqliteConnection, p: &Principal, q: &Query) -
                 } else {
                     value
                 };
-                if allocation["category_id"].as_str().is_some_and(|id| investment_categories.contains(id)) {
-                    continue;
-                }
                 member.spending = add(member.spending, signed)?;
                 let category = allocation["category_id"]
                     .as_str()
@@ -2502,12 +2458,12 @@ async fn analytics_result(
             v["meta"] = meta;
             v["balance_available"] = json!(false);
             v["budget_status"] = Value::Null;
-            v["unresolved_count"] = json!(values.len());
+
             ok(v)
         }
         "transactions" | "transfers" => {
             if report == "transfers" {
-                values.retain(|v| v["event_type"] == "transfer");
+                values.retain(|v| v["classification"]["transaction_type"] == "transfer" || v["allocations"].as_array().is_some_and(|lines|lines.iter().any(|a|classification::kind(v,a)=="transfer")));
             }
             values.sort_by(|a, b| {
                 (b["effective_date"].as_str(), b["id"].as_str())
@@ -2518,6 +2474,7 @@ async fn analytics_result(
             ok(response)
         }
         "categories" | "income-categories" | "merchants" => {
+            let values = classification::reporting(values);
             let mut groups: std::collections::BTreeMap<
                 String,
                 (i64, std::collections::HashSet<String>),
@@ -2546,27 +2503,12 @@ async fn analytics_result(
             ok(json!({"data":data,"page":{},"meta":meta}))
         }
         "types" => {
-            let mut groups: std::collections::BTreeMap<String, (i64, usize)> =
-                std::collections::BTreeMap::new();
+            let mut groups:std::collections::BTreeMap<String,(i64,HashSet<String>)>=std::collections::BTreeMap::new();
             for v in &values {
-                let scoped_amount = if ["transfer", "investment", "investment_withdrawal"].contains(&v["event_type"].as_str().unwrap_or("")) {
-                    money(text(v, "amount")?, &currency)?
-                } else {
-                    v["allocations"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .try_fold(0_i64, |sum, a| {
-                            add(sum, money(text(a, "amount")?, &currency)?)
-                        })?
-                };
-                if scoped_amount != 0 || !matches!(v["event_type"].as_str(), Some("expense" | "refund")) {
-                    let entry = groups.entry(text(v, "event_type")?.to_owned()).or_default();
-                    entry.0 = add(entry.0, scoped_amount)?;
-                    entry.1 += 1;
-                }
+                let lines=v["allocations"].as_array().cloned().filter(|a|!a.is_empty()).unwrap_or_else(||vec![json!({"amount":v["amount"]})]);
+                for a in lines {let kind=classification::kind(v,&a).to_owned();let entry=groups.entry(kind).or_default();entry.0=add(entry.0,money(text(&a,"amount")?,currency)?)?;entry.1.insert(text(v,"id")?.to_owned());}
             }
-            let data = groups.into_iter().map(|(event_type,(total,count))| Ok(json!({"event_type":event_type,"amount":format_money(total,&currency)?,"currency":currency,"count":count}))).collect::<Result<Vec<_>>>()?;
+            let data=groups.into_iter().map(|(event_type,(n,ids))|Ok(json!({"event_type":event_type,"amount":format_money(n,currency)?,"currency":currency,"count":ids.len()}))).collect::<Result<Vec<_>>>()?;
             ok(json!({"data":data,"page":{},"meta":meta}))
         }
         "series" => {
@@ -2703,7 +2645,7 @@ fn budget_destination(transaction: &Value, allocation: &Value, p: &Principal) ->
     if allocation["scope"] == "personal" {
         transaction["entered_by"].as_str().unwrap_or(&p.user_id).to_owned()
     } else {
-        allocation["budget_destination"].as_str().unwrap_or("unassigned").to_owned()
+        allocation["member_id"].as_str().or_else(||allocation["budget_destination"].as_str()).unwrap_or("unassigned").to_owned()
     }
 }
 
@@ -2745,6 +2687,7 @@ async fn budget_allocations(db: &mut SqliteConnection, p: &Principal, id: &str, 
     ]);
     if let Some(category_id) = q.get("category_id").filter(|value| value.as_str() != "uncategorized") { report_query.insert("category_id".into(), category_id.clone()); }
     let (values, currency, mut meta) = report_inputs(db, p, &report_query, false).await?;
+    let values = classification::reporting(values);
     let mut rows = Vec::new();
     for transaction in values {
         let sign = match transaction["event_type"].as_str() {
@@ -2782,6 +2725,7 @@ async fn budget_matrix(db: &mut SqliteConnection, p: &Principal, id: &str, q: &Q
     ]);
     if let Some(category_id) = q.get("category_id").filter(|value| value.as_str() != "uncategorized") { report_query.insert("category_id".into(), category_id.clone()); }
     let (values, currency, mut meta) = report_inputs(db, p, &report_query, false).await?;
+    let values = classification::reporting(values);
     let mut cells: std::collections::BTreeMap<(Option<String>, String), i64> = std::collections::BTreeMap::new();
     for transaction in values {
         let sign = match transaction["event_type"].as_str() {
@@ -2827,6 +2771,7 @@ async fn budget_forecast_view(db: &mut SqliteConnection, p: &Principal, id: &str
         ("currency".into(), text(&budget, "currency")?.into()),
     ]);
     let (values, currency, meta) = report_inputs(db, p, &query, false).await?;
+    let values = classification::reporting(values);
     let commitments = budget_commitments(db, p, &budget).await?;
     let valid_posted: HashSet<String> = commitments["data"].as_array().into_iter().flatten()
         .filter(|item| item["state"] == "posted")
@@ -2929,6 +2874,7 @@ async fn budget_tracking(
         ("currency".into(), text(&budget, "currency")?.into()),
     ]);
     let (values, currency, mut meta) = report_inputs(db, p, &query, false).await?;
+    let values = classification::reporting(values);
     let commitments = budget_commitments(db, p, &budget).await?;
     let mut commitments_by_category: HashMap<String, i64> = HashMap::new();
     let mut total_committed = 0_i64;
@@ -3028,6 +2974,7 @@ async fn budget_people(
         ("currency".into(), text(&budget, "currency")?.into()),
     ]);
     let (values, currency, mut meta) = report_inputs(db, p, &query, false).await?;
+    let values = classification::reporting(values);
     let commitments = budget_commitments(db, p, &budget).await?;
     let mut commitments_by_destination: HashMap<String, i64> = HashMap::new();
     for item in commitments["data"].as_array().into_iter().flatten() {
@@ -3294,5 +3241,37 @@ pub(crate) fn allowed_body(body: &Value, fields: &[&str]) -> Result<()> {
     {
         return Err(ApiError::invalid(format!("Unsupported field: {key}.")));
     }
+    Ok(())
+}
+
+async fn sort_transactions(db: &mut SqliteConnection,p: &Principal,values: &mut [Value],q: &Query) -> Result<()> {
+    let accounts=storage::list(db,p,"accounts").await?;let categories=storage::list(db,p,"categories").await?;
+    let members=auth::me(db,p).await?;
+    let key=|v: &Value,column: &str| -> String {
+        match column {
+            "category"=>v["allocations"].as_array().into_iter().flatten().map(|a|categories.iter().find(|c|c["id"]==a["category_id"]).and_then(|c|c["name"].as_str()).unwrap_or("")).collect::<Vec<_>>().join(", "),
+            "account"=>v["movements"].as_array().into_iter().flatten().map(|m|accounts.iter().find(|a|a["id"]==m["account_id"]).and_then(|a|a["name"].as_str()).unwrap_or("")).collect::<Vec<_>>().join(", "),
+            "person"=>members["members"].as_array().into_iter().flatten().find(|m|m["user_id"]==v["paid_by_user_id"] || m["user_id"]==v["entered_by"]).and_then(|m|m["name"].as_str()).unwrap_or("").to_owned(),
+            "transaction_type"=>v["classification"]["transaction_type"].as_str().unwrap_or("unknown").to_owned(),
+            "merchant"=>v["merchant"].as_str().filter(|s|!s.is_empty()).or_else(||v["description"].as_str()).unwrap_or("").to_owned(),
+            _=>v[column].as_str().unwrap_or("").to_owned(),
+        }.to_lowercase()
+    };
+    let compare=|a: &Value,b: &Value,sort: &str| {
+        let column=sort.trim_start_matches('-');
+        let order=match column {
+            "amount"=>{
+                let n=|v:&Value| {let c=v["currency"].as_str().unwrap_or("INR");money(v["amount"].as_str().unwrap_or("0"),c).unwrap_or(0) as i128 * 10_i128.pow(3-domain::exponent(c).unwrap_or(2))};
+                n(a).cmp(&n(b))
+            },
+            "confidence"=>a["classification"]["confidence_score"].as_i64().cmp(&b["classification"]["confidence_score"].as_i64()),
+            "review_status"=>{let rank=|v:&Value|match v["classification"]["status"].as_str(){Some("needs_review")=>0,Some("suggested")=>1,_=>2};rank(a).cmp(&rank(b))},
+            _=>key(a,column).cmp(&key(b,column)),
+        };
+        if sort.starts_with('-') {order.reverse()}else{order}
+    };
+    let primary=q.get("sort").map(String::as_str).unwrap_or("-effective_date");
+    let secondary=q.get("secondary_sort").map(String::as_str).unwrap_or("-effective_date");
+    values.sort_by(|a,b|compare(a,b,primary).then_with(||compare(a,b,secondary)).then_with(||a["id"].as_str().cmp(&b["id"].as_str())));
     Ok(())
 }
