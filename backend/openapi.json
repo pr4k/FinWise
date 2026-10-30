@@ -12490,6 +12490,130 @@
           }
         }
       }
+    },
+    "/settle-ups/{id}/reimbursement-candidates": {
+      "get": {
+        "operationId": "get_settle_ups_id_reimbursement_candidates",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settle-ups/{id}/reverse": {
+      "post": {
+        "operationId": "post_settle_ups_id_reverse",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "Required unless expected_revision is in the body.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "required": []
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12854,6 +12978,7 @@
               "investment",
               "transfer",
               "reimbursement",
+              "paid_on_behalf",
               "refund",
               "debt",
               "adjustment",
@@ -16849,14 +16974,37 @@
           "note": {
             "type": "string"
           },
+          "transaction_id": {
+            "type": "string"
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transaction_id": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "string",
+                  "pattern": "^-?\\d+(\\.\\d+)?$",
+                  "description": "Exact decimal money; never a JSON number."
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "transaction_id",
+                "amount"
+              ]
+            }
+          },
           "expected_revision": {
             "type": "integer"
           }
         },
-        "required": [
-          "amount",
-          "date"
-        ]
+        "required": []
       },
       "SipSchedule": {
         "type": "object",
@@ -17213,6 +17361,7 @@
               "investment",
               "transfer",
               "reimbursement",
+              "paid_on_behalf",
               "refund",
               "debt",
               "adjustment",
@@ -17249,6 +17398,9 @@
           "investment_id": {
             "type": "string"
           },
+          "receivable_id": {
+            "type": "string"
+          },
           "reason": {
             "type": "string"
           },
@@ -17279,6 +17431,7 @@
               "investment",
               "transfer",
               "reimbursement",
+              "paid_on_behalf",
               "refund",
               "debt",
               "adjustment",
@@ -17303,6 +17456,12 @@
           },
           "offset_expense": {
             "type": "boolean"
+          },
+          "person": {
+            "type": "string"
+          },
+          "receivable_id": {
+            "type": "string"
           }
         },
         "required": [
@@ -17322,6 +17481,7 @@
               "investment",
               "transfer",
               "reimbursement",
+              "paid_on_behalf",
               "refund",
               "debt",
               "adjustment",
@@ -17346,6 +17506,17 @@
           "investment_id": {
             "type": "string"
           },
+          "person": {
+            "type": "string"
+          },
+          "paid_on_behalf_amount": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "receivable_description": {
+            "type": "string"
+          },
           "expected_revision": {
             "type": "integer"
           }
@@ -17368,6 +17539,7 @@
               "investment",
               "transfer",
               "reimbursement",
+              "paid_on_behalf",
               "refund",
               "debt",
               "adjustment",
@@ -17394,6 +17566,7 @@
               "investment",
               "transfer",
               "reimbursement",
+              "paid_on_behalf",
               "refund",
               "debt",
               "adjustment",
@@ -17523,6 +17696,7 @@
                     "investment",
                     "transfer",
                     "reimbursement",
+                    "paid_on_behalf",
                     "refund",
                     "debt",
                     "adjustment",

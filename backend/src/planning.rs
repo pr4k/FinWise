@@ -260,14 +260,15 @@ fn decorate_obligation(v: &mut Value) -> Result<()> {
         .as_array()
         .ok_or_else(|| ApiError::invalid("Invalid repayments."))?
     {
+        if payment["reversed"]==true {continue;}
         let amount = positive(payment, "amount", &currency)?;
         if amount > remaining {
             return Err(ApiError::invalid("Repayments exceed the obligation."));
         }
         remaining -= amount;
     }
-    v["remaining"] = json!(format_money(remaining, &currency)?);
-    v["status"] = json!(if remaining == 0 { "settled" } else { "open" });
+    v["remaining"] = json!(format_money(if v["reversed"]==true {0}else{remaining}, &currency)?);
+    v["status"] = json!(if v["reversed"]==true {"reversed"}else if remaining == 0 { "settled" } else { "open" });
     Ok(())
 }
 fn decorate_investment(v: &mut Value) -> Result<()> {
@@ -939,6 +940,17 @@ pub async fn route(
 ) -> Result<Reply> {
     let parts: Vec<&str> = path.split('/').collect();
     match (method, parts.as_slice()) {
+        ("GET",["settle-ups",id,"reimbursement-candidates"])=>{
+            api::allowed_query(q,&[])?;
+            let v=storage::get(db,p,"settlement_obligations",id).await?;owner(p,&v)?;active(&v)?;
+            if v["reversed"]==true || v["direction"]!="owed_to_me" {return Err(ApiError::invalid("Choose an active receivable."));}
+            ok(crate::reimbursements::candidates(db,p,&v).await?)
+        },
+        ("POST",["settle-ups",id,"reverse"])=>{
+            api::allowed_body(body,&[])?;
+            let v=storage::get(db,p,"settlement_obligations",id).await?;owner(p,&v)?;api::revision(headers,body,&v)?;
+            let mut saved=crate::reimbursements::reverse(db,p,&v).await?;decorate_obligation(&mut saved)?;ok(saved)
+        },
         ("GET", ["settle-ups"]) => {
             api::allowed_query(q, &["status", "cursor", "limit"])?;
             let mut items = storage::list(db, p, "settlement_obligations").await?;
@@ -1022,10 +1034,7 @@ pub async fn route(
                         "Linked expense must be active and match the split total and currency.",
                     ));
                 }
-                if storage::list(db, p, "settlement_obligations")
-                    .await?
-                    .iter()
-                    .any(|v| v["deleted"] != true && v["transaction_id"] == transaction_id)
+                if crate::reimbursements::has_source(db,p,transaction_id).await?
                 {
                     return Err(ApiError::conflict("This expense already has a split."));
                 }
@@ -1092,6 +1101,7 @@ pub async fn route(
             owner(p, &anchor)?;
             active(&anchor)?;
             api::revision(headers, body, &anchor)?;
+            if anchor["kind"]=="paid_on_behalf" {crate::reimbursements::reverse(db,p,&anchor).await?;return Ok((StatusCode::NO_CONTENT,Value::Null));}
             let group = anchor["split_id"].as_str();
             let candidates = if group.is_some() {
                 storage::list(db, p, "settlement_obligations").await?
@@ -1131,10 +1141,11 @@ pub async fn route(
                 .as_array()
                 .ok_or_else(|| ApiError::invalid("Invalid repayments."))?
             {
-                if domain::date(text(payment, "date")?)? < date {
+                if payment["reversed"]!=true && payment["transaction_id"].is_null() && domain::date(text(payment, "date")?)? < date {
                     return Err(ApiError::invalid("Obligation date follows a repayment."));
                 }
             }
+            if before["kind"]=="paid_on_behalf" && (after["amount"]!=before["amount"] || after["date"]!=before["date"] || after["person"]!=before["person"]) {return Err(ApiError::invalid("Reverse the receivable before changing its person, date or amount."));}
             if before["kind"] == "split" && after["amount"] != before["amount"] {
                 return Err(ApiError::invalid(
                     "Split shares cannot be changed individually.",
@@ -1146,11 +1157,26 @@ pub async fn route(
             ok(saved)
         }
         ("POST", ["settle-ups", id, "repayments"]) => {
-            api::allowed_body(body, &["amount", "date", "note"])?;
+            api::allowed_body(body, &["amount", "date", "note", "transaction_id", "matches"])?;
             let before = storage::get(db, p, "settlement_obligations", id).await?;
             owner(p, &before)?;
             active(&before)?;
             api::revision(headers, body, &before)?;
+            if before["reversed"]==true {return Err(ApiError::conflict("This receivable has been reversed."));}
+            if let Some(matches) = body.get("matches") {
+                let matches = matches.as_array().filter(|v| !v.is_empty() && v.len() <= 200)
+                    .ok_or_else(|| ApiError::invalid("Select between 1 and 200 reimbursement credits."))?;
+                let mut current = before.clone();
+                let mut seen = HashSet::new();
+                for payment in matches {
+                    api::allowed_body(payment, &["transaction_id", "amount", "note"])?;
+                    if !seen.insert(text(payment,"transaction_id")?.to_owned()) {return Err(ApiError::invalid("Select each credit only once."));}
+                    current = crate::reimbursements::link(db,p,&current,payment).await?;
+                }
+                decorate_obligation(&mut current)?;
+                return ok(current);
+            }
+            if body["transaction_id"].is_string() {let mut saved=crate::reimbursements::link(db,p,&before,body).await?;decorate_obligation(&mut saved)?;return ok(saved);}
             let payment_date = domain::date(text(body, "date")?)?;
             if payment_date < domain::date(text(&before, "date")?)? {
                 return Err(ApiError::invalid("Repayment date precedes the obligation."));
@@ -1176,16 +1202,7 @@ pub async fn route(
             owner(p, &before)?;
             active(&before)?;
             api::revision(headers, body, &before)?;
-            let mut after = before.clone();
-            let repayments = after["repayments"]
-                .as_array_mut()
-                .ok_or_else(|| ApiError::invalid("Invalid repayments."))?;
-            let original = repayments.len();
-            repayments.retain(|v| v["id"] != *payment_id);
-            if repayments.len() == original {
-                return Err(ApiError::missing());
-            }
-            storage::update(db, p, &before, after, "repayment_removed").await?;
+            crate::reimbursements::unlink(db,p,&before,payment_id).await?;
             Ok((StatusCode::NO_CONTENT, Value::Null))
         }
         ("GET", ["investments", "goals"]) => {

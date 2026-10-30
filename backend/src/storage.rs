@@ -318,6 +318,7 @@ pub async fn update(
         value["classification"] = crate::classification::baseline(&value,true);
     }
     crate::classification::validate_dependents(db,p,before,&value).await?;
+    crate::reimbursements::validate_change(db,p,before,&value).await?;
     let id = text(before, "id")?;
     let revision = before["revision"].as_i64().unwrap_or(1) + 1;
     value["id"] = before["id"].clone();

@@ -7749,3 +7749,119 @@ async fn classification_offsets_follow_original_categories_members_and_scope() {
     assert_eq!(incorrect.0,StatusCode::CONFLICT,"{}",incorrect.1);
     let deleted=c.call("DELETE",&format!("transactions/{}",expense["id"].as_str().unwrap()),json!({"reason":"Test linked expense protection"}),None,expense["revision"].as_i64()).await;assert_eq!(deleted.0,StatusCode::CONFLICT,"{}",deleted.1);
 }
+
+#[tokio::test]
+async fn investment_transaction_filter_includes_each_visible_family_member_and_legacy_allocations() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let member_id=member.call("GET","me",json!({}),None,None).await.1["user"]["id"].clone();
+    let own_bank=owner.create("accounts",json!({"name":"Owner shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let member_bank=member.create("accounts",json!({"name":"Member shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let category=owner.create("categories",json!({"name":"Investment contributions","kind":"expense","tracking_type":"investment","visibility":"shared"})).await;
+    let food=owner.category("Food","expense").await;
+    let own=owner.transaction("expense","100.00",&own_bank,&category,"family").await;
+    let theirs=member.transaction("expense","200.00",&member_bank,&category,"family").await;
+    owner.transaction("expense","999.00",&own_bank,&food,"family").await;
+    let private_bank=member.account("Private bank","bank").await;
+    let hidden=member.transaction("expense","50.00",&private_bank,&category,"family").await;
+    let holding=owner.create("investments",json!({"name":"Shared holding","type":"investment","currency":"INR","visibility":"shared"})).await;
+    let funded=owner.call("PUT",&format!("investments/{}/months/2026-09",holding["id"].as_str().unwrap()),json!({"contribution":"300.00","withdrawal":"0","account_id":own_bank["id"],"transaction_date":"2026-09-15"}),None,Some(1)).await;
+    assert_eq!(funded.0,StatusCode::OK,"{}",funded.1);
+    for scope in ["family","combined"] {
+        let result=owner.call("GET",&format!("transactions?scope={scope}&transaction_type=investment"),json!({}),None,None).await;
+        assert_eq!(result.0,StatusCode::OK,"{}",result.1);
+        let rows=result.1["data"].as_array().unwrap();assert_eq!(rows.len(),3,"{}",result.1);
+        assert!(rows.iter().any(|v|v["id"]==own["id"]));assert!(rows.iter().any(|v|v["id"]==theirs["id"]));assert!(rows.iter().any(|v|v["event_type"]=="investment"));assert!(!rows.iter().any(|v|v["id"]==hidden["id"]));
+    }
+    let theirs_only=owner.call("GET",&format!("transactions?scope=family&transaction_type=investment&member_id={}",member_id.as_str().unwrap()),json!({}),None,None).await;
+    assert_eq!(theirs_only.0,StatusCode::OK,"{}",theirs_only.1);assert_eq!(theirs_only.1["data"].as_array().unwrap().len(),1);assert_eq!(theirs_only.1["data"][0]["id"],theirs["id"]);
+    let raw=owner.call("GET","transactions?scope=family&event_type=investment",json!({}),None,None).await;
+    assert_eq!(raw.1["data"].as_array().unwrap().len(),1); // The legacy selector was requesting only this ledger event.
+}
+
+#[tokio::test]
+async fn paid_on_behalf_laptop_cross_month_reimbursement_preserves_movements_and_card_settlement() {
+    let (c,_)=setup().await;let bank=c.account("Bank","bank").await;let card=c.account("Card","credit_card").await;let purchase=c.category("Laptop","expense").await;let salary=c.category("Income","income").await;
+    let expense=c.transaction("expense","141766.00",&card,&purchase,"personal").await;
+    let classified=classify(&c,&expense,json!({"transaction_type":"paid_on_behalf","person":"Alex","paid_on_behalf_amount":"141766.00","receivable_description":"Laptop for Alex"})).await;
+    assert_eq!(classified["movements"],expense["movements"]);assert_eq!(classified["amount"],expense["amount"]);
+    let id=classified["classification"]["receivable_id"].as_str().unwrap();
+    let mut credit=transaction("income","141766.00",&bank,&salary,"personal");credit["effective_date"]=json!("2026-10-20");credit["description"]=json!("Alex laptop reimbursement");let credit=c.create("transactions",credit).await;
+    let candidates=c.call("GET",&format!("settle-ups/{id}/reimbursement-candidates"),json!({}),None,None).await;
+    assert_eq!(candidates.0,StatusCode::OK,"{}",candidates.1);assert_eq!(candidates.1["data"][0]["id"],credit["id"]);assert_eq!(candidates.1["data"][0]["suggested"],true);
+    let linked=c.call("POST",&format!("settle-ups/{id}/repayments"),json!({"amount":"141766.00","transaction_id":credit["id"]}),Some("link-laptop-repayment"),Some(1)).await;
+    assert_eq!(linked.0,StatusCode::OK,"{}",linked.1);assert_eq!(linked.1["remaining"],"0.00");assert_eq!(linked.1["status"],"settled");
+    c.create("transactions",json!({"event_type":"transfer","amount":"141766.00","currency":"INR","effective_date":"2026-10-21","description":"Card bill payment","allocations":[],"movements":[{"account_id":bank["id"],"amount":"-141766.00"},{"account_id":card["id"],"amount":"141766.00"}]})).await;
+    let summary=c.call("GET","analytics/summary?from=2026-09-01&to=2026-11-01&scope=combined",json!({}),None,None).await.1;
+    assert_eq!(summary["income"],"0.00");assert_eq!(summary["net_spending"],"0.00");
+    let saved_credit=c.call("GET",&format!("transactions/{}",credit["id"].as_str().unwrap()),json!({}),None,None).await.1;assert_eq!(saved_credit["movements"],credit["movements"]);assert_eq!(saved_credit["classification"]["transaction_type"],"reimbursement");
+    let payment=linked.1["repayments"][0]["id"].as_str().unwrap();
+    let unlinked=c.call("DELETE",&format!("settle-ups/{id}/repayments/{payment}"),json!({}),None,Some(2)).await;assert_eq!(unlinked.0,StatusCode::NO_CONTENT,"{}",unlinked.1);
+    let obligation=c.call("GET",&format!("settle-ups/{id}"),json!({}),None,None).await.1;assert_eq!(obligation["remaining"],"141766.00");assert_eq!(obligation["repayments"][0]["reversed"],true);
+    let summary=c.call("GET","analytics/summary?from=2026-09-01&to=2026-11-01&scope=combined",json!({}),None,None).await.1;assert_eq!(summary["income"],"0.00");assert_eq!(summary["net_spending"],"0.00");
+    let reversed=c.call("POST",&format!("settle-ups/{id}/reverse"),json!({}),Some("reverse-laptop-receivable"),Some(3)).await;assert_eq!(reversed.0,StatusCode::OK,"{}",reversed.1);assert_eq!(reversed.1["status"],"reversed");
+    assert_eq!(classified_summary(&c,"personal").await["net_spending"],"141766.00");
+}
+#[tokio::test]
+async fn paid_on_behalf_partial_reimbursements_share_credit_capacity_and_block_unsafe_edits() {
+    let (c,_)=setup().await;let bank=c.account("Bank","bank").await;let expense_category=c.category("Purchase","expense").await;let income_category=c.category("Income","income").await;
+    let original=c.transaction("expense","100.03",&bank,&expense_category,"family").await;
+    let paid=classify(&c,&original,json!({"transaction_type":"paid_on_behalf","person":"Alex","paid_on_behalf_amount":"70.02"})).await;
+    let id=paid["classification"]["receivable_id"].as_str().unwrap();
+    assert_eq!(classified_summary(&c,"family").await["net_spending"],"30.01");
+    let second=c.transaction("expense","100.00",&bank,&expense_category,"family").await;
+    let second=classify(&c,&second,json!({"transaction_type":"paid_on_behalf","person":"Sam","paid_on_behalf_amount":"100.00"})).await;
+    let id2=second["classification"]["receivable_id"].as_str().unwrap();
+    let credit=c.transaction("income","100.00",&bank,&income_category,"family").await;
+    let first=c.call("POST",&format!("settle-ups/{id}/repayments"),json!({"amount":"50.00","transaction_id":credit["id"]}),Some("partial-first"),Some(1)).await;assert_eq!(first.0,StatusCode::OK,"{}",first.1);assert_eq!(first.1["remaining"],"20.02");
+    let over=c.call("POST",&format!("settle-ups/{id2}/repayments"),json!({"amount":"60.00","transaction_id":credit["id"]}),Some("over-capacity"),Some(1)).await;assert_eq!(over.0,StatusCode::BAD_REQUEST,"{}",over.1);
+    let other=c.call("POST",&format!("settle-ups/{id2}/repayments"),json!({"amount":"50.00","transaction_id":credit["id"]}),Some("partial-second"),Some(1)).await;assert_eq!(other.0,StatusCode::OK,"{}",other.1);assert_eq!(other.1["remaining"],"50.00");
+    let more=c.transaction("income","20.02",&bank,&income_category,"family").await;
+    let settled=c.call("POST",&format!("settle-ups/{id}/repayments"),json!({"amount":"20.02","transaction_id":more["id"]}),Some("settle-remainder"),Some(2)).await;assert_eq!(settled.0,StatusCode::OK,"{}",settled.1);assert_eq!(settled.1["status"],"settled");
+    let duplicate=classify(&c,&paid,json!({"transaction_type":"paid_on_behalf","person":"Alex","paid_on_behalf_amount":"70.02"})).await;assert_eq!(duplicate["classification"]["receivable_id"],paid["classification"]["receivable_id"]);
+    let edit=c.call("POST",&format!("transactions/{}/classification",paid["id"].as_str().unwrap()),json!({"transaction_type":"expense"}),Some("unsafe-paid-edit"),duplicate["revision"].as_i64()).await;assert_eq!(edit.0,StatusCode::CONFLICT,"{}",edit.1);
+    let credit_now=c.call("GET",&format!("transactions/{}",credit["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    let undo=c.call("POST",&format!("transactions/{}/classification",credit["id"].as_str().unwrap()),json!({"transaction_type":"income"}),Some("unsafe-credit-edit"),credit_now["revision"].as_i64()).await;assert_eq!(undo.0,StatusCode::CONFLICT,"{}",undo.1);
+    assert_eq!(classified_summary(&c,"family").await["income"],"0.00");assert_eq!(classified_summary(&c,"family").await["net_spending"],"30.01");
+}
+
+#[tokio::test]
+async fn paid_on_behalf_batch_is_atomic_and_reversal_releases_shared_credit_capacity() {
+    let (c,_)=setup().await;let (other,_)=partner(&c).await;
+    let bank=c.create("accounts",json!({"name":"Shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let food=c.create("categories",json!({"name":"Purchases","kind":"expense","visibility":"shared"})).await;
+    let income=c.create("categories",json!({"name":"Incoming","kind":"income","visibility":"shared"})).await;
+    let purchase=c.transaction("expense","100.00",&bank,&food,"family").await;
+    for value in ["0","-1","100.01"] {
+        let result=c.call("POST",&format!("transactions/{}/classification",purchase["id"].as_str().unwrap()),json!({"transaction_type":"paid_on_behalf","person":"Alex","paid_on_behalf_amount":value}),Some(&format!("invalid-{value}")),Some(1)).await;
+        assert_eq!(result.0,StatusCode::BAD_REQUEST,"{}",result.1);
+    }
+    let purchase=classify(&c,&purchase,json!({"transaction_type":"paid_on_behalf","person":"Alex","paid_on_behalf_amount":"100.00"})).await;
+    let receivable=purchase["classification"]["receivable_id"].as_str().unwrap();
+    let mut credit1=transaction("income","60.00",&bank,&income,"family");credit1["effective_date"]=json!("2026-08-01");let credit1=c.create("transactions",credit1).await;
+    let mut credit2=transaction("income","40.00",&bank,&income,"family");credit2["effective_date"]=json!("2026-12-01");let credit2=c.create("transactions",credit2).await;
+    let batch=c.call("POST",&format!("settle-ups/{receivable}/repayments"),json!({"matches":[{"transaction_id":credit1["id"],"amount":"60.00"},{"transaction_id":credit2["id"],"amount":"40.01"}]}),Some("invalid-batch"),Some(1)).await;
+    assert_eq!(batch.0,StatusCode::BAD_REQUEST,"{}",batch.1);
+    let unchanged=c.call("GET",&format!("settle-ups/{receivable}"),json!({}),None,None).await.1;
+    assert_eq!(unchanged["revision"],1);assert_eq!(unchanged["repayments"],json!([]));
+    let untouched=c.call("GET",&format!("transactions/{}",credit1["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(untouched["revision"],credit1["revision"]);assert_eq!(untouched["allocations"],credit1["allocations"]);
+    let batch=c.call("POST",&format!("settle-ups/{receivable}/repayments"),json!({"matches":[{"transaction_id":credit1["id"],"amount":"60.00"},{"transaction_id":credit2["id"],"amount":"40.00"}]}),Some("valid-batch"),Some(1)).await;
+    assert_eq!(batch.0,StatusCode::OK,"{}",batch.1);assert_eq!(batch.1["remaining"],"0.00");assert_eq!(batch.1["repayments"].as_array().unwrap().len(),2);
+    let theirs=other.transaction("expense","60.00",&bank,&food,"family").await;
+    let theirs=classify(&other,&theirs,json!({"transaction_type":"paid_on_behalf","person":"Sam","paid_on_behalf_amount":"60.00"})).await;
+    let their_id=theirs["classification"]["receivable_id"].as_str().unwrap();
+    let duplicate_split=other.call("POST","settle-ups/splits",json!({"description":"Duplicate purchase split","date":"2026-09-15","currency":"INR","total":"100.00","my_share":"0.00","transaction_id":purchase["id"],"shares":[{"person":"Duplicate","amount":"100.00"}]}),Some("duplicate-shared-source"),None).await;
+    assert_eq!(duplicate_split.0,StatusCode::CONFLICT,"{}",duplicate_split.1);
+
+    let denied=other.call("GET",&format!("settle-ups/{receivable}"),json!({}),None,None).await;
+    assert_eq!(denied.0,StatusCode::NOT_FOUND);
+    let over=other.call("POST",&format!("settle-ups/{their_id}/repayments"),json!({"transaction_id":credit1["id"],"amount":"0.01"}),Some("shared-over"),Some(1)).await;
+    assert_eq!(over.0,StatusCode::BAD_REQUEST,"{}",over.1);
+    let reversed=c.call("POST",&format!("settle-ups/{receivable}/reverse"),json!({}),Some("reverse-active-batch"),batch.1["revision"].as_i64()).await;
+    assert_eq!(reversed.0,StatusCode::OK,"{}",reversed.1);assert!(reversed.1["repayments"].as_array().unwrap().iter().all(|v|v["reversed"]==true));
+    let reused=other.call("POST",&format!("settle-ups/{their_id}/repayments"),json!({"transaction_id":credit1["id"],"amount":"60.00"}),Some("shared-reuse"),Some(1)).await;
+    assert_eq!(reused.0,StatusCode::OK,"{}",reused.1);assert_eq!(reused.1["status"],"settled");
+    let summary=c.call("GET","analytics/summary?from=2026-08-01&to=2027-01-01&scope=family",json!({}),None,None).await.1;
+    assert_eq!(summary["income"],"0.00");assert_eq!(summary["net_spending"],"100.00");
+}

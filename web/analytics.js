@@ -10,10 +10,13 @@
   function hydrateCharts(host) {
     if(!window.Chart) return;
     host.querySelectorAll('canvas[data-chart]').forEach(canvas=>{
+      const existing=window.Chart.getChart?.(canvas);
+      if(existing?.finwiseSpec===canvas.dataset.chart) return;
+      existing?.destroy();
       const spec=JSON.parse(canvas.dataset.chart);
       const horizontal=spec.horizontal;
       const compact=value=>new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(value);
-      new window.Chart(canvas,{
+      const chart=new window.Chart(canvas,{
         type:spec.type,
         data:{labels:spec.labels,datasets:spec.datasets.map(dataset=>({
           ...dataset,backgroundColor:dataset.backgroundColor||dataset.borderColor,
@@ -32,6 +35,7 @@
             y:{beginAtZero:spec.type==='bar',grid:{display:!horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:horizontal?undefined:5,callback:horizontal?value=>{const label=spec.labels[value]||'';return label.length>22?`${label.slice(0,21)}…`:label;}:value=>compact(value),font:{size:11}}}}
         }
       });
+      chart.finwiseSpec=canvas.dataset.chart;
     });
   }
   function sankey(rows,poolLabel,direction) {
@@ -107,8 +111,8 @@
     const valued=holdings.filter(item=>item.currency===currency&&item.snapshot?.value!=null);
     const covered=valued.filter(item=>item.snapshot.gain_loss!=null);
     const selected=holdings.filter(item=>item.currency===currency&&item.monthRecord);
-    const settlementRows=obligations.filter(item=>item.date.slice(0,7)<=month).map(item=>{
-      const paid=sumMoney((item.repayments||[]).filter(payment=>payment.date.slice(0,7)<=month).map(payment=>payment.amount),new Intl.NumberFormat('en',{style:'currency',currency:item.currency}).resolvedOptions().maximumFractionDigits);
+    const settlementRows=obligations.filter(item=>!item.reversed&&item.date.slice(0,7)<=month).map(item=>{
+      const paid=sumMoney((item.repayments||[]).filter(payment=>!payment.reversed&&payment.date.slice(0,7)<=month).map(payment=>payment.amount),new Intl.NumberFormat('en',{style:'currency',currency:item.currency}).resolvedOptions().maximumFractionDigits);
       return {...item,asOfRemaining:difference(item.amount,paid)};
     }).filter(item=>minor(item.asOfRemaining).value>0n);
     return {

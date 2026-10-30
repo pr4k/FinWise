@@ -1736,6 +1736,7 @@ pub(crate) async fn validate_ledger_with_history(
     before: Option<&Value>,
 ) -> Result<()> {
     domain::validate_transaction(v)?;
+    if v["allocations"].as_array().into_iter().flatten().any(|a|a["transaction_type"]=="paid_on_behalf") && before.is_none_or(|old|old["allocations"]!=v["allocations"]) {return Err(ApiError::invalid("Use transaction classification to create or change a Paid on Behalf receivable."));}
     if v["allocations"].as_array().into_iter().flatten().any(|a|a["offset_expense"]==true) && before.is_none_or(|old|old["allocations"]!=v["allocations"]) {return Err(ApiError::invalid("Use transaction classification to verify expense offsets."));}
     if let Some(payer) = v.get("paid_by_user_id") {
         let payer = payer.as_str().ok_or_else(|| ApiError::invalid("Paid by must be a household member."))?;

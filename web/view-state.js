@@ -13,6 +13,11 @@
       eventType:eventTypes.includes(params.get('event_type'))?params.get('event_type'):''
     };
     for(const [key,param] of Object.entries(extraFilters)) if(params.get(param)) result[key]=params.get(param);
+    // Older Investment links selected only generated ledger movements, missing imported/SIP allocations.
+    if(result.eventType==='investment') {
+      if(!result.transactionType) result.transactionType='investment';
+      result.eventType='';
+    }
     return result;
   }
   function read(search, fallbackMonth) {
@@ -52,7 +57,7 @@
     }
     if(filters.eventType) {
       if(!eventTypes.includes(filters.eventType)) throw new Error('Invalid transaction type.');
-      params.set('event_type',filters.eventType);
+      params.set(filters.eventType==='investment'?'transaction_type':'event_type',filters.eventType);
     }
     for(const [key,param] of Object.entries(extraFilters)) if(filters[key]) params.set(param,filters[key]);
     return `transactions${params.size?`?${params}`:''}`;

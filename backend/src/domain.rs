@@ -153,7 +153,7 @@ pub fn validate_transaction(v: &Value) -> Result<()> {
             if allocation.get("transaction_type").is_some() {
                 choice(allocation,"transaction_type",crate::classification::TYPES)?;
                 let incoming=!matches!(kind,"expense"|"investment");
-                if (allocation["transaction_type"]=="expense" && incoming) || (matches!(allocation["transaction_type"].as_str(),Some("income"|"refund"|"reimbursement")) && !incoming) {return Err(ApiError::invalid("Economic classification must match the account movement direction."));}
+                if (matches!(allocation["transaction_type"].as_str(),Some("expense"|"paid_on_behalf")) && incoming) || (matches!(allocation["transaction_type"].as_str(),Some("income"|"refund"|"reimbursement")) && !incoming) {return Err(ApiError::invalid("Economic classification must match the account movement direction."));}
             }
             if allocation
                 .get("category_id")

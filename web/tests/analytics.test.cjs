@@ -119,3 +119,33 @@ test('opening baseline remains an observed value while later unvalued SIP suppre
   assert.equal(after.value,'1000.00');
   assert.equal(after.gainCount,0);
 });
+
+test('live chart hydration preserves unchanged charts and replaces changed data once',()=>{
+  const charts=new Map();let created=0,destroyed=0;
+  class Chart {
+    constructor(canvas) {created++;charts.set(canvas,this);this.canvas=canvas;}
+    destroy() {destroyed++;charts.delete(this.canvas);}
+    static getChart(canvas) {return charts.get(canvas);}
+  }
+  const context={window:{Chart},BigInt};vm.runInNewContext(code,context);
+  const canvas={dataset:{chart:JSON.stringify({type:'bar',labels:[],datasets:[],currency:'INR'})}};
+  const host={querySelectorAll:()=>[canvas]};
+  context.window.finwiseAnalytics.hydrateCharts(host);
+  const first=charts.get(canvas);
+  context.window.finwiseAnalytics.hydrateCharts(host);
+  assert.equal(charts.get(canvas),first);assert.equal(created,1);assert.equal(destroyed,0);
+  canvas.dataset.chart=JSON.stringify({type:'bar',labels:['Updated'],datasets:[],currency:'INR'});
+  context.window.finwiseAnalytics.hydrateCharts(host);
+  assert.notEqual(charts.get(canvas),first);assert.equal(created,2);assert.equal(destroyed,1);
+});
+
+test('settlement analytics excludes reversed receivables and reversed payments',()=>{
+  const view=analytics();
+  const result=view.planningSummary([], [
+    {person:'Alex',direction:'owed_to_me',currency:'INR',date:'2026-09-01',amount:'100.00',repayments:[{date:'2026-09-02',amount:'60.00',reversed:true},{date:'2026-10-02',amount:'20.00'}]},
+    {person:'Sam',direction:'owed_to_me',currency:'INR',date:'2026-09-01',amount:'90.00',reversed:true,repayments:[]}
+  ],'2026-10','INR');
+  assert.equal(result.settlementRows.length,1);
+  assert.equal(result.settlementRows[0].asOfRemaining,'80.00');
+  assert.equal(result.owedToMe,'80.00');
+});

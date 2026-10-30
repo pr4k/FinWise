@@ -14,6 +14,7 @@ pub const TYPES: &[&str] = &[
     "investment",
     "transfer",
     "reimbursement",
+    "paid_on_behalf",
     "refund",
     "debt",
     "adjustment",
@@ -475,7 +476,7 @@ pub async fn save(
             "category_id",
             "splits",
             "linked_transaction_id",
-            "investment_id",
+            "investment_id", "person", "paid_on_behalf_amount", "receivable_description",
         ],
     )?;
     validate(body)?;
@@ -557,7 +558,8 @@ pub async fn save(
         }
         classification["investment_id"] = holding["id"].clone();
     }
-    let mut lines = if let Some(splits) = body["splits"].as_array() {
+    let paid_splits=crate::reimbursements::split(before,body)?;
+    let mut lines = if let Some(splits)=paid_splits {splits} else if let Some(splits) = body["splits"].as_array() {
         splits.clone()
     } else {
         before["allocations"]
@@ -585,7 +587,7 @@ pub async fn save(
             return Err(ApiError::invalid("Split amounts must be positive."));
         }
         total = add(total, n)?;
-        if body.get("splits").is_none() {
+        if body.get("splits").is_none() && body.get("paid_on_behalf_amount").is_none() {
             line["transaction_type"] = body["transaction_type"].clone();
         }
         domain::choice(line, "transaction_type", TYPES)?;
@@ -763,7 +765,7 @@ pub async fn save(
                 "Income and received refunds require a credit movement.",
             ));
         }
-        if line["transaction_type"] == "expense" && credit(before) {
+        if matches!(line["transaction_type"].as_str(),Some("expense"|"paid_on_behalf")) && credit(before) {
             return Err(ApiError::invalid("Expenses require a debit movement."));
         }
     }
@@ -796,6 +798,7 @@ pub async fn save(
         after["original_allocations"] =
             storage::raw(db, p, "transactions", text(before, "id")?).await?["allocations"].clone();
     }
+    crate::reimbursements::prepare(db,p,before,&mut after,body).await?;
     let saved = storage::update(db, p, before, after, "classify").await?;
     if let Some(holding_id) = body["investment_id"].as_str() {
         if before["classification"]["investment_id"] != holding_id
@@ -908,6 +911,7 @@ pub async fn route(
             storage::update(db, p, &before, after, "classification_undo").await
         }
         ("POST", ["classification-rules", "preview"]) => {
+            if body["transaction_type"]=="paid_on_behalf" {return Err(ApiError::invalid("Paid on Behalf requires a person and amount; classify each purchase individually."));}
             allowed_body(body, &["contains", "transaction_type"])?;
             validate(body)?;
             let needle = text(body, "contains")?.to_lowercase();
@@ -933,6 +937,7 @@ pub async fn route(
             Ok(json!({"data":data,"proposed_type":body["transaction_type"]}))
         }
         ("POST", ["classification-rules", "apply"]) => {
+            if body["transaction_type"]=="paid_on_behalf" {return Err(ApiError::invalid("Paid on Behalf requires a person and amount; classify each purchase individually."));}
             allowed_body(
                 body,
                 &["contains", "transaction_type", "transactions", "save_rule"],

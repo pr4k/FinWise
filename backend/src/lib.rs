@@ -1,5 +1,6 @@
 pub mod api;
 pub mod classification;
+pub mod reimbursements;
 pub mod auth;
 pub mod budget_forecast;
 pub mod balances;

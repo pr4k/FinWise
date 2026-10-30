@@ -309,7 +309,7 @@ paths["/reconciliation/sessions"]["post"]["responses"]["201"] = {"description": 
 
 schemas["SettlementInput"] = obj({"person":S,"direction":enum("owed_to_me","i_owe"),"kind":enum("loan","split","other"),"amount":M,"currency":S,"date":D,"description":S},("person","direction","kind","amount","currency","date","description"))
 schemas["SplitInput"] = obj({"description":S,"date":D,"currency":S,"total":M,"my_share":M,"paid_by":S,"transaction_id":S,"shares":arr(obj({"person":S,"amount":M},("person","amount")))},("description","date","currency","total","my_share","shares"))
-schemas["RepaymentInput"] = obj({"amount":M,"date":D,"note":S,"expected_revision":I},("amount","date"))
+schemas["RepaymentInput"] = obj({"amount":M,"date":D,"note":S,"transaction_id":S,"matches":arr(obj({"transaction_id":S,"amount":M,"note":S},("transaction_id","amount"))),"expected_revision":I})
 schemas["SipSchedule"] = obj({"amount":M,"day":{"type":"integer","minimum":1,"maximum":31},"start_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"end_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"status":enum("active","paused")},("amount","day","start_month","status"))
 schemas["InitialInvestmentRecord"] = obj({"month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"principal":M,"current_value":M,"account_id":S,"transaction_date":D},("month","principal"))
 schemas["InvestmentInput"] = obj({"name":S,"type":enum("investment","emergency_fund"),"asset_class":enum("mutual_fund","stock_market"),"currency":S,"target":M,"monthly_goal":M,"notes":S,"visibility":enum("private","shared"),"sip":{"oneOf":[ref("SipSchedule"),{"type":"null"}]},"opening_value":M,"opening_month":{"type":"string","pattern":"^\\d{4}-(0[1-9]|1[0-2])$"},"initial_record":ref("InitialInvestmentRecord")},("name","type","currency"))
@@ -383,10 +383,10 @@ for path, methods in investment_contract["paths"].items():
     paths[path] = methods
 
 # Economic purpose is independent from ledger event direction.
-economic_type = enum("income","expense","investment","transfer","reimbursement","refund","debt","adjustment","unknown")
-schemas["TransactionClassification"] = obj({"transaction_type":economic_type,"status":enum("confirmed","suggested","needs_review"),"confidence_score":{"type":"integer","minimum":0,"maximum":100},"classification_source":enum("manual","rule","system"),"confirmed_at":S,"linked_transaction_id":S,"investment_id":S,"reason":S,"suggested_link_id":S}, ("transaction_type","status","confidence_score","classification_source"))
-schemas["ClassificationSplit"] = obj({"amount":M,"transaction_type":economic_type,"category_id":{"type":["string","null"]},"scope":enum("personal","family"),"member_id":S,"offset_expense":B}, ("amount","transaction_type","scope"))
-schemas["ClassificationInput"] = obj({"transaction_type":economic_type,"category_id":{"type":["string","null"]},"splits":arr(ref("ClassificationSplit")),"linked_transaction_id":S,"investment_id":S,"expected_revision":I}, ("transaction_type",))
+economic_type = enum("income","expense","investment","transfer","reimbursement","paid_on_behalf","refund","debt","adjustment","unknown")
+schemas["TransactionClassification"] = obj({"transaction_type":economic_type,"status":enum("confirmed","suggested","needs_review"),"confidence_score":{"type":"integer","minimum":0,"maximum":100},"classification_source":enum("manual","rule","system"),"confirmed_at":S,"linked_transaction_id":S,"investment_id":S,"receivable_id":S,"reason":S,"suggested_link_id":S}, ("transaction_type","status","confidence_score","classification_source"))
+schemas["ClassificationSplit"] = obj({"amount":M,"transaction_type":economic_type,"category_id":{"type":["string","null"]},"scope":enum("personal","family"),"member_id":S,"offset_expense":B,"person":S,"receivable_id":S}, ("amount","transaction_type","scope"))
+schemas["ClassificationInput"] = obj({"transaction_type":economic_type,"category_id":{"type":["string","null"]},"splits":arr(ref("ClassificationSplit")),"linked_transaction_id":S,"investment_id":S,"person":S,"paid_on_behalf_amount":M,"receivable_description":S,"expected_revision":I}, ("transaction_type",))
 schemas["ClassificationRulePreviewInput"] = obj({"contains":S,"transaction_type":economic_type}, ("contains","transaction_type"))
 schemas["ClassificationRuleApplyInput"] = obj({"contains":S,"transaction_type":economic_type,"save_rule":B,"transactions":arr(obj({"id":S,"revision":I}, ("id","revision")))}, ("contains","transaction_type","transactions"))
 schemas["Transaction"]["properties"]["classification"] = ref("TransactionClassification")
@@ -398,6 +398,8 @@ route("/transactions/{id}/classification","post","Transaction","ClassificationIn
 route("/transactions/{id}/classification-undo","post","Transaction","Revision",revision=True)
 route("/classification-rules/preview","post",request="ClassificationRulePreviewInput")
 route("/classification-rules/apply","post",request="ClassificationRuleApplyInput")
+route("/settle-ups/{id}/reimbursement-candidates","get")
+route("/settle-ups/{id}/reverse","post",request="Revision",revision=True)
 paths["/transactions"]["get"]["parameters"] += [{"name":key,"in":"query","schema":S} for key in ["transaction_type","classification_status","direction","min_amount","max_amount","currency","secondary_sort"]]
 
 document = {"openapi": "3.1.0", "info": {"title": "FinWise API", "version": "0.1.0", "description": "Core implementation. Check x-implemented for each operation. Deferred workflows return 501; unknown routes return 404."}, "servers": [{"url": "/api/v1"}], "paths": paths, "components": {"securitySchemes": {"session": {"type": "apiKey", "in": "cookie", "name": "finwise_session"}}, "schemas": schemas}}

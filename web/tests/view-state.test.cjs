@@ -52,3 +52,13 @@ test('economic filters, date bounds and secondary sorting compose and persist in
   view.save('2026-09','combined','http://localhost'+next,value=>next=value,{account:'',accountType:'',eventType:''});
   const cleared=new URL(next,'http://localhost').searchParams;assert.equal(cleared.has('sort'),false);assert.equal(cleared.has('classification_status'),false);assert.equal(cleared.has('from'),false);
 });
+
+test('legacy Investment filter uses economic classification for all family members',()=>{
+  const view=state();
+  const params=new URL(view.transactionsPath('2026-09',false,{eventType:'investment'},'family'),'http://localhost').searchParams;
+  assert.equal(params.get('transaction_type'),'investment');assert.equal(params.has('event_type'),false);assert.equal(params.get('scope'),'family');assert.equal(params.has('member_id'),false);
+  const restored=view.readFilters('?scope=family&event_type=investment');
+  assert.equal(restored.eventType,'');assert.equal(restored.transactionType,'investment');
+  const memberQuery=new URL(view.transactionsPath('2026-09',false,{...restored,person:'partner'},'family'),'http://localhost').searchParams;
+  assert.equal(memberQuery.get('transaction_type'),'investment');assert.equal(memberQuery.get('member_id'),'partner');
+});
