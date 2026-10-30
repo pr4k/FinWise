@@ -73,7 +73,7 @@ test('standalone and split tagged investments appear in overview and activity',(
   }
   state.investmentTab='overview';
   context.renderInvestmentTab();
-  assert.match(root.innerHTML,/tagged, unassigned net 100.00/);
+  assert.match(root.innerHTML,/Unlinked net funding<\/dt><dd>100.00/);
 });
 
 test('monthly investment headline uses the shared report total and breakdown',()=>{
@@ -81,8 +81,8 @@ test('monthly investment headline uses the shared report total and breakdown',()
   state.investmentTab='overview';
   state.investmentViewData.report={contributed:'65768.00',withdrawn:'0.00',unassigned_net:'27430.54',net_invested:'93198.54'};
   context.renderInvestmentTab();
-  assert.match(root.innerHTML,/Net invested in 2026-10 · Combined household<\/span><strong>93198.54<\/strong>/);
-  assert.match(root.innerHTML,/Recorded contributions 65768.00 · withdrawn 0.00 · tagged, unassigned net 27430.54/);
+  assert.match(root.innerHTML,/Net invested[\s\S]*?investment-stat-value">93198.54<\/strong>/);
+  assert.match(root.innerHTML,/Contributions<\/dt><dd>65768.00[\s\S]*?Withdrawals<\/dt><dd>0.00[\s\S]*?Unlinked net funding<\/dt><dd>27430.54/);
 });
 
 test('personal investment activity uses payer, including family-scoped payments',()=>{
@@ -106,8 +106,8 @@ test('personal investment activity uses payer, including family-scoped payments'
   state.investmentTab='overview';
   state.investmentViewData.report={net_invested:'27430.54',unassigned_net:'27430.54',personal_net_invested:'2430.54',personal_unassigned_net:'2430.54'};
   context.renderInvestmentTab();
-  assert.match(root.innerHTML,/Combined household<\/span><strong>27430.54/);
-  assert.match(root.innerHTML,/Paid by you \(net\) 2430.54 · your unassigned net 2430.54/);
+  assert.match(root.innerHTML,/Net invested[\s\S]*?investment-stat-value">27430.54/);
+  assert.match(root.innerHTML,/Paid by you, net<\/dt><dd>2430.54[\s\S]*?Your unlinked funding<\/dt><dd>2430.54/);
 });
 
 test('tagged investment table identifies the payer',()=>{
@@ -172,7 +172,7 @@ test('emergency fund holdings are separate from the regular investment value',()
   state.investmentTab='overview';
   state.investmentViewData.holdings.push({id:'emergency',name:'CC emergency',owner_id:'u',type:'emergency_fund',currency:'INR',records:[{month:'2026-10',contribution:'5000.00',withdrawal:'0',value:'5000.00',net_contributions:'5000.00',gain_loss:'0'}]});
   context.renderInvestmentTab();
-  assert.match(root.innerHTML,/Investment value \(excluding emergency funds\)<\/span><strong>100.00<\/strong>/);
-  assert.match(root.innerHTML,/Separate emergency funds/);
+  assert.match(root.innerHTML,/Portfolio value[\s\S]*?investment-stat-value">100.00<\/strong>/);
+  assert.match(root.innerHTML,/emergency fund/);
   assert.match(root.innerHTML,/CC emergency/);
 });

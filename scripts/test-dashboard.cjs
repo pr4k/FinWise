@@ -37,7 +37,7 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByRole('heading',{name:'Your month',exact:true}).waitFor();
     async function open(view) {
       await page.evaluate(view=>location.hash=view,view);
-      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Dashboard',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Dashboard',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
+      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Dashboard',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Dashboard',budgets:'Family budget',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
       catch(error) { throw new Error(`Opening ${view}: ${error.message}`); }
     }
     async function upload(repeat=false) {
@@ -140,7 +140,69 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     assert.equal(await page.locator('#breadcrumb-current').textContent(),'Dashboard');
     assert.equal(await page.locator('.live-error').count(),0);
     assert.deepEqual(errors,[]);
-    console.log('Dashboard browser checks passed: merged reports and legacy route, four hero breakdowns, exact reconciliation, contributor/excluded tabs, keyboard/close focus, transaction drill-down, synchronized scopes, and 320–1440px layouts.');
+    await page.evaluate(()=>location.hash='overview');
+    await page.waitForFunction(()=>!document.querySelector('#view-root').hasAttribute('aria-busy')&&document.querySelector('.dashboard-page'));
+    assert.equal(await page.getByRole('heading',{name:'Budget pulse',exact:true}).count(),0);
+    assert.equal(await page.locator('#desktop-nav [data-view=budgets]').isVisible(),false);
+    await page.locator('.scope-segments [data-scope=family]').click();
+    await page.getByRole('heading',{name:'Budget pulse',exact:true}).waitFor();
+    assert.equal(await page.locator('#desktop-nav [data-view=budgets]').isVisible(),true);
+    await open('budgets');
+    await page.getByRole('button',{name:'Create family budget',exact:true}).first().click();
+    await page.getByLabel('Name',{exact:true}).fill('Shared family plan');
+    await page.getByLabel('Expected income',{exact:true}).fill('1000.00');
+    assert.equal(await page.locator('[data-person-limit]').count(),0);
+    await page.locator('#editor .budget-input-grid input').first().fill('100.00');
+    await page.getByRole('button',{name:'Create draft',exact:true}).click();
+    await page.getByRole('heading',{name:'Shared family plan · draft',exact:true}).first().waitFor();
+    assert.equal(await page.getByRole('tab',{name:'People',exact:true}).count(),0);
+    assert.equal(await page.getByRole('tablist',{name:'Budget sections'}).getByRole('tab').count(),3);
+    const familyPlan=await page.evaluate(async()=>{const plans=await window.finwiseAPI.collection('budgets?month='+document.querySelector('#report-month').value+'&scope=family');return plans.data.find(plan=>plan.name==='Shared family plan');});
+    assert.equal(familyPlan.scope,'family');assert.equal(familyPlan.people_limits.length,0);
+    await page.getByRole('button',{name:'Activate',exact:true}).first().click();
+    await page.getByRole('heading',{name:'Shared family plan · active',exact:true}).first().waitFor();
+    await page.getByRole('tab',{name:'Categories',exact:true}).click();
+    assert.equal(await page.locator('#budget-panel-categories').isVisible(),true);
+    assert.equal(await page.locator('[data-action=budget-matrix-detail]').count(),0);
+    for(const width of [320,390,768,1440]) {
+      await page.setViewportSize({width,height:1000});
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`Family budget overflow at ${width}`);
+    }
+    await page.locator('.scope-segments [data-scope=personal]').click();
+    await page.getByRole('button',{name:'View family budget',exact:true}).waitFor();
+    assert.equal(await page.locator('#desktop-nav [data-view=budgets]').isVisible(),false);
+    assert.equal(await page.locator('.live-error').count(),0);assert.deepEqual(errors,[]);
+    await page.evaluate(async month=>{
+      const api=window.finwiseAPI;
+      for(const holding of [
+        {name:'Nifty 50 Index Fund',type:'investment',asset_class:'mutual_fund',opening_value:'285600.00'},
+        {name:'Equity portfolio',type:'investment',asset_class:'stock_market',opening_value:'125400.00'}
+      ])await api.request('investments',{method:'POST',body:{...holding,currency:'INR',visibility:'shared',opening_month:month}});
+      await api.request('investments/goals',{method:'POST',body:{name:'Family safety fund',kind:'emergency',currency:'INR',target_amount:'85000.00',essential_monthly:'17000.00',target_months:5,allocations:[]}});
+    },first.month);
+    await open('investments');
+    await page.getByRole('tab',{name:'Overview',exact:true}).click();
+    await page.locator('.investment-summary').waitFor();
+    assert.equal(await page.locator('.investment-stat').count(),4);
+    assert.equal(await page.locator('.investment-calculation-details').first().evaluate(el=>el.open),false);
+    assert.equal(await page.locator('.investment-preview-card').count(),2);
+    await page.getByText('How these totals work',{exact:true}).click();
+    assert.equal(await page.getByRole('heading',{name:'Monthly cash flow',exact:true}).isVisible(),true);
+    await page.getByText('How these totals work',{exact:true}).click();
+    for(const width of [320,390,768,1440]) {
+      await page.setViewportSize({width,height:1000});
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`Investment overview overflow at ${width}`);
+      if(process.env.FINWISE_SCREENSHOT_DIR)await page.locator('.investment-summary').screenshot({path:path.join(process.env.FINWISE_SCREENSHOT_DIR,`investment-summary-${width}.png`)});
+    }
+    await page.locator('.investment-preview-card').filter({hasText:'Nifty 50 Index Fund'}).click();
+    await page.locator('#editor[open]').waitFor();
+    await page.locator('#editor [data-action=close-editor]').first().click();
+    await page.getByRole('button',{name:'View all →',exact:true}).click();
+    await page.getByRole('heading',{name:'Holdings',exact:true}).waitFor();
+    assert.equal(await page.locator('.live-error').count(),0);assert.deepEqual(errors,[]);
+    console.log('Dashboard browser checks passed: merged reports and legacy route, four hero breakdowns, exact reconciliation, contributor/excluded tabs, keyboard/close focus, transaction drill-down, synchronized scopes, family-only budgets, compact investment overview with expandable calculations and holdings drill-down, and 320–1440px layouts.');
   } finally {
     if(browser) await browser.close();
     try { process.kill(-server.pid,'SIGTERM'); } catch {}

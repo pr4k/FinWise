@@ -1,7 +1,7 @@
 # FinWise — Current Application Feature Specification
 
 **Version:** 1.0  
-**As of:** 30 October 2026  
+**As of:** 31 October 2026
 **Scope:** Application behavior represented by the current local working tree, including uncommitted changes. This is an implementation inventory, not a roadmap or a production certification.
 
 ## 1. Product purpose
@@ -22,7 +22,7 @@ The main application is an authenticated, responsive browser interface backed by
 | Shared account | Accessible to household members; sharing includes account history and reconciliation evidence. |
 | Personal report scope | Reports the signed-in user's eligible personal allocations. Investment views additionally use the ownership and payer rules in section 12. |
 | Family report scope | Reports accessible family allocations and the family budget. |
-| Combined report scope | Combines eligible personal and family allocations without counting them twice; budget plans remain separate. |
+| Combined report scope | Combines eligible personal and family allocations without counting them twice. Budgets are available only in Family view. |
 
 Allocation scope, account visibility, payer identity, budget beneficiary, and investment ownership are separate concepts. Changing one does not automatically change the others. All views remain limited by server-side authorization.
 
@@ -164,26 +164,31 @@ Answers what happened in the selected month and where available money sits. Over
 
 ## 9. Budgets and Planner
 
-**Purpose:** Plan monthly spending, allocate responsibility, and compare limits with recorded activity and commitments.
+**Purpose:** Plan shared family spending and compare category limits with recorded activity and commitments.
 
 **Budget setup and lifecycle**
 
-- Personal and Family monthly plans have currency, name, expected income, savings goal, category limits, and draft/active/archived lifecycle.
-- Combined scope presents Personal and Family plans separately.
+- Budget management, dashboard cards, and budget reports appear only in Family view. New plans use Family scope with currency, name, expected income, savings goal, shared category limits, and draft/active/archived lifecycle.
+- Existing personal plans remain stored for compatibility and history; the current UI does not display or create personal plans.
 - Limits apply either to one category or a pooled parent with descendants. Overlapping child limits under a pooled parent are rejected.
-- Optional family People allowances reconcile with category limits. Three prior months' exact-category averages can populate limits, with coverage caveats.
+- There are no per-person allowances or person-level budget controls. Three prior months' Family-scope exact-category averages can populate category limits, with coverage caveats.
 - Authorized managers can activate plans, copy them to the next month as drafts, and make permitted lifecycle changes.
 - Existing-plan edits require a server-validated before/after preview, matching revision and preview hash, and an amendment reason. Worsening a negative funding gap requires explicit acceptance. Plan history retains revisions and reasons.
 
 **Budget workspace**
 
-- Top View, People, Categories, and Plan Ahead tabs share the selected month and scope.
+- Overview, Categories, and Plan Ahead tabs share the selected month and Family scope. Personal/Combined budget links offer a switch to Family.
 - Shows effective allowance, net actual spending, remaining amounts, over-limit and unbudgeted categories, savings/income comparison, commitments, and available after commitments.
-- People/category matrix and drilldowns use authorized expense/refund allocations rather than counting allowance totals as spending.
+- Category transaction drilldowns use authorized expense/refund allocations. Paid-by information remains separate from shared category limits. New family allocations and commitments use the shared family pool; legacy destination metadata is retained when editing transactions.
 - Daily pacing compares actual spending, an even budget guide, and prior-month spending.
 - A current-month forecast becomes available after seven elapsed days. It explains its rate calculation, excludes explicitly matched posted bills from the variable rate, and is labeled Limited history. Earlier dates and noncurrent months return Forecast unavailable.
 
 **Planner**
+
+- Adds a monthly canvas, cash calendar (month, agenda and table), what-if scenarios, sinking funds, explicit plan/actual matching, revision history and draft/active/closed states in the current FinWise theme. Future months work without ledger records.
+- Uses real authorized accounts and reporting allocations, with Personal/Family and currency isolation. Card charges reserve bank cash; due statement payments release matching reservations without counting consumption twice. Opening balances remain frozen planning assumptions; unknown funding and shortfalls are labeled.
+- Canvas plans, card evidence, fund targets and activation allowances are browser-local and namespaced by household/user. Activation opens a local allowance view; it does not create server family budgets or actual ledger entries. See [Planner integration](planner-module.md).
+- The **Saved expenses & family budget commitments** disclosure retains the existing server-backed workflow below.
 
 - Records title, due date, expected amount/currency, optional expense category/account, and Personal/Household visibility.
 - Ordinary plans are reminders that can be marked done or planned; they do not post transactions.
@@ -228,7 +233,7 @@ Answers what happened in the selected month and where available money sits. Over
 
 **Purpose:** Track owned assets, investment funding, dated performance, and reserves without confusing them with spending.
 
-**Workspace:** Overview, Holdings, SIPs, Activity, Goals & Emergency, and Review tabs. Values use the selected period/cutoff and show valuation coverage; prices are manually observed rather than live market quotes.
+**Workspace:** Overview, Holdings, SIPs, Activity, Goals & Emergency, and Review tabs. The Overview leads with four compact totals: Portfolio value, Net invested, Tracking return, and Emergency fund, including a target progress indicator. Coverage stays visible in short captions; full cash-flow calculations, payer/ownership attribution, valuation dates, and access rules expand under “How these totals work.” Holdings appear as compact cards with detail links, while the Holdings tab retains the full table. Tagged investment transactions are collapsed by default in Overview. Values use the selected period/cutoff; prices are manually observed rather than live market quotes.
 
 **Holding setup and access**
 

@@ -141,3 +141,8 @@ body:has(.metric-dialog[open]) {overflow:hidden}
   .metric-effect {max-width:100%;margin-left:42px;text-align:left}
   .metric-effect b {font-size:14px}
 }
+
+.sidebar [data-view="budgets"][hidden],.bottom-nav [data-view="budgets"][hidden] {display:none!important}
+.dashboard-page .dashboard-bottom-grid:not(:has(> :nth-child(3))) {grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:800px) {.dashboard-page .dashboard-bottom-grid:not(:has(> :nth-child(3))) {grid-template-columns:1fr}}
+.dashboard-page .dashboard-bottom-grid:not(:has(> :nth-child(3))) > :last-child {grid-column:auto}

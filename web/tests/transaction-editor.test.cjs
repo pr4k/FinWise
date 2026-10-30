@@ -32,7 +32,7 @@ test('transaction details show the same content and host from every page',async(
       assert.equal(rendered.at(-1)[4],wide?context.transactionDrawer:context.dialog);
       assert.equal(rendered.at(-1)[1],rendered[0][1]);
       assert.match(rendered.at(-1)[1],/Edit transaction:edit-transaction/);
-      assert.match(rendered.at(-1)[1],/Budget used by/);
+      assert.doesNotMatch(rendered.at(-1)[1],/Budget used by/);
       assert.match(rendered.at(-1)[1],/Reconciliation evidence/);
     }
   }

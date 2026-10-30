@@ -37,7 +37,7 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByRole('heading',{name:'Your month',exact:true}).waitFor();
     async function open(view) {
       await page.evaluate(view=>location.hash=view,view);
-      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Dashboard',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Dashboard',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
+      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Dashboard',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Dashboard',budgets:'Family budget',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
       catch(error) { throw new Error(`Opening ${view}: ${error.message}`); }
     }
     async function upload(repeat=false) {
@@ -205,7 +205,8 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await newRow.waitFor();
     assert.match(await newRow.locator('td').nth(1).textContent(),/Empty · new in Money Manager/);
     // Exercise the budget tracking response shape, including draft activation.
-    await open('budgets'); await page.getByRole('button',{name:'Create budget',exact:true}).first().click();
+    await page.locator('.scope-segments [data-scope=family]').click();
+    await open('budgets'); await page.getByRole('button',{name:'Create family budget',exact:true}).first().click();
     await page.getByLabel('Name',{exact:true}).fill('Browser budget');
     await page.getByLabel('Expected income',{exact:true}).fill('1000.00');
     await page.locator('#editor .budget-input-grid input').first().fill('1000');
