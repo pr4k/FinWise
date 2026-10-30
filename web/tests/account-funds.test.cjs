@@ -77,7 +77,7 @@ test('opened account leads with the reduced available balance and retains the re
     Date,Map,URLSearchParams,period:()=>({from:'2026-10-01',to:'2026-11-01'}),
     id:encodeURIComponent,viewState:{transactionsPath:()=> 'transactions'},
     api:{collection:async()=>({data:[]}),request:async()=>({data:[]})},
-    button:()=>'',dangerButton:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>'',moneyTone:()=>''
+    button:(title,action)=>`<button data-action="${action}">${title}</button>`,dangerButton:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>'',moneyTone:()=>''
   });
   context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
   context.analyticsView.negate=value=>String(-Number(value));
@@ -94,6 +94,15 @@ test('opened account leads with the reduced available balance and retains the re
   delete selected.funds;
   const card=await context.view.accounts(['bank']);
   assert.match(card,/<span>Amount owed<\/span>INR 100000.00/);
+  selected.owner_id='family-member';
+  selected.visibility='shared';
+  const sharedCard=await context.view.accounts(['bank']);
+  assert.match(sharedCard,/data-action="opening-balance">Set known balance/);
+  assert.doesNotMatch(sharedCard,/data-action="edit-account"/);
+  selected.opening_balance={amount:'2000.00',as_of:'2026-10-01T00:00:00Z'};
+  assert.match(await context.view.accounts(['bank']),/data-action="opening-balance">Edit known balance/);
+  selected.visibility='private';
+  assert.doesNotMatch(await context.view.accounts(['bank']),/data-action="opening-balance"/);
 });
 
 test('accounts page shows balances for every family owner regardless of selected scope',async()=>{

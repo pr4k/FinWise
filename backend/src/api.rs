@@ -1020,7 +1020,12 @@ pub(crate) async fn route(
             if family_only(db, p).await? { force_family(kind, &mut after); }
             match *kind {
                 "accounts" => {
-                    if before["owner_id"] != p.user_id {
+                    let shared_balance_update = before["visibility"] == "shared"
+                        && body.get("opening_balance").is_some()
+                        && body.as_object().unwrap().keys().all(|key| {
+                            matches!(key.as_str(), "opening_balance" | "expected_revision")
+                        });
+                    if before["owner_id"] != p.user_id && !shared_balance_update {
                         return Err(ApiError::forbidden());
                     }
                     if before["visibility"] == "private" && after["visibility"] == "shared" {

@@ -11,6 +11,37 @@ use std::path::Path;
 use tower::ServiceExt;
 
 #[tokio::test]
+async fn family_members_can_set_shared_card_starting_balances_only() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    // Exercise both a household owner editing a member's card and the reverse.
+    for (creator, editor) in [(&member, &owner), (&owner, &member)] {
+        let card = creator.create("accounts", json!({"name":"Family card","subtype":"credit_card","currency":"INR","visibility":"shared"})).await;
+        let path = format!("accounts/{}", card["id"].as_str().unwrap());
+        let opening = json!({"amount":"2500.00","as_of":"2026-09-01T00:00:00+05:30"});
+        let saved = editor.call("PATCH", &path, json!({"opening_balance":opening}), None, card["revision"].as_i64()).await;
+        assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+        assert_eq!(saved.1["balance"]["amount"], "2500.00");
+        assert_eq!(saved.1["owner_id"], card["owner_id"]);
+        let revision = saved.1["revision"].as_i64();
+        let stale = editor.call("PATCH", &path, json!({"opening_balance":opening}), None, card["revision"].as_i64()).await;
+        assert_eq!(stale.0, StatusCode::CONFLICT);
+        for body in [json!({"name":"Renamed"}), json!({"opening_balance":opening,"visibility":"private"})] {
+            let denied = editor.call("PATCH", &path, body, None, revision).await;
+            assert_eq!(denied.0, StatusCode::FORBIDDEN, "{}", denied.1);
+        }
+        let corrected = editor.call("PATCH", &path, json!({"opening_balance":{"amount":"3000.00","as_of":"2026-09-02T00:00:00+05:30"},"expected_revision":revision}), None, None).await;
+        assert_eq!(corrected.0, StatusCode::OK, "{}", corrected.1);
+        assert_eq!(corrected.1["balance"]["amount"], "3000.00");
+        let read = creator.call("GET", &path, json!({}), None, None).await;
+        assert_eq!(read.1["opening_balance"]["amount"], "3000.00");
+        let private = creator.create("accounts", json!({"name":"Private card","subtype":"credit_card","currency":"INR","visibility":"private"})).await;
+        let denied = editor.call("PATCH", &format!("accounts/{}", private["id"].as_str().unwrap()), json!({"opening_balance":opening}), None, private["revision"].as_i64()).await;
+        assert_eq!(denied.0, StatusCode::NOT_FOUND, "{}", denied.1);
+    }
+}
+
+#[tokio::test]
 async fn account_available_funds_separate_goal_reserves_without_changing_ledger() {
     let (client, _) = setup().await;
     let bank = client.create("accounts", json!({"name":"Savings","subtype":"bank","currency":"INR","opening_balance":{"amount":"100000.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
