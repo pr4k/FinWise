@@ -7657,9 +7657,11 @@ async fn classification_transfer_pair_card_payment_audit_and_undo() {
     assert!(history["data"].as_array().unwrap().iter().any(|v|v["action"]=="classification_undo"));
 }
 #[tokio::test]
-async fn classification_review_matching_is_suggested_and_ranked_not_amount_confirmed() {
+async fn category_reporting_does_not_suggest_types_or_require_reviews() {
     let (c,pool)=setup().await;let a=c.account("A","bank").await;let b=c.account("B","bank").await;let expense=c.category("Expense","expense").await;let income=c.category("Income","income").await;
-    let debit=c.transaction("expense","500.00",&a,&expense,"personal").await;
+    let mut purchase=transaction("expense","500.00",&a,&expense,"personal");
+    purchase["description"]=json!("SIP broker investment loan salary refund");
+    let debit=c.create("transactions",purchase).await;
     let credit=c.transaction("income","500.00",&b,&income,"personal").await;
     for tx in [&debit,&credit] {sqlx::query("UPDATE resources SET document=json_set(document,'$.classification.classification_source','system','$.classification.status','needs_review','$.classification.confidence_score',50) WHERE id=?").bind(tx["id"].as_str().unwrap()).execute(&pool).await.unwrap();}
     for amount in ["1.00","2.00","3.00","4.00","5.00","6.00"] {
@@ -7667,10 +7669,16 @@ async fn classification_review_matching_is_suggested_and_ranked_not_amount_confi
         sqlx::query("UPDATE resources SET document=json_set(document,'$.classification.classification_source','system','$.classification.status','needs_review','$.classification.transaction_type','unknown','$.classification.confidence_score',30) WHERE id=?").bind(t["id"].as_str().unwrap()).execute(&pool).await.unwrap();
     }
     let review=c.call("GET","classification-reviews?from=2026-09-01&to=2026-10-01&scope=personal&currency=INR",json!({}),None,None).await;
-    assert_eq!(review.0,StatusCode::OK,"{}",review.1);assert_eq!(review.1["data"].as_array().unwrap().len(),5);assert_eq!(review.1["pending_count"],8);
-    assert_eq!(review.1["data"][0]["classification"]["transaction_type"],"transfer");assert_eq!(review.1["data"][0]["classification"]["status"],"suggested");
-    let before=review.1["data"][0].clone();classify(&c,&before,json!({"transaction_type":"transfer","linked_transaction_id":before["classification"]["suggested_link_id"]})).await;
-    let review=c.call("GET","classification-reviews",json!({}),None,None).await.1;assert_eq!(review["pending_count"],6);assert_eq!(review["data"].as_array().unwrap().len(),5);
+    assert_eq!(review.0,StatusCode::OK,"{}",review.1);
+    assert_eq!(review.1["pending_count"],0);
+    assert!(review.1["data"].as_array().unwrap().is_empty());
+    let investment=c.create("categories",json!({"name":"Investments","kind":"expense","tracking_type":"investment"})).await;
+    let child=c.create("categories",json!({"name":"Monthly fund","kind":"expense","parent_id":investment["id"]})).await;
+    c.transaction("expense","12.34",&a,&child,"personal").await;
+    let summary=classified_summary(&c,"personal").await;
+    assert_eq!(summary["actual_spending"],"521.00");
+    assert_eq!(summary["earned_income"],"500.00");
+    assert_eq!(summary["net_invested"],"12.34");
 }
 #[tokio::test]
 async fn classification_filters_sort_all_rows_before_cursor_pagination() {
@@ -7727,14 +7735,14 @@ async fn classification_investment_link_and_budget_consumers_share_split_amounts
     let report=c.call("GET","investments/report?month=2026-09&scope=personal&currency=INR",json!({}),None,None).await.1;assert_eq!(report["net_invested"],"70.02");
 }
 #[tokio::test]
-async fn classification_matching_is_identical_across_month_filters_and_detail_reads() {
+async fn category_reporting_is_identical_across_month_filters_and_detail_reads() {
     let (c,pool)=setup().await;let a=c.account("A","bank").await;let b=c.account("B","bank").await;let food=c.category("Food","expense").await;let income=c.category("Income","income").await;
     let mut debit=transaction("expense","50.00",&a,&food,"personal");debit["effective_date"]=json!("2026-09-30");let debit=c.create("transactions",debit).await;
     let mut credit=transaction("income","50",&b,&income,"personal");credit["effective_date"]=json!("2026-10-01");let credit=c.create("transactions",credit).await;
     for tx in [&debit,&credit] {sqlx::query("UPDATE resources SET document=json_set(document,'$.classification.classification_source','system','$.classification.status','needs_review','$.classification.confidence_score',50) WHERE id=?").bind(tx["id"].as_str().unwrap()).execute(&pool).await.unwrap();}
     let detail=c.call("GET",&format!("transactions/{}",debit["id"].as_str().unwrap()),json!({}),None,None).await.1;
     let month=c.call("GET","transactions?from=2026-09-01&to=2026-10-01",json!({}),None,None).await.1;
-    assert_eq!(month["data"][0]["classification"],detail["classification"]);assert_eq!(detail["classification"]["transaction_type"],"transfer");assert_eq!(detail["classification"]["status"],"suggested");assert_eq!(detail["classification"]["suggested_link_id"],credit["id"]);
+    assert_eq!(month["data"][0]["classification"],detail["classification"]);assert_eq!(detail["classification"]["transaction_type"],"expense");assert_eq!(detail["classification"]["status"],"confirmed");assert!(detail["classification"]["suggested_link_id"].is_null());
 }
 
 #[tokio::test]

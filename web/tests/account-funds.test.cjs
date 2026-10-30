@@ -49,26 +49,40 @@ test('unknown balances stay unknown and shortfalls are shown in account details'
   assert.match(context.accountReservationPanel(shortfall),/INR 500.00 of requested reserves is no longer covered/);
 });
 
-test('dashboard renders available account balances and reserves separately',async()=>{
+test('dashboard separates recorded balances, available funds, reserves, currencies and card repayments',async()=>{
   const context=helpers();
+  const card={id:'card',name:'Card',currency:'INR',subtype:'credit_card',balance:{amount:'5000.00'}};
+  const usd={...account,id:'usd',currency:'USD',balance:{amount:'999.00'}};
+  const transfers=[{id:'payment',event_type:'transfer',amount:'20.00',movements:[{account_id:'bank',amount:'-20.00'},{account_id:'card',amount:'20.00'}]}];
   Object.assign(context,{
-    state:{month:'2026-10',scope:'combined',me:{household:{base_currency:'INR'}},accounts:[account],categories:[]},
+    state:{members:[],month:'2026-10',scope:'combined',me:{household:{base_currency:'INR'}},accounts:[account,card,usd],categories:[]},
     reportQuery:()=>'',period:()=>({from:'2026-10-01',to:'2026-11-01'}),Date,Map,URLSearchParams,smartReviewPanel:()=>'',
-    api:{request:async path=>path.startsWith('analytics/dashboard')?{summary:{recorded_surplus:'0.00',income:'0.00',net_spending:'0.00',after_investment_cash_flow:'0.00',unresolved_count:0},series:{data:[]},categories:{data:[]},accounts:{data:[account]}}:{data:[]},collection:async()=>({data:[]})},
+    api:{request:async path=>path.startsWith('analytics/dashboard')?{summary:{recorded_surplus:'0.00',income:'0.00',net_spending:'0.00',after_investment_cash_flow:'0.00',transfer_volume:'100.00'},series:{data:[]},categories:{data:[]},accounts:{data:[account,card,usd]}}:{data:[]},collection:async path=>({data:path.startsWith('analytics/transactions')?transfers:[]})},
     allInvestments:async()=>[],categoryView:{rollup:()=>new Map()},moneyTone:()=>'',
-    responsiveAmount:String,field:(_label,control)=>control,option:(value,label)=>`<option value="${value}">${label}</option>`,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
+    responsiveAmount:(value,currency)=>value==null?'Unknown':`${currency} ${value}`,field:(_label,control)=>control,option:(value,label)=>`<option value="${value}">${label}</option>`,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
   });
   context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
-  context.analyticsView.groupedBars=()=>'';
+  context.analyticsView.categoryRing=()=>'';
+  context.analyticsView.categoryHistory=()=>'';
+  context.analyticsView.cumulativeMoney=()=>[];
+  context.analyticsView.moneyLines=()=>'';
+  context.analyticsView.subscriptionMonth=()=>({rows:[]});
   const start=source.indexOf('  async overview() {');
   const end=source.indexOf('\n  async analytics()',start);
   vm.runInContext('var view={'+source.slice(start,end)+'};',context);
   const html=await context.view.overview();
   assert.match(html,/Available money and reserves/);
   assert.match(html,/INR 71538.00/);
-  assert.match(html,/Emergency reserves in accounts/);
-  assert.match(html,/INR 18462.00/);
-  assert.doesNotMatch(html,/100000.00/);
+  assert.match(html,/Account snapshot/);
+  assert.match(html,/Reserved funds/);
+  assert.match(html,/INR 28462.00/);
+  assert.match(html,/100000.00/);
+  assert.match(html,/Bank & cash recorded/);
+  assert.match(html,/After reserves/);
+  assert.match(html,/Internal transfers[\s\S]*?INR 80.00/);
+  assert.match(html,/Card payments[\s\S]*?INR 20.00/);
+  assert.doesNotMatch(html,/999.00/);
+  assert.match(html,/Credit card owed[\s\S]*?INR 5000.00/);
 });
 
 test('opened account leads with the reduced available balance and retains the recorded breakdown',async()=>{
@@ -105,6 +119,40 @@ test('opened account leads with the reduced available balance and retains the re
   assert.match(await context.view.accounts(['bank']),/data-action="opening-balance">Edit known balance/);
   selected.visibility='private';
   assert.doesNotMatch(await context.view.accounts(['bank']),/data-action="opening-balance"/);
+});
+
+test('account history preserves newest-first ledger order and balances, including same-time entries',async()=>{
+  const context=helpers();
+  const ledger=[
+    {event_type:'balance_check',description:'Latest check',effective_at:'2026-10-25T00:14:00+05:30',movement:null,balance_after:'337410.00'},
+    {event_type:'transfer',description:'Recent transfer',effective_at:'2026-10-23T10:00:00+05:30',movement:'25000.00',balance_after:'226267.00'},
+    {event_type:'transfer',description:'Same-time incoming',effective_at:'2026-10-17T10:00:00+05:30',movement:'9941.00',balance_after:'201267.00'},
+    {event_type:'transfer',description:'Same-time payment',effective_at:'2026-10-17T10:00:00+05:30',movement:'-11000.00',balance_after:'201267.00'},
+    {event_type:'opening_balance',description:'Starting balance',effective_at:'2026-10-09T22:22:00+05:30',movement:null,balance_after:'140864.00'}
+  ];
+  Object.assign(context,{
+    state:{accounts:[{...account,owner_id:'u',visibility:'private'}],month:'2026-10',categories:[],me:{user:{id:'u'}}},
+    Date,Map,URLSearchParams,period:()=>({from:'2026-10-01',to:'2026-11-01'}),
+    id:encodeURIComponent,viewState:{transactionsPath:()=> 'transactions'},
+    api:{collection:async path=>({data:path.includes('/ledger')?ledger:[]}),request:async()=>({data:[]})},
+    button:()=>'',dangerButton:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>'',moneyTone:()=>'',balanceLabel:()=> 'from known balance'
+  });
+  context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
+  context.analyticsView.negate=value=>String(-Number(value));
+  context.analyticsView.subscriptionMonth=()=>({rows:[]});
+  const start=source.indexOf('  async accounts(parts) {');
+  const end=source.indexOf('\n  async changes()',start);
+  vm.runInContext('var view={'+source.slice(start,end)+'};',context);
+  for(const route of [['bank'],['bank','all']]) {
+    const html=await context.view.accounts(route);
+    const history=html.slice(html.indexOf('<div class="account-ledger-list">'));
+    const dates=[...history.matchAll(/<time datetime="([^"]+)"/g)].map(match=>match[1]);
+    assert.deepEqual(dates,ledger.map(row=>row.effective_at));
+    const descriptions=[...history.matchAll(/account-ledger-copy"><strong>([^<]+)<\/strong>/g)].map(match=>match[1]);
+    assert.deepEqual(descriptions,ledger.map(row=>row.description));
+    const balances=[...history.matchAll(/Balance after · INR ([\d.]+)/g)].map(match=>match[1]);
+    assert.deepEqual(balances,ledger.map(row=>row.balance_after));
+  }
 });
 
 test('accounts page shows balances for every family owner regardless of selected scope',async()=>{

@@ -10,7 +10,7 @@ An open-source, self-hosted personal and household budgeting app in development:
 - [Widget spending API](docs/widgets-api.md): opt-in, read-only LAN/private-VPN spending summary without a login cookie or API token.
 - [iPhone Home Screen app](docs/ios-home-screen.md): install FinWise from Safari as a standalone web app.
 - [Android PWA installation](docs/android-pwa.md): private HTTPS setup and Chrome installation steps.
-- [Transaction intelligence](docs/transaction-intelligence.md): economic classifications, split allocations, smart review, reporting policy, safe migration, and transaction filters/sorting.
+- [Transaction intelligence](docs/transaction-intelligence.md): category-based reporting, transaction filters, allocations, and reimbursements.
 - [Analytics and budget tracking](docs/analytics-and-budgets.md): dashboard views, metrics, coverage, monthly plans, revisions, contributions, and alerts.
 - [Money Manager import and categories](docs/money-manager-import-and-categories.md): observed XLSX format, event/category mapping, and category management.
 - [Independent app mode](docs/independent-app-mode.md): household setting that keeps imports while turning off Money Manager change tracking and update prompts.

@@ -149,3 +149,27 @@ test('settlement analytics excludes reversed receivables and reversed payments',
   assert.equal(result.settlementRows[0].asOfRemaining,'80.00');
   assert.equal(result.owedToMe,'80.00');
 });
+
+test('dashboard category mix preserves refunds and escapes category labels',()=>{
+  const view=analytics();
+  const ring=view.categoryRing([{label:'Home <rent>',amount:'100.25'},{label:'Returned items',amount:'-10.00'}],'INR');
+  assert.match(ring,/Home &lt;rent&gt;/);
+  assert.match(ring,/INR 100.25/);
+  assert.match(ring,/INR -10.00/);
+  assert.match(ring,/INR 90.25/);
+  assert.match(ring,/Refund/);
+  assert.doesNotMatch(ring,/<rent>/);
+  assert.match(view.categoryRing([{label:'Refund only',amount:'-10.00'}],'INR'),/No positive category spending/);
+});
+
+test('dashboard category history stacks exact amounts and fills quiet months with zero',()=>{
+  const view=analytics();
+  const history=view.categoryHistory([
+    [['rent',{amount:'100.01'}]],[],[['rent',{amount:'-20.50'}],['uncategorized',{amount:'5.25'}]]
+  ],['2026-08','2026-09','2026-10'],[{id:'rent',name:'Rent & bills'}],'INR');
+  assert.match(history,/stacked&quot;:true/);
+  assert.match(history,/Rent &amp; bills/);
+  assert.match(history,/2026-09 INR 0/);
+  assert.match(history,/2026-10 INR -20.50/);
+  assert.match(history,/Uncategorized/);
+});

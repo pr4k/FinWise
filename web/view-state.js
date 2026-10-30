@@ -4,7 +4,7 @@
   const validScope = value => ['personal','family','combined'].includes(value);
   const accountTypes = ['bank','credit_card','cash','settle_up'];
   const eventTypes = ['expense','income','refund','transfer','investment','investment_withdrawal'];
-  const extraFilters={transactionType:'transaction_type',status:'classification_status',category:'category_id',person:'member_id',direction:'direction',minAmount:'min_amount',maxAmount:'max_amount',search:'q',from:'from',to:'to',currency:'currency',sort:'sort',secondarySort:'secondary_sort'};
+  const extraFilters={category:'category_id',person:'member_id',direction:'direction',minAmount:'min_amount',maxAmount:'max_amount',search:'q',from:'from',to:'to',currency:'currency',sort:'sort',secondarySort:'secondary_sort'};
   function readFilters(search) {
     const params=new URLSearchParams(search);
     const result = {
@@ -13,11 +13,9 @@
       eventType:eventTypes.includes(params.get('event_type'))?params.get('event_type'):''
     };
     for(const [key,param] of Object.entries(extraFilters)) if(params.get(param)) result[key]=params.get(param);
-    // Older Investment links selected only generated ledger movements, missing imported/SIP allocations.
-    if(result.eventType==='investment') {
-      if(!result.transactionType) result.transactionType='investment';
-      result.eventType='';
-    }
+    // Keep old bookmarked transaction types useful without a second type selector.
+    if(!result.eventType && eventTypes.includes(params.get('transaction_type'))) result.eventType=params.get('transaction_type');
+    for(const key of ['sort','secondarySort']) if(['confidence','review_status'].includes((result[key]||'').replace(/^-/,''))) delete result[key];
     return result;
   }
   function read(search, fallbackMonth) {
@@ -32,6 +30,8 @@
     url.searchParams.set('month',month);
     url.searchParams.set('scope',scope);
     if(filters) {
+      url.searchParams.delete('transaction_type');
+      url.searchParams.delete('classification_status');
       for(const [param,value] of [['account',filters.account],['account_type',filters.accountType],['event_type',filters.eventType],...Object.entries(extraFilters).map(([key,param])=>[param,filters[key]])]) {
         if(value) url.searchParams.set(param,value); else url.searchParams.delete(param);
       }

@@ -1,4 +1,4 @@
-//! Independent economic classification. Ledger movements and source evidence are never rewritten.
+//! Category-based reporting and compatibility for existing investment and settlement links.
 use crate::{
     auth::Principal,
     domain::{self, add, format_money, money, text},
@@ -27,9 +27,6 @@ pub fn baseline(v: &Value, manual: bool) -> Value {
     };
     json!({"transaction_type":kind,"status":if manual {"confirmed"} else {"needs_review"},"confidence_score":if manual {100} else {60},"classification_source":if manual {"manual"} else {"system"}})
 }
-fn suggestion(kind: &str, score: i64, reason: &str) -> Value {
-    json!({"transaction_type":kind,"status":if score>=70 {"suggested"} else {"needs_review"},"confidence_score":score,"classification_source":"system","reason":reason})
-}
 pub fn kind<'a>(v: &'a Value, a: &'a Value) -> &'a str {
     a["transaction_type"]
         .as_str()
@@ -57,7 +54,8 @@ pub fn validate(v: &Value) -> Result<()> {
     }
     Ok(())
 }
-/// Enrich authorized rows using authorized context only. Saved manual decisions always win.
+/// Derive reporting from assigned categories and ledger types, without heuristic suggestions.
+/// Preserve existing explicit decisions and settlement/investment links for compatibility.
 pub async fn enrich(db: &mut SqliteConnection, p: &Principal, values: &mut [Value]) -> Result<()> {
     if values.is_empty() {
         return Ok(());
@@ -97,59 +95,7 @@ pub async fn enrich(db: &mut SqliteConnection, p: &Principal, values: &mut [Valu
             None
         })
         .collect();
-    let rules = storage::list(db, p, "classification_rules").await?;
-    let mut rules: Vec<_> = rules
-        .iter()
-        .filter(|r| r["enabled"] != false && r["owner_id"] == p.user_id)
-        .collect();
-    rules.sort_by_key(|r| std::cmp::Reverse(r["priority"].as_i64().unwrap_or(0)));
     let accounts = storage::list(db, p, "accounts").await?;
-    let owned: HashSet<_> = accounts.iter().filter_map(|a| a["id"].as_str()).collect();
-    // Matching context is independent of report filters and pagination. Do not read hidden accounts.
-    let needs_context = values.iter().any(|v| {
-        v["classification"].is_null()
-            || (v["classification"]["classification_source"] != "manual"
-                && v["classification"]["status"] != "confirmed")
-    });
-    let documents: Vec<String> = if needs_context {
-        sqlx::query_scalar(
-            "SELECT document FROM resources WHERE household_id=? AND kind='transactions'",
-        )
-        .bind(&p.household_id)
-        .fetch_all(&mut *db)
-        .await?
-    } else {
-        Vec::new()
-    };
-    let snapshot: Vec<Value> = documents
-        .into_iter()
-        .map(|s| {
-            serde_json::from_str::<Value>(&s)
-                .map_err(|_| ApiError::invalid("Invalid stored transaction."))
-        })
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .filter(|v| {
-            v["voided"] != true
-                && v["movements"].as_array().is_some_and(|legs| {
-                    legs.iter().all(|m| {
-                        m["account_id"]
-                            .as_str()
-                            .is_some_and(|id| owned.contains(id))
-                    })
-                })
-        })
-        .collect();
-    let mut candidates_by_amount: HashMap<(String, i64, bool), Vec<&Value>> = HashMap::new();
-    for row in &snapshot {
-        if row["movements"].as_array().is_some_and(|m| m.len() == 1) {
-            let c = text(row, "currency")?;
-            candidates_by_amount
-                .entry((c.to_owned(), money(text(row, "amount")?, c)?, credit(row)))
-                .or_default()
-                .push(row);
-        }
-    }
     for v in values {
         v["report_scope"] =
             json!(if v["movements"]
@@ -164,8 +110,9 @@ pub async fn enrich(db: &mut SqliteConnection, p: &Principal, values: &mut [Valu
             } else {
                 "personal"
             });
-        if v["classification"].is_null() {
-            v["classification"] = baseline(v, false);
+        if v["classification"]["classification_source"] != "manual" {
+            v["classification"] = baseline(v, true);
+            v["classification"]["classification_source"] = json!("system");
         }
         if let Some(lines) = v["allocations"].as_array_mut() {
             for line in lines {
@@ -177,163 +124,6 @@ pub async fn enrich(db: &mut SqliteConnection, p: &Principal, values: &mut [Valu
                         line["transaction_type"] = json!(kind);
                     }
                 }
-            }
-        }
-        if v["classification"]["classification_source"] == "manual"
-            || v["classification"]["status"] == "confirmed"
-        {
-            continue;
-        }
-        if v["event_type"] == "transfer" || !v["investment_id"].is_null() {
-            v["classification"] = baseline(v, false);
-            v["classification"]["status"] = json!("confirmed");
-            v["classification"]["confidence_score"] = json!(99);
-            continue;
-        }
-        let description = format!(
-            "{} {}",
-            v["merchant"].as_str().unwrap_or(""),
-            v["description"].as_str().unwrap_or("")
-        )
-        .to_lowercase();
-        let matching: Vec<_> = rules
-            .iter()
-            .filter(|r| {
-                v["created_at"].as_str() > r["created_at"].as_str()
-                    && description.contains(&r["contains"].as_str().unwrap_or("\0").to_lowercase())
-            })
-            .collect();
-        if let Some(rule) = matching.first() {
-            let priority = rule["priority"].as_i64().unwrap_or(0);
-            let conflict = matching.iter().any(|r| {
-                r["priority"].as_i64().unwrap_or(0) == priority
-                    && (r["transaction_type"] != rule["transaction_type"]
-                        || r["category_id"] != rule["category_id"])
-            });
-            v["classification"] = if conflict {
-                suggestion("unknown", 30, "Conflicting saved rules require review")
-            } else {
-                json!({"transaction_type":rule["transaction_type"],"status":"confirmed","confidence_score":98,"classification_source":"rule","rule_id":rule["id"]})
-            };
-            let k = v["classification"]["transaction_type"]
-                .as_str()
-                .unwrap_or("unknown");
-            if (k == "expense" && credit(v))
-                || (matches!(k, "income" | "refund" | "reimbursement") && !credit(v))
-            {
-                v["classification"] = suggestion(
-                    "unknown",
-                    30,
-                    "Saved rule conflicts with the movement direction",
-                );
-            }
-            let kind = v["classification"]["transaction_type"].clone();
-            if let Some(lines) = v["allocations"].as_array_mut() {
-                for line in lines {
-                    line["transaction_type"] = kind.clone();
-                }
-            }
-        } else if ["sip", "mutual fund", "zerodha", "groww", "broker"]
-            .iter()
-            .any(|s| description.contains(s))
-        {
-            v["classification"] = suggestion("investment", 85, "Investment payment pattern");
-        } else if ["credit card payment", "card bill", "cc payment"]
-            .iter()
-            .any(|s| description.contains(s))
-        {
-            v["classification"] =
-                suggestion("transfer", 85, "Possible credit card liability settlement");
-        } else if description.contains("emergency fund") {
-            v["classification"] = suggestion(
-                "transfer",
-                80,
-                "Reserve allocation, excluded from consumption",
-            );
-        } else if description.contains("reimburs") && credit(v) {
-            v["classification"] = suggestion(
-                "reimbursement",
-                85,
-                "Reimbursement; match the original expense or receivable",
-            );
-        } else if description.contains("loan")
-            && !description.contains("interest")
-            && !description.contains("fee")
-        {
-            v["classification"] = suggestion("debt", 80, "Possible loan principal movement");
-        } else if description.contains("salary") && credit(v) {
-            v["classification"] = suggestion("income", 90, "Salary pattern");
-        } else if description.contains("refund") && credit(v) {
-            v["classification"] = suggestion("refund", 85, "Merchant refund pattern");
-        } else if description.contains("unknown")
-            || v["allocations"]
-                .as_array()
-                .is_some_and(|a| !a.is_empty() && a.iter().all(|a| a["category_id"].is_null()))
-        {
-            v["classification"] = suggestion("unknown", 30, "Unresolved economic purpose");
-        }
-        if v["classification"]["confidence_score"]
-            .as_i64()
-            .unwrap_or(0)
-            < 70
-            && !v["merchant"].as_str().unwrap_or("").is_empty()
-        {
-            let historical: HashSet<_> = snapshot
-                .iter()
-                .filter(|other| {
-                    other["id"] != v["id"]
-                        && other["merchant"] == v["merchant"]
-                        && other["effective_date"].as_str() < v["effective_date"].as_str()
-                        && other["classification"]["status"] == "confirmed"
-                        && credit(other) == credit(v)
-                })
-                .filter_map(|other| other["classification"]["transaction_type"].as_str())
-                .collect();
-            if historical.len() == 1 {
-                v["classification"] = suggestion(
-                    historical.iter().next().unwrap(),
-                    75,
-                    "Previous confirmed merchant classification",
-                );
-            }
-        }
-        // A distinct, opposite account movement nearby is evidence, never sufficient to confirm.
-        if v["classification"]["status"] != "confirmed"
-            && v["movements"].as_array().is_some_and(|m| m.len() == 1)
-        {
-            let c = text(v, "currency")?;
-            let candidates: Vec<_> = candidates_by_amount
-                .get(&(c.to_owned(), money(text(v, "amount")?, c)?, !credit(v)))
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|other| {
-                    if other["id"] == v["id"]
-                        || other["voided"] == true
-                        || other["currency"] != v["currency"]
-                        || other["movements"].as_array().is_none_or(|m| m.len() != 1)
-                        || credit(other) == credit(v)
-                    {
-                        return false;
-                    }
-                    let a = v["movements"][0]["account_id"].as_str().unwrap_or("");
-                    let b = other["movements"][0]["account_id"].as_str().unwrap_or("");
-                    a != b
-                        && owned.contains(a)
-                        && owned.contains(b)
-                        && domain::date(v["effective_date"].as_str().unwrap_or(""))
-                            .ok()
-                            .zip(domain::date(other["effective_date"].as_str().unwrap_or("")).ok())
-                            .is_some_and(|(a, b)| (a - b).num_days().abs() <= 3)
-                })
-                .collect();
-            if candidates.len() == 1 {
-                v["classification"] = suggestion(
-                    "transfer",
-                    80,
-                    "Opposite movement between visible owned accounts; confirm the pair",
-                );
-                v["classification"]["suggested_link_id"] = candidates[0]["id"].clone();
             }
         }
     }

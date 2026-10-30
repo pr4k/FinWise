@@ -31,8 +31,8 @@
           plugins:{legend:{display:spec.datasets.length>1,position:'bottom',align:'start',labels:{usePointStyle:true,pointStyle:'circle',boxWidth:8,boxHeight:8,padding:18,color:'#566579',font:{size:11,weight:'600'}}},
             tooltip:{backgroundColor:'#182534',padding:11,cornerRadius:8,displayColors:spec.datasets.length>1,
               callbacks:{label:context=>`${context.dataset.label}: ${spec.currency} ${context.dataset.exact[context.dataIndex]}`}}},
-          scales:{x:{grid:{display:horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:spec.type==='line'?7:undefined,callback:horizontal?value=>compact(value):value=>spec.labels[value]??value,font:{size:11}}},
-            y:{beginAtZero:spec.type==='bar',grid:{display:!horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:horizontal?undefined:5,callback:horizontal?value=>{const label=spec.labels[value]||'';return label.length>22?`${label.slice(0,21)}…`:label;}:value=>compact(value),font:{size:11}}}}
+          scales:{x:{stacked:Boolean(spec.stacked),grid:{display:horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:spec.type==='line'?7:undefined,callback:horizontal?value=>compact(value):value=>spec.labels[value]??value,font:{size:11}}},
+            y:{stacked:Boolean(spec.stacked),beginAtZero:spec.type==='bar',grid:{display:!horizontal,color:'#edf0f3'},border:{display:false},ticks:{color:'#8290a0',maxTicksLimit:horizontal?undefined:5,callback:horizontal?value=>{const label=spec.labels[value]||'';return label.length>22?`${label.slice(0,21)}…`:label;}:value=>compact(value),font:{size:11}}}}
         }
       });
       chart.finwiseSpec=canvas.dataset.chart;
@@ -142,5 +142,24 @@
     const details=series.flatMap(item=>item.values.map((value,index)=>value==null?'':`<p>${escape(item.name)} · ${escape(labels[index])}: ${escape(currency)} ${escape(value)}</p>`)).join('');
     return chart({type:'line',labels,currency,datasets},title,details);
   }
-  window.finwiseAnalytics={difference,negate,sankey,groupedBars,categoryAverages,cumulativeSpending,sumMoney,subscriptionMonth,planningSummary,cumulativeMoney,pacedBudget,moneyLines,hydrateCharts};
+  const dashboardPalette=['#63845b','#91aa7c','#bdca9d','#d7be85','#dbe1cc','#9ebdb2'];
+  function categoryRing(rows,currency) {
+    const positive=rows.filter(row=>Number(row.amount)>0),total=positive.reduce((n,row)=>n+Number(row.amount),0);
+    if(!positive.length)return '<p class="empty-state">No positive category spending this month.</p>';
+    const net=sumMoney(rows.map(row=>row.amount),new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits);
+    const formatted=new Intl.NumberFormat(currency==='INR'?'en-IN':'en',{style:'currency',currency,maximumFractionDigits:0}).format(Number(net));
+    let offset=0;
+    const segments=positive.map((row,i)=>{const start=offset;offset+=Number(row.amount)/total*100;return `${dashboardPalette[i%dashboardPalette.length]} ${start}% ${offset}%`;});
+    const legend=rows.map((row,i)=>`<li><span class="dashboard-dot" style="background:${dashboardPalette[i%dashboardPalette.length]}"></span><span>${escape(row.label)}</span><b>${escape(currency)} ${escape(row.amount)}</b><small>${Number(row.amount)>0?Math.round(Number(row.amount)/total*100)+'%':'Refund'}</small></li>`).join('');
+    return `<div class="dashboard-category-split"><div class="dashboard-ring" role="img" aria-label="Positive category spending ${escape(currency)} ${escape(sumMoney(positive.map(row=>row.amount),new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits))}" style="background:conic-gradient(${segments.join(',')})"><div><span>NET SPENDING</span><strong title="${escape(currency)} ${escape(net)}">${escape(formatted)}</strong><small>${positive.length} categories</small></div></div><ul class="dashboard-category-legend">${legend}</ul></div>`;
+  }
+  function categoryHistory(rollups,months,categories,currency) {
+    const maps=rollups.map(rows=>new Map(rows));
+    const ids=[...new Set(rollups.flatMap(rows=>rows.map(([key])=>key)))];
+    const series=ids.map(key=>({id:key,label:key==='uncategorized'?'Uncategorized':categories.find(c=>c.id===key)?.name||'Category',values:maps.map(map=>map.get(key)?.amount||'0')}));
+    if(!series.length)return '<p class="empty-state">No category history recorded.</p>';
+    const datasets=series.map((item,i)=>({label:item.label,data:item.values.map(Number),exact:item.values,backgroundColor:dashboardPalette[i%dashboardPalette.length]}));
+    return chart({type:'bar',stacked:true,labels:months,currency,datasets},'Six-month spending by category',series.map(item=>`<p>${escape(item.label)}: ${item.values.map((value,i)=>`${escape(months[i])} ${escape(currency)} ${escape(value)}`).join('; ')}</p>`).join(''));
+  }
+  window.finwiseAnalytics={categoryRing,categoryHistory,difference,negate,sankey,groupedBars,categoryAverages,cumulativeSpending,sumMoney,subscriptionMonth,planningSummary,cumulativeMoney,pacedBudget,moneyLines,hydrateCharts};
 })();

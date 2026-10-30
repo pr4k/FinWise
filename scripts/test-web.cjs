@@ -34,10 +34,10 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByLabel('Password',{exact:true}).fill('browser-synthetic-password-123');
     await page.getByLabel('Timezone',{exact:true}).fill('Asia/Kolkata');
     await page.getByRole('button',{name:'Create household',exact:true}).click();
-    await page.getByRole('heading',{name:'Your finances'}).waitFor();
+    await page.getByRole('heading',{name:'Your month',exact:true}).waitFor();
     async function open(view) {
       await page.evaluate(view=>location.hash=view,view);
-      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').textContent.includes('Loading your data'),({imports:'Imports',overview:'Overview',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Analytics',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
+      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Overview',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Analytics',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
       catch(error) { throw new Error(`Opening ${view}: ${error.message}`); }
     }
     async function upload(repeat=false) {
@@ -96,6 +96,10 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     assert.equal(await page.locator('.live-error').count(),0,'Investment goals returned an error');
     // The compact overview feed remains keyboard accessible and opens ledger detail.
     await open('overview');
+    await page.getByRole('heading',{name:'Account snapshot',exact:true}).waitFor();
+    await page.getByLabel('Previous month',{exact:true}).check();
+    await page.waitForFunction(()=>document.querySelectorAll('.dashboard-page canvas[data-chart]').length>=1);
+    await page.getByLabel('Previous month',{exact:true}).uncheck();
     await page.locator('.recent-item').first().focus();
     await page.keyboard.press('Enter');
     await page.getByRole('heading',{name:'Transaction details',exact:true}).waitFor();
@@ -231,7 +235,7 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await memberPage.getByLabel('Invited email').fill('family-member@example.test');
     await memberPage.getByLabel('Create password').fill('family-member-password-123');
     await memberPage.getByRole('button',{name:'Create account and join'}).click();
-    await memberPage.getByRole('heading',{name:'Your finances'}).waitFor();
+    await memberPage.getByRole('heading',{name:'Your month',exact:true}).waitFor();
     await memberPage.locator('#report-month').fill(first.month);
     await memberPage.locator('#report-scope').selectOption('family');
     await memberPage.locator('.bottom-add').click();
@@ -250,11 +254,13 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await memberContext.close();
     for(const width of [320,390,768,1440]) {
       await page.setViewportSize({width,height:900});
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
       for(const view of ['overview','analytics','transactions','accounts','categories','statements','budgets','reconcile','changes','imports','settings','more']) {
         await open(view);
         const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth);
         assert.equal(overflow,false,`${view} overflows at ${width}px`);
         assert.equal(await page.locator('.live-error').count(),0,`${view} returned an error at ${width}px`);
+        if(process.env.FINWISE_SCREENSHOT_DIR && [390,1440].includes(width) && view==='overview') await page.screenshot({path:path.join(process.env.FINWISE_SCREENSHOT_DIR,`overview-${width}.png`),fullPage:true});
         if(process.env.FINWISE_SCREENSHOT_DIR && width===390 && ['statements','budgets','changes'].includes(view)) await page.screenshot({path:path.join(process.env.FINWISE_SCREENSHOT_DIR,`${view}.png`),fullPage:true});
       }
     }

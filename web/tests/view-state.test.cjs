@@ -41,24 +41,36 @@ test('account, account type, and transaction type filters combine and survive re
   assert.equal(view.transactionsPath('2026-09',false,filters),'transactions?account_id=account-1&account_type=bank&event_type=expense');
 });
 
-test('economic filters, date bounds and secondary sorting compose and persist in the URL',()=>{
+test('category filters, date bounds and secondary sorting compose and persist in the URL',()=>{
   const view=state();let next;
-  const filters={account:'a',accountType:'bank',eventType:'',transactionType:'investment',status:'suggested',category:'sip',person:'u',direction:'debit',minAmount:'0.01',maxAmount:'10000.01',search:'Fund & broker',from:'2026-08-15',to:'2026-10-02',currency:'INR',sort:'amount',secondarySort:'-confidence'};
+  const filters={account:'a',accountType:'bank',eventType:'expense',category:'sip',person:'u',direction:'debit',minAmount:'0.01',maxAmount:'10000.01',search:'Fund & broker',from:'2026-08-15',to:'2026-10-02',currency:'INR',sort:'amount',secondarySort:'-amount'};
   view.save('2026-09','combined','http://localhost/#transactions/all',value=>next=value,filters);
   const restored=view.readFilters(new URL(next,'http://localhost').search);
   assert.deepEqual({...restored},filters);
   const query=new URL(view.transactionsPath('2026-09',true,restored,'combined'),'http://localhost').searchParams;
-  assert.equal(query.get('scope'),'combined');assert.equal(query.get('from'),'2026-08-15');assert.equal(query.get('to'),'2026-10-02');assert.equal(query.get('q'),'Fund & broker');assert.equal(query.get('sort'),'amount');assert.equal(query.get('secondary_sort'),'-confidence');assert.equal(query.get('classification_status'),'suggested');
+  assert.equal(query.get('scope'),'combined');assert.equal(query.get('from'),'2026-08-15');assert.equal(query.get('to'),'2026-10-02');assert.equal(query.get('q'),'Fund & broker');assert.equal(query.get('sort'),'amount');assert.equal(query.get('secondary_sort'),'-amount');assert.equal(query.has('classification_status'),false);
   view.save('2026-09','combined','http://localhost'+next,value=>next=value,{account:'',accountType:'',eventType:''});
   const cleared=new URL(next,'http://localhost').searchParams;assert.equal(cleared.has('sort'),false);assert.equal(cleared.has('classification_status'),false);assert.equal(cleared.has('from'),false);
 });
 
-test('legacy Investment filter uses economic classification for all family members',()=>{
+test('Investment filter includes category-assigned investments for all family members',()=>{
   const view=state();
   const params=new URL(view.transactionsPath('2026-09',false,{eventType:'investment'},'family'),'http://localhost').searchParams;
   assert.equal(params.get('transaction_type'),'investment');assert.equal(params.has('event_type'),false);assert.equal(params.get('scope'),'family');assert.equal(params.has('member_id'),false);
   const restored=view.readFilters('?scope=family&event_type=investment');
-  assert.equal(restored.eventType,'');assert.equal(restored.transactionType,'investment');
+  assert.equal(restored.eventType,'investment');assert.equal(restored.transactionType,undefined);
   const memberQuery=new URL(view.transactionsPath('2026-09',false,{...restored,person:'partner'},'family'),'http://localhost').searchParams;
   assert.equal(memberQuery.get('transaction_type'),'investment');assert.equal(memberQuery.get('member_id'),'partner');
+});
+
+test('old classification bookmarks discard review filters and preserve the transaction type',()=>{
+  const view=state();let next;
+  const filters=view.readFilters('?transaction_type=expense&classification_status=pending&sort=-confidence&secondary_sort=review_status');
+  assert.equal(filters.eventType,'expense');
+  assert.equal(filters.status,undefined);assert.equal(filters.sort,undefined);assert.equal(filters.secondarySort,undefined);
+  const query=new URL(view.transactionsPath('2026-09',false,filters),'http://localhost').searchParams;
+  assert.equal(query.get('event_type'),'expense');assert.equal(query.has('classification_status'),false);
+  view.save('2026-09','personal','http://localhost/?transaction_type=expense&classification_status=pending',value=>next=value,filters);
+  const saved=new URL(next,'http://localhost').searchParams;
+  assert.equal(saved.has('transaction_type'),false);assert.equal(saved.has('classification_status'),false);
 });
