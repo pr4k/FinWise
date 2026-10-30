@@ -44,7 +44,7 @@ test('changing away from expense disables subscription fields and loading cannot
 });
 test('account list hides deleted accounts while retaining them in the history catalog',async()=>{
   const accounts=[{id:'active',name:'Active bank',subtype:'bank',currency:'INR',active:true},{id:'deleted',name:'Deleted card',subtype:'credit_card',currency:'INR',active:false},{id:'settle',name:'Deleted settlement',subtype:'settle_up',currency:'INR',active:false}];
-  const context={state:{accounts},api:{request:async()=>({data:[]})},h:String,heading:()=>'',button:()=>'',coverage:()=>'',empty:()=>'',accountBalance:()=>'',accountFundsPanel:()=>''};
+  const context={state:{accounts,me:{user:{id:'u'}},members:[]},api:{request:async()=>({data:[]})},h:String,heading:()=>'',button:()=>'',coverage:()=>'',empty:()=>'',accountBalance:()=>'',accountFundsPanel:()=>''};
   vm.createContext(context);
   const a=source.indexOf('  async accounts(parts) {'),b=source.indexOf('\n  async changes()',a);
   vm.runInContext('var view={'+source.slice(a,b)+'};',context);

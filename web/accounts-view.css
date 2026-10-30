@@ -1,6 +1,9 @@
 .account-card-link{color:inherit;text-decoration:none}
 .account-card-link:hover{color:var(--purple);text-decoration:underline;text-underline-offset:3px}
 .account-card-actions .outline-button{color:var(--purple);font-weight:700}
+.account-card-top{gap:12px}
+.account-card-top .account-symbol{flex-shrink:0}
+.account-card-top .account-visibility{min-width:0;overflow-wrap:anywhere;text-transform:none}
 .account-subscription-count{align-self:start;margin:-5px 0 13px;padding:5px 9px;border-radius:99px;background:#f0f4e9;color:#527049;font-size:10px;font-weight:700}
 .account-detail-page{display:grid;gap:18px}
 .account-detail-back .outline-button{border:0;background:transparent;padding-left:0;color:var(--purple);font-weight:700}

@@ -71,13 +71,13 @@ test('dashboard renders available account balances and reserves separately',asyn
 
 test('opened account leads with the reduced available balance and retains the recorded breakdown',async()=>{
   const context=helpers();
-  const selected={...account,visibility:'private',balance:{...account.balance,source:'opening_balance',as_of:'2026-10-25T00:00:00Z'}};
+  const selected={...account,owner_id:'u',visibility:'private',balance:{...account.balance,source:'opening_balance',as_of:'2026-10-25T00:00:00Z'}};
   Object.assign(context,{
     state:{accounts:[selected],month:'2026-10',categories:[],me:{user:{id:'u'}}},
     Date,Map,URLSearchParams,period:()=>({from:'2026-10-01',to:'2026-11-01'}),
     id:encodeURIComponent,viewState:{transactionsPath:()=> 'transactions'},
     api:{collection:async()=>({data:[]}),request:async()=>({data:[]})},
-    button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>'',moneyTone:()=>''
+    button:()=>'',dangerButton:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>'',moneyTone:()=>''
   });
   context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
   context.analyticsView.negate=value=>String(-Number(value));
@@ -86,6 +86,7 @@ test('opened account leads with the reduced available balance and retains the re
   const end=source.indexOf('\n  async changes()',start);
   vm.runInContext('var view={'+source.slice(start,end)+'};',context);
   const html=await context.view.accounts(['bank']);
+  assert.match(html,/My account · bank/);
   assert.match(html,/<span>Available to use<\/span>INR 71538.00/);
   assert.match(html,/Recorded balance INR 100000.00 · earmarked INR 28462.00/);
   assert.match(html,/Available and earmarked money/);
@@ -93,4 +94,39 @@ test('opened account leads with the reduced available balance and retains the re
   delete selected.funds;
   const card=await context.view.accounts(['bank']);
   assert.match(card,/<span>Amount owed<\/span>INR 100000.00/);
+});
+
+test('accounts page shows balances for every family owner regardless of selected scope',async()=>{
+  const context=helpers();
+  const accounts=[
+    {...account,owner_id:'u',visibility:'private'},
+    {...account,id:'family-bank',name:'Family savings',owner_id:'member',visibility:'shared',funds:{...account.funds,available:'42000.00'}},
+    {id:'family-card',name:'Family card',owner_id:'member',visibility:'shared',subtype:'credit_card',currency:'INR',balance:{amount:'2500.00'}},
+    {...account,id:'former-member',owner_id:'former',visibility:'shared'},
+    {...account,id:'archived',name:'Archived savings',archived:true}
+  ];
+  Object.assign(context,{
+    state:{accounts,members:[{user_id:'member',name:'Priya'}],scope:'personal',me:{user:{id:'u'}}},
+    Map,encodeURIComponent,api:{request:async()=>({data:[]})},
+    heading:(title,description)=>title+description,button:()=>'',empty:()=>'',coverage:()=>''
+  });
+  const start=source.indexOf('  async accounts(parts) {');
+  const end=source.indexOf('\n  async changes()',start);
+  vm.runInContext('var view={'+source.slice(start,end)+'};',context);
+  for(const scope of ['personal','family','combined']) {
+    context.state.scope=scope;
+    const html=await context.view.accounts([]);
+    assert.match(html,/My account/);
+    assert.match(html,/Priya’s account/);
+    assert.match(html,/Family member’s account/);
+    assert.match(html,/Family savings/);
+    assert.match(html,/INR 42000.00/);
+    assert.match(html,/Family card/);
+    assert.match(html,/INR 2500.00/);
+    assert.doesNotMatch(html,/Archived savings/);
+  }
+  context.state.accounts=[accounts[1]];
+  context.state.members=[];
+  const html=await context.view.accounts([]);
+  assert.match(html,/Family member’s account/);
 });
