@@ -28,7 +28,7 @@ Allocation scope, account visibility, payer identity, budget beneficiary, and in
 
 ## 3. Navigation and shared experience
 
-The browser provides Overview, Household 360, Analytics, Transactions, Recurring transactions, Planner, Accounts, Budgets, Settle up, Investments, Categories, Statements, Reconcile, Imports, and Settings. Money Manager changes appears when its integration mode is enabled.
+The browser provides a unified Dashboard, Household 360, Transactions, Recurring transactions, Planner, Accounts, Budgets, Settle up, Investments, Categories, Statements, Reconcile, Imports, and Settings. Money Manager changes appears when its integration mode is enabled.
 
 - Desktop uses a sidebar and a shared month/scope toolbar. Mobile uses Home, Activity, Add transaction, Budgets, and More.
 - Hash routes open screens and supported record subviews. URL parameters retain report periods, scope, transaction filters, sorting, and supported tab selections.
@@ -129,13 +129,16 @@ These rules apply across features and are part of their expected behavior.
 
 **Current reporting boundary:** The separate classification editor, Smart Review queue, confidence scores, classification filters, and automatic classification rules are absent from the current UI. Descriptions do not automatically override reporting types. Compatibility classification fields/endpoints and existing explicit corrections remain for historical records and reimbursement workflows. Investment funding must be unlinked before editing its protected source transaction.
 
-## 8. Overview, Household 360, and Analytics
+## 8. Dashboard and Household 360
 
-### Overview
+### Dashboard
 
-Answers what happened in the selected month and where available money sits.
+Answers what happened in the selected month and where available money sits. Overview and Analytics share one Dashboard destination; existing Analytics links open the integrated reports section.
 
 - Income, net spending, recorded surplus, net investment contributions, and after-investment cash flow, with a report-currency selector.
+- Each of the four hero cards opens an accessible detail overlay with the authoritative total, formula, positive effects, signed offsets, top five contributors ordered by absolute effect, all contributors, and excluded transactions with reasons. Contributions are grouped by transaction; split allocations retain their signed effects.
+- Personal, Family, and Combined scope controls are available on the dashboard and in the detail overlay and remain synchronized. Family-only households retain their existing scope restriction.
+- Detail rows open transaction details. Close and Escape restore focus to the originating card, and contributor tabs support arrow-key navigation. Zero totals suppress undefined percentage shares; incomplete contribution detail is explicitly identified.
 - Analytics-only dashboard with cumulative daily income/spending, optional previous-month spending, category mix, and six-month category history. The shared navigation retains transaction entry.
 - Account snapshot separates recorded bank/cash balances, available funds, reserves, and card liabilities; unknown balances are excluded from known totals.
 - Visible payer contribution cards, largest spending transactions with detail drill-downs, and separate transfer, reimbursement, and card-payment totals.
@@ -151,9 +154,9 @@ Answers what happened in the selected month and where available money sits.
 - Income uses the entrant; expenses/refunds use the recorded payer with legacy/import fallbacks. Investment visibility follows the applicable sharing rules.
 - Private accounts and holdings do not become visible through household totals. Transfers do not become spending or new investment contributions.
 
-### Analytics
+### Integrated dashboard reports
 
-- Supports Personal, Family, and Combined reporting, month comparison, category drivers, account position, and transaction drilldowns.
+- Trends, Planning, and Detailed reports are sections within the Dashboard, using its selected month, scope, and report currency. Supports month comparison, category drivers, account position, and transaction drilldowns.
 - Provides cumulative daily money-flow charts; six-month income/spending and category trends; daily comparison; category/subcategory detail; merchant, account, transaction-mix, and transfer summaries.
 - Shows budget performance, investment/emergency-fund observations, and private settle-up planning through the selected month. Planning values remain distinct from ledger spending and balances.
 - Tagged subscription payments have separate currency totals and statement-only counts. They are a breakdown of observed activity and are not added to spending again.
@@ -321,7 +324,7 @@ Owners/admins switch the household mode with revision checking and audit history
 
 **Apple Shortcuts quick expenses:** The owner explicitly enables unauthenticated expense entry, chooses the member whose permissions apply, allowed accounts, and a default account. Settings provides endpoint URLs; disabling removes public access. This is intended for a trusted LAN/private VPN.
 
-**Widget API:** Independently opt-in, unauthenticated, read-only summaries use a selected member's visible data. Personal spending is the default; owner switches permit Family/Combined spending and accessible account balances. Includes daily/calendar spending and account data, with copyable calendar URLs and responses that may be cached for five minutes. URL selection does not override configured permissions.
+**Widget API:** Independently opt-in, unauthenticated, read-only summaries use a selected member's visible data. Personal spending is the default; owner switches permit Family/Combined spending and accessible account balances. Includes daily/calendar spending and account data. The expense calendar returns a full month grid, with zero placeholders explicitly marked for future dates and household-local cutoff metadata. Includes copyable calendar URLs and responses that may be cached for five minutes. URL selection does not override configured permissions.
 
 **PWA installation:** Supports iOS Home Screen and Android installation with a manifest, icons, and standalone display. The service worker supplies an offline information page when navigation fails; offline ledger editing and synchronization are not implemented.
 

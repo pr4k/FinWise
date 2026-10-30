@@ -161,5 +161,42 @@
     const datasets=series.map((item,i)=>({label:item.label,data:item.values.map(Number),exact:item.values,backgroundColor:dashboardPalette[i%dashboardPalette.length]}));
     return chart({type:'bar',stacked:true,labels:months,currency,datasets},'Six-month spending by category',series.map(item=>`<p>${escape(item.label)}: ${item.values.map((value,i)=>`${escape(months[i])} ${escape(currency)} ${escape(value)}`).join('; ')}</p>`).join(''));
   }
-  window.finwiseAnalytics={categoryRing,categoryHistory,difference,negate,sankey,groupedBars,categoryAverages,cumulativeSpending,sumMoney,subscriptionMonth,planningSummary,cumulativeMoney,pacedBudget,moneyLines,hydrateCharts};
+  function metricBreakdown(summary,transactions,key,currency) {
+    const definitions={
+      earned_income:{title:'Earned income',formula:'Eligible ordinary income',description:'Ordinary income allocations only. Transfers and linked reimbursement credits do not contribute.',field:'income',fallback:'income'},
+      actual_spending:{title:'Net consumption spending',formula:'Consumption allocations − eligible refunds',description:'Eligible consumption spending, including your retained paid-on-behalf share, less eligible refunds. Transfers, card repayments and investment funding are excluded.',field:'spending',fallback:'net_spending'},
+      net_invested:{title:'Net invested',formula:'Investment contributions − withdrawals',description:'Recorded investment contributions less capital withdrawals. Linked funding is counted once; security purchases do not create a second contribution.',field:'net_invested'},
+      economic_surplus:{title:'Recorded surplus',formula:'Earned income − net consumption spending',description:'What you earned less what you consumed. This is a flow for the selected period, separate from account balances.',fallback:'recorded_surplus'}
+    };
+    const definition=definitions[key];
+    if(!definition)throw new Error('Unknown dashboard metric.');
+    const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
+    const sum=values=>sumMoney(values,scale),byId=new Map();
+    for(const line of summary.breakdown||[]) {
+      const effects=key==='economic_surplus'?[line.income||'0',negate(line.spending||'0')]:[line[definition.field]||'0'];
+      const group=byId.get(line.transaction_id)||{effects:[],types:new Set(),categories:new Set()};
+      group.effects.push(...effects);group.types.add(line.transaction_type);
+      if(line.category_id)group.categories.add(line.category_id);
+      byId.set(line.transaction_id,group);
+    }
+    const rows=new Map(transactions.map(transaction=>[transaction.id,transaction]));
+    // Keep every authoritative effect even if source metadata is no longer available.
+    for(const transactionId of byId.keys())if(!rows.has(transactionId))rows.set(transactionId,{id:transactionId,description:'Recorded allocation',unavailable:true});
+    const contributors=[],excluded=[];
+    for(const transaction of rows.values()) {
+      const group=byId.get(transaction.id),effects=group?.effects||[];
+      const row={transaction,effect:sum(effects),types:[...(group?.types||[])].filter(Boolean),categories:[...(group?.categories||[])]};
+      if(effects.some(value=>Number(value)!==0))contributors.push(row);
+      else {
+        const types=new Set(row.types.length?row.types:[transaction.event_type]);
+        row.reason=types.has('transfer')?'Transfers and card repayments move money without creating income or consumption.':types.has('reimbursement')?'Reimbursement credits are separate from earned income; only eligible expense offsets affect consumption.':types.has('investment')||transaction.event_type==='investment_withdrawal'?'Investment funding and withdrawals affect net investment, separately from income and consumption.':types.has('paid_on_behalf')?'The share paid for someone else is separate from your consumption.':'No eligible allocation affects this metric in the selected scope.';
+        excluded.push(row);
+      }
+    }
+    contributors.sort((a,b)=>Math.abs(Number(b.effect))-Math.abs(Number(a.effect))||String(b.transaction.effective_date||'').localeCompare(a.transaction.effective_date||'')||String(a.transaction.id).localeCompare(String(b.transaction.id)));
+    const effects=[...byId.values()].flatMap(group=>group.effects);
+    const positive=sum(effects.filter(value=>Number(value)>0)),offsets=negate(sum(effects.filter(value=>Number(value)<0)));
+    return {...definition,key,total:summary[key]??summary[definition.fallback]??'0',positive,offsets,explained:sum(effects),contributors,excluded};
+  }
+  window.finwiseAnalytics={metricBreakdown,categoryRing,categoryHistory,difference,negate,sankey,groupedBars,categoryAverages,cumulativeSpending,sumMoney,subscriptionMonth,planningSummary,cumulativeMoney,pacedBudget,moneyLines,hydrateCharts};
 })();

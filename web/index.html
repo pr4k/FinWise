@@ -28,19 +28,19 @@
     <link rel="stylesheet" href="/accounts-view.css?v=20261021b" />
     <link rel="stylesheet" href="/ui-refresh.css?v=20261024c" />
     <link rel="stylesheet" href="/transactions-view.css?v=20261030a" />
-    <link rel="stylesheet" href="/dashboard-view.css?v=20261030a" />
+    <link rel="stylesheet" href="/dashboard-view.css?v=20261030b" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
     <script src="/api.js?v=20261024perf" defer></script>
     <script src="/view-state.js?v=20261030categories" defer></script>
     <script src="/categories.js?v=20261002e" defer></script>
-    <script src="/analytics.js?v=20261030dashboard" defer></script>
+    <script src="/analytics.js?v=20261030merged-dashboard" defer></script>
     <script src="/subscription-brands.js?v=20261021b" defer></script>
     <script src="/activity.js?v=20261002e" defer></script>
     <script src="/time.js?v=20261002e" defer></script>
     <script src="/reconciliation.js?v=20261023a" defer></script>
     <script src="/compact-money.js?v=20261010a" defer></script>
     <script src="/live-view.js?v=20261030live" defer></script>
-    <script src="/app.js?v=20261030dashboard" defer></script>
+    <script src="/app.js?v=20261030merged-dashboard" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -92,12 +92,11 @@
         <a class="brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>FinWise<span class="brand-dot">.</span></span></a>
         <div class="household-card"><div class="household-icon" aria-hidden="true">FW</div><div><strong id="household-name"></strong><span id="household-currency"></span></div></div>
         <nav class="nav-list" id="desktop-nav">
-          <button class="nav-item" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
+          <button class="nav-item" data-view="overview"><svg><use href="#i-grid"/></svg><span>Dashboard</span></button>
           <button class="nav-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Transactions</span></button>
           <button class="nav-item" data-view="accounts"><svg><use href="#i-wallet"/></svg><span>Accounts</span></button>
           <button class="nav-item" data-view="budgets"><svg><use href="#i-wallet"/></svg><span>Budgets</span></button>
           <button class="nav-item" data-view="investments"><svg><use href="#i-chart"/></svg><span>Investments</span></button>
-          <button class="nav-item" data-view="analytics"><svg><use href="#i-chart"/></svg><span>Analytics</span></button>
           <details class="nav-disclosure"><summary>Planning & household</summary>
             <button class="nav-item" data-view="planner"><svg><use href="#i-bell"/></svg><span>Planner</span></button>
             <button class="nav-item" data-view="recurring"><svg><use href="#i-receipt"/></svg><span>Recurring</span></button>
@@ -120,7 +119,7 @@
         <header class="topbar">
           <button class="mobile-menu icon-button" id="menu-button" type="button" aria-label="Collapse navigation" aria-expanded="true" aria-controls="desktop-nav"><svg><use href="#i-menu"/></svg></button>
           <a class="mobile-brand" href="#overview" aria-label="FinWise home"><span class="brand-mark">f</span><span>FinWise<span class="brand-dot">.</span></span></a>
-          <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Overview</strong></div>
+          <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Dashboard</strong></div>
           <button class="mobile-profile icon-button" type="button" data-view="settings" aria-label="Open settings and profile"><svg><use href="#i-settings"/></svg></button>
           <div class="topbar-actions">
             <div class="scope-segments" role="group" aria-label="Report scope"><button type="button" data-action="analytics-scope" data-scope="personal">Personal</button><button type="button" data-action="analytics-scope" data-scope="family">Family</button><button type="button" data-action="analytics-scope" data-scope="combined">Combined</button></div>
@@ -139,6 +138,7 @@
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <aside id="transaction-drawer" class="transaction-drawer" aria-labelledby="transaction-drawer-title" hidden></aside>
+    <dialog id="metric-dialog" class="metric-dialog" aria-labelledby="metric-detail-title"></dialog>
     <dialog class="balance-dialog live-dialog" id="editor" aria-labelledby="editor-title"></dialog>
   </body>
 </html>

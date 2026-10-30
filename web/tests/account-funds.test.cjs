@@ -58,7 +58,7 @@ test('dashboard separates recorded balances, available funds, reserves, currenci
     state:{members:[],month:'2026-10',scope:'combined',me:{household:{base_currency:'INR'}},accounts:[account,card,usd],categories:[]},
     reportQuery:()=>'',period:()=>({from:'2026-10-01',to:'2026-11-01'}),Date,Map,URLSearchParams,smartReviewPanel:()=>'',
     api:{request:async path=>path.startsWith('analytics/dashboard')?{summary:{recorded_surplus:'0.00',income:'0.00',net_spending:'0.00',after_investment_cash_flow:'0.00',transfer_volume:'100.00'},series:{data:[]},categories:{data:[]},accounts:{data:[account,card,usd]}}:{data:[]},collection:async path=>({data:path.startsWith('analytics/transactions')?transfers:[]})},
-    allInvestments:async()=>[],categoryView:{rollup:()=>new Map()},moneyTone:()=>'',
+    views:{dashboardReports:async()=>''},scopeTabs:()=>'',allInvestments:async()=>[],categoryView:{rollup:()=>new Map()},moneyTone:()=>'',
     responsiveAmount:(value,currency)=>value==null?'Unknown':`${currency} ${value}`,field:(_label,control)=>control,option:(value,label)=>`<option value="${value}">${label}</option>`,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
   });
   context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);

@@ -2675,7 +2675,7 @@ async fn widget_daily_spending_covers_seven_calendar_days_with_refunds_and_zeroe
 }
 
 #[tokio::test]
-async fn widget_expense_calendar_covers_elapsed_dates_and_deduplicates_family_spending() {
+async fn widget_expense_calendar_covers_full_month_and_deduplicates_family_spending() {
     let (owner, _) = setup().await;
     let anonymous = Client { app: owner.app.clone(), cookie: String::new(), csrf: String::new() };
     assert_eq!(anonymous.call("GET", "widgets/expense-calendar?scope=family&month=2026-10", json!({}), None, None).await.0, StatusCode::NOT_FOUND);
@@ -2720,7 +2720,15 @@ async fn widget_expense_calendar_covers_elapsed_dates_and_deduplicates_family_sp
     assert_eq!(result.1["currency"], "INR");
     assert_eq!(result.1["complete"], true);
     let days = result.1["days"].as_array().unwrap();
-    assert_eq!(days.len(), today.day() as usize);
+    let next_month_start = first.checked_add_months(chrono::Months::new(1)).unwrap();
+    assert_eq!(days.len(), (next_month_start-first).num_days() as usize);
+    assert_eq!(result.1["today"], today.to_string());
+    assert_eq!(result.1["timezone"], "Asia/Kolkata");
+    for (index, day) in days.iter().enumerate() {
+        let date = first + chrono::Duration::days(index as i64);
+        assert_eq!(day["date"], date.to_string());
+        assert_eq!(day["is_future"], date > today);
+    }
     assert_eq!(days[0]["date"], first.to_string());
     assert_eq!(days[0]["expense"], 22.0);
     assert!(days[1..].iter().all(|day| day["expense"].as_f64() == Some(0.0)));
@@ -2747,9 +2755,24 @@ async fn widget_expense_calendar_covers_elapsed_dates_and_deduplicates_family_sp
     assert_eq!(past["days"].as_array().unwrap().len(), previous.day() as usize);
     let next = first.checked_add_months(chrono::Months::new(1)).unwrap();
     let next_month = next.format("%Y-%m").to_string();
+    let mut future_entry = make("expense", "99.00", &food);
+    future_entry["effective_date"] = json!(next.to_string());
+    future_entry["effective_at"] = json!(format!("{next}T00:00:00+05:30"));
+    owner.create("transactions", future_entry).await;
     let future = anonymous.call("GET", &format!("widgets/expense-calendar?scope=family&month={next_month}"), json!({}), None, None).await.1;
     assert_eq!(future["complete"], false);
-    assert!(future["days"].as_array().unwrap().is_empty());
+    let future_days = future["days"].as_array().unwrap();
+    assert_eq!(future_days.len(), (next.checked_add_months(chrono::Months::new(1)).unwrap()-next).num_days() as usize);
+    assert!(future_days.iter().all(|day| day["expense"].as_f64() == Some(0.0) && day["is_future"] == true));
+    let october = anonymous.call("GET", "widgets/expense-calendar?scope=family&month=2026-10", json!({}), None, None).await;
+    assert_eq!(october.0, StatusCode::OK, "{}", october.1);
+    assert_eq!(october.1["days"].as_array().unwrap().len(), 31);
+    assert_eq!(october.1["days"][22]["date"], "2026-10-23");
+    for leap_month in ["2024-02", "2025-02"] {
+        let result = anonymous.call("GET", &format!("widgets/expense-calendar?month={leap_month}"), json!({}), None, None).await;
+        assert_eq!(result.0, StatusCode::OK, "{}", result.1);
+        assert_eq!(result.1["days"].as_array().unwrap().len(), if leap_month == "2024-02" {29} else {28});
+    }
     assert_eq!(anonymous.call("GET", "widgets/expense-calendar?month=2026-13", json!({}), None, None).await.0, StatusCode::BAD_REQUEST);
     assert_eq!(anonymous.call("GET", "widgets/expense-calendar?extra=1", json!({}), None, None).await.0, StatusCode::BAD_REQUEST);
 }

@@ -13867,6 +13867,25 @@
           "currency": {
             "type": "string"
           },
+          "timezone": {
+            "type": "string"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "today": {
+            "type": "string",
+            "format": "date"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "family",
+              "combined"
+            ]
+          },
           "complete": {
             "type": "boolean"
           },
@@ -13881,11 +13900,15 @@
                 },
                 "expense": {
                   "type": "number"
+                },
+                "is_future": {
+                  "type": "boolean"
                 }
               },
               "required": [
                 "date",
-                "expense"
+                "expense",
+                "is_future"
               ]
             }
           }
@@ -13893,6 +13916,10 @@
         "required": [
           "month",
           "currency",
+          "timezone",
+          "generated_at",
+          "today",
+          "scope",
           "complete",
           "days"
         ]

@@ -4,7 +4,7 @@
 
 `GET /api/v1/widgets/accounts` uses the same selected member and an additional **Expose accessible account balances and last transaction dates** switch. It is also unauthenticated and read-only. Anyone who can reach it while enabled can read the selected member's accessible account names, types, balances, and latest transaction dates. The accounts switch starts off, including on installations where the spending widget was already enabled.
 
-`GET /api/v1/widgets/expense-calendar` uses the spending widget's enable switch and Family scope switch. It returns one numeric net expense for every elapsed household-local date in a selected month.
+`GET /api/v1/widgets/expense-calendar` uses the spending widget's enable switch and Family scope switch. It returns one numeric net expense for every household-local date in a selected month, including marked zero placeholders for future dates.
 
 ## Enable on the NAS
 
@@ -93,15 +93,23 @@ curl -i 'http://YOUR_NAS_IP:3000/api/v1/widgets/expense-calendar?scope=family&mo
 {
   "month": "2026-10",
   "currency": "INR",
+  "timezone": "Asia/Kolkata",
+  "generated_at": "2026-10-22T08:15:00+05:30",
+  "today": "2026-10-22",
+  "scope": "family",
   "complete": true,
   "days": [
-    {"date": "2026-10-01", "expense": 0},
-    {"date": "2026-10-02", "expense": 1250.50}
+    {"date": "2026-10-01", "expense": 0, "is_future": false},
+    {"date": "2026-10-02", "expense": 1250.50, "is_future": false}
   ]
 }
 ```
 
-The example omits later dates. A real current-month response includes each date from the first through today, including zero-expense dates; a past month includes every date. A future month returns `days: []` and `complete: false`. Here `complete` means all elapsed calendar dates are represented; it does **not** certify that every purchase has been imported or that hidden private-account activity is included. Expense values are JSON numbers in the household base currency. They are net of eligible refunds and can be negative. The endpoint applies the same transaction, allocation, settlement, currency, visibility, and future-time exclusions as the spending widget. Family allocations from one shared transaction are summed once; Combined adds the configured member's Personal allocations once.
+The example omits later rows. Every response contains exactly one row per date in the selected month, in chronological order, including zero-expense dates and future placeholders. October always includes October 23 and has 31 rows; February has 28 or 29 as appropriate. Future cells have `expense: 0` and `is_future: true`; render them as future/unelapsed cells, not evidence of zero spending. Future-dated ledger transactions are not included.
+
+`today`, `timezone`, and `generated_at` describe the server's household-local cutoff; clients should use this cutoff rather than assume the device timezone matches. `complete` remains true for current/past months and false for entirely future months. It describes elapsed-date coverage, not ledger import completeness. A future month now returns a full placeholder grid instead of an empty `days` array. Expense values remain JSON numbers in the household base currency; eligible refunds can make elapsed-date values negative. Scope, account access, settlement, and currency rules are unchanged.
+
+A widget which previously threw a missing-date error while building a complete month should use the full `days` grid. Deploy the updated backend before refreshing the widget; existing successful responses may remain cached for five minutes.
 
 ## Calculation rules
 

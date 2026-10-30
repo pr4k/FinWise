@@ -37,7 +37,7 @@ async function freePort() { const s=net.createServer(); await new Promise(r=>s.l
     await page.getByRole('heading',{name:'Your month',exact:true}).waitFor();
     async function open(view) {
       await page.evaluate(view=>location.hash=view,view);
-      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Overview',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Analytics',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
+      try { await page.waitForFunction(view=>document.querySelector('#breadcrumb-current').textContent===view && !document.querySelector('#view-root').hasAttribute('aria-busy'),({imports:'Imports',overview:'Dashboard',transactions:'Transactions',accounts:'Accounts',categories:'Categories',analytics:'Dashboard',budgets:'Budgets',investments:'Investments',statements:'Statements',reconcile:'Reconcile',changes:'Money Manager changes',settings:'Settings',more:'More'})[view]); }
       catch(error) { throw new Error(`Opening ${view}: ${error.message}`); }
     }
     async function upload(repeat=false) {

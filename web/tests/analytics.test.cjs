@@ -173,3 +173,43 @@ test('dashboard category history stacks exact amounts and fills quiet months wit
   assert.match(history,/2026-10 INR -20.50/);
   assert.match(history,/Uncategorized/);
 });
+
+test('hero breakdown uses authoritative signed effects, excludes transfers and retains exact offsets',()=>{
+  const view=analytics();
+  const summary={earned_income:'100.01',actual_spending:'39.99',economic_surplus:'60.02',net_invested:'15.00',breakdown:[
+    {transaction_id:'salary',transaction_type:'income',income:'100.01',spending:'0',net_invested:'0'},
+    {transaction_id:'shop',transaction_type:'expense',income:'0',spending:'50.00',net_invested:'0'},
+    {transaction_id:'refund',transaction_type:'refund',income:'0',spending:'-10.01',net_invested:'0'},
+    {transaction_id:'fund',transaction_type:'investment',income:'0',spending:'0',net_invested:'20.00'},
+    {transaction_id:'withdraw',transaction_type:'investment',income:'0',spending:'0',net_invested:'-5.00'},
+    {transaction_id:'transfer',transaction_type:'transfer',income:'0',spending:'0',net_invested:'0'},
+    {transaction_id:'reimburse',transaction_type:'reimbursement',income:'0',spending:'0',net_invested:'0'}
+  ]};
+  const transactions=summary.breakdown.map(line=>({id:line.transaction_id,event_type:line.transaction_type}));
+  const income=view.metricBreakdown(summary,transactions,'earned_income','INR');
+  assert.equal(income.total,'100.01');assert.equal(income.explained,'100.01');
+  assert.equal(income.contributors.length,1);assert.equal(income.excluded.length,6);
+  assert.match(income.excluded.find(row=>row.transaction.id==='reimburse').reason,/separate from earned income/);
+  const spending=view.metricBreakdown(summary,transactions,'actual_spending','INR');
+  assert.equal(spending.positive,'50.00');assert.equal(spending.offsets,'10.01');assert.equal(spending.explained,'39.99');
+  assert.equal(spending.contributors[1].effect,'-10.01');
+  const invested=view.metricBreakdown(summary,transactions,'net_invested','INR');
+  assert.equal(invested.positive,'20.00');assert.equal(invested.offsets,'5.00');assert.equal(invested.explained,'15.00');
+  const surplus=view.metricBreakdown(summary,transactions,'economic_surplus','INR');
+  assert.equal(surplus.positive,'110.02');assert.equal(surplus.offsets,'50.00');assert.equal(surplus.explained,'60.02');
+  assert.equal(surplus.contributors[1].effect,'-50.00');
+  assert.equal(surplus.contributors[2].effect,'10.01');
+});
+
+test('hero breakdown groups split allocations, preserves missing source effects and zero-net offsets',()=>{
+  const view=analytics();
+  const result=view.metricBreakdown({actual_spending:'0.000',breakdown:[
+    {transaction_id:'split',transaction_type:'expense',spending:'1.005'},
+    {transaction_id:'split',transaction_type:'refund',spending:'-1.005'},
+    {transaction_id:'missing',transaction_type:'expense',spending:'0.000'}
+  ]},[{id:'split'}],'actual_spending','KWD');
+  assert.equal(result.positive,'1.005');assert.equal(result.offsets,'1.005');assert.equal(result.explained,'0.000');
+  assert.equal(result.contributors.length,1);assert.equal(result.contributors[0].effect,'0.000');
+  assert.equal(result.excluded[0].transaction.unavailable,true);
+  assert.throws(()=>view.metricBreakdown({},[],'invalid','INR'),/Unknown dashboard metric/);
+});

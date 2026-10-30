@@ -223,11 +223,10 @@ pub async fn expense_calendar(state: &AppState, query: &Query) -> Result<Reply> 
         .map_err(|_| ApiError::invalid("month must be YYYY-MM."))?;
     let (_, _, _, month_end) = period_bounds(month_start)?;
     let last = std::cmp::min(month_end, today);
-    let mut days = Vec::new();
+    let mut amounts = vec![0_i64; (month_end - month_start).num_days() as usize + 1];
     if last >= month_start {
         let from = month_start.to_string();
         let to = (last + Duration::days(1)).to_string();
-        let mut amounts = vec![0_i64; (last - month_start).num_days() as usize + 1];
         for tx in crate::classification::reporting(storage::transactions_in_period(&mut db, &p, &from, &to, false).await?) {
             if tx["voided"] == true
                 || tx["currency"] != currency
@@ -261,21 +260,29 @@ pub async fn expense_calendar(state: &AppState, query: &Query) -> Result<Reply> 
             let index = (date - month_start).num_days() as usize;
             amounts[index] = add(amounts[index], amount)?;
         }
-        for (index, amount) in amounts.into_iter().enumerate() {
-            let expense: Value = serde_json::from_str(&format_money(amount, currency)?)
-                .map_err(|_| ApiError::invalid("Invalid money total."))?;
-            days.push(json!({
-                "date": (month_start + Duration::days(index as i64)).to_string(),
-                "expense": expense,
-            }));
-        }
     }
+    let days = calendar_days(month_start, today, &amounts, currency)?;
     Ok((StatusCode::OK, json!({
         "month": month,
         "currency": currency,
+        "timezone": tz.to_string(),
+        "generated_at": now.with_timezone(&tz).to_rfc3339(),
+        "today": today.to_string(),
+        "scope": scope,
         "complete": last >= month_start,
         "days": days,
     })))
+}
+
+// A month heatmap needs a stable cell for every date, including unelapsed dates.
+// Future cells are placeholders; they never include future-dated ledger activity.
+fn calendar_days(start: NaiveDate, today: NaiveDate, amounts: &[i64], currency: &str) -> Result<Vec<Value>> {
+    amounts.iter().enumerate().map(|(index, amount)| {
+        let date = start + Duration::days(index as i64);
+        let expense: Value = serde_json::from_str(&format_money(*amount, currency)?)
+            .map_err(|_| ApiError::invalid("Invalid money total."))?;
+        Ok(json!({"date":date.to_string(),"expense":expense,"is_future":date>today}))
+    }).collect()
 }
 
 pub async fn accounts(state: &AppState, query: &Query) -> Result<Reply> {
@@ -609,6 +616,27 @@ fn category_group(id: &str, categories: &HashMap<String, Value>, include_childre
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn month_heatmap_keeps_october_23_before_and_after_the_date_elapses() {
+        let start = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+        let mut amounts = vec![0; 31];
+        amounts[0] = 125050;
+        amounts[21] = -1200;
+        for today_day in [22, 23, 30] {
+            let today = NaiveDate::from_ymd_opt(2026, 10, today_day).unwrap();
+            let days = calendar_days(start, today, &amounts, "INR").unwrap();
+            assert_eq!(days.len(), 31);
+            assert_eq!(days[22]["date"], "2026-10-23");
+            assert_eq!(days[22]["expense"].as_f64(), Some(0.0));
+            assert_eq!(days[22]["is_future"], today_day < 23);
+            assert_eq!(days[0]["expense"], 1250.50);
+            assert_eq!(days[21]["expense"], -12.0);
+            for (index, day) in days.iter().enumerate() {
+                assert_eq!(day["date"], (start + Duration::days(index as i64)).to_string());
+            }
+        }
+    }
+
     #[test]
     fn weeks_start_monday_and_month_end_is_inclusive() {
         let monday = NaiveDate::from_ymd_opt(2026, 10, 12).unwrap();
