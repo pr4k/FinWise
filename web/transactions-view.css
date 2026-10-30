@@ -1,0 +1,68 @@
+/* Keep the five-column activity view readable inside the workspace or drawer. */
+.activity-table-wrap { container-type: inline-size; }
+.activity-ledger-table { min-width: 0; }
+.activity-ledger-table th:nth-child(1) { width: 12%; }
+.activity-ledger-table th:nth-child(2) { width: 34%; }
+.activity-ledger-table th:nth-child(3) { width: 21%; }
+.activity-ledger-table th:nth-child(4) { width: 16%; }
+.activity-ledger-table th:nth-child(5) { width: 17%; }
+.ledger-workspace .activity-ledger-table th:nth-child(n) { width: auto; }
+.ledger-workspace .activity-ledger-table th:nth-child(1) { width: 12%; }
+.ledger-workspace .activity-ledger-table th:nth-child(2) { width: 34%; }
+.ledger-workspace .activity-ledger-table th:nth-child(3) { width: 21%; }
+.ledger-workspace .activity-ledger-table th:nth-child(4) { width: 16%; }
+.ledger-workspace .activity-ledger-table th:nth-child(5) { width: 17%; }
+.activity-ledger-table th button { padding: 4px 0; border: 0; text-transform: none; font-size: 11px; letter-spacing: 0; }
+.activity-ledger-table th button:hover { text-decoration: underline; }
+.activity-ledger-table td { overflow-wrap: anywhere; }
+.activity-ledger-table .activity-title { display: grid; justify-items: start; gap: 7px; }
+.activity-ledger-table .activity-title strong { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.activity-ledger-table .activity-meta { display: grid; gap: 7px; margin-top: 9px; line-height: 1.6; }
+.activity-ledger-table .activity-meta .transaction-indicators { flex-wrap: wrap; gap: 5px 10px; }
+.activity-ledger-table .activity-account-detail summary { width: auto; overflow-wrap: anywhere; line-height: 1.6; }
+.activity-ledger-table th:nth-child(4), .activity-ledger-table td:nth-child(4) { text-align: right; }
+.activity-ledger-table .activity-amount { font-size: 15px; }
+.activity-ledger-table .activity-review { display: grid; justify-items: start; gap: 7px; }
+.activity-ledger-table .activity-review .quiet-tag { max-width: 100%; white-space: normal; text-transform: capitalize; font-size: 10px; }
+.activity-ledger-table .activity-review small { margin: 0; line-height: 1.6; text-transform: capitalize; }
+.activity-review-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.activity-ledger-table .activity-review-actions button { margin: 0; min-height: 32px; padding: 6px 9px; }
+
+/* Container width also accounts for an open sidebar or transaction drawer. */
+@container (max-width: 940px) {
+  .activity-ledger-table thead { display: none; }
+  .activity-ledger-table tbody { display: grid; gap: 0; }
+  .activity-ledger-table tr,
+  .ledger-workspace .activity-ledger-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, .5fr); gap: 12px 24px; margin: 0; padding: 20px 22px; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+  .activity-ledger-table td,
+  .ledger-workspace .activity-ledger-table td:nth-child(n) { display: block; grid-column: auto; grid-row: auto; min-width: 0; max-width: none; padding: 0; border: 0; text-align: left; }
+  .activity-ledger-table td::before { display: none; }
+  .activity-ledger-table td > * { max-width: 100%; }
+  .activity-ledger-table td:nth-child(1),
+  .ledger-workspace .activity-ledger-table td:nth-child(1) { grid-column: 1; grid-row: 1; box-shadow: none; }
+  .activity-ledger-table td:nth-child(1) small { display: inline; margin-left: 8px; }
+  .activity-ledger-table td:nth-child(2),
+  .ledger-workspace .activity-ledger-table td:nth-child(2) { grid-column: 1; grid-row: 2; }
+  .activity-ledger-table td:nth-child(3),
+  .ledger-workspace .activity-ledger-table td:nth-child(3) { grid-column: 1; grid-row: 3; }
+  .activity-ledger-table td:nth-child(4),
+  .ledger-workspace .activity-ledger-table td:nth-child(4) { grid-column: 2; grid-row: 1; text-align: right; }
+  .activity-ledger-table td:nth-child(5),
+  .ledger-workspace .activity-ledger-table td:nth-child(5) { grid-column: 2; grid-row: 2 / 4; align-self: start; text-align: left; }
+  .activity-ledger-table .activity-title strong { white-space: normal; }
+  .activity-ledger-table .activity-meta { max-height: none; white-space: normal; overflow: visible; }
+}
+
+@media (max-width: 1100px) {
+  .tx-expand > summary.tx-scan-row { padding-top: 16px; padding-bottom: 16px; align-items: flex-start; }
+  .tx-scan-primary > strong { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .tx-scan-context { flex-wrap: wrap; justify-content: flex-start; gap: 4px 12px; margin-top: 6px; }
+  .tx-review { white-space: normal; }
+}
+
+@container (max-width: 480px) {
+  .activity-ledger-table tr,
+  .ledger-workspace .activity-ledger-table tr { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; }
+  .activity-ledger-table td:nth-child(n),
+  .ledger-workspace .activity-ledger-table td:nth-child(n) { grid-column: 1; grid-row: auto; text-align: left; }
+}
