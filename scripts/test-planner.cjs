@@ -109,6 +109,32 @@ try{
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('accounts')).data.find(a=>a.name==='Travel Card').card_due.amount)()`),'2400.00');
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
  await run(`location.hash='overview'`);await until('!!document.querySelector(".dashboard-page")');assert.equal(await run('document.querySelector("#report-month").value'),'2026-11');
- assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, guided income import without double counting, subscription/SIP suggestions, partial card payments, server budget creation/activation, independent months, current card due refresh, monthly planning overrides/reset without account writes, and 320–1440px layouts.');
+
+ // Balance-only cards must be visible even without card_due metadata.
+ const balanceCards=await run(`(async()=>{
+  const kiwi=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Balance-only Kiwi',subtype:'credit_card',currency:'INR',visibility:'private',opening_balance:{amount:'18709.00',as_of:'2026-10-01T00:00:00+05:30'}}});
+  const unknown=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Unknown due card',subtype:'credit_card',currency:'INR',visibility:'private'}});
+  const shared=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Shared balance card',subtype:'credit_card',currency:'INR',visibility:'shared'}});
+  return {kiwi:kiwi.id,unknown:unknown.id,shared:shared.id};
+ })()`);
+ await run(`location.hash='planner'`);await until('!!document.querySelector(".workflow-summary")&&!document.querySelector("#view-root").hasAttribute("aria-busy")');
+ assert.ok(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.kiwi}"]')`));
+ assert.ok(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.unknown}"]')`));
+ assert.equal(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.shared}"]')`),false);
+ const cardBefore=await run('plannerInstance.snapshot().totals.card');
+ await click(`[data-workflow-account-card="${balanceCards.kiwi}"]`);assert.equal(await run('document.querySelector("#workflow-account-estimate").value'),'18709');
+ await run(`(()=>{const form=document.querySelector('#workflow-account-card-form');form.elements.dueAmount.value='15000';form.requestSubmit();})()`);
+ assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
+ assert.equal(await run(`(async()=> (await finwiseAPI.collection('accounts')).data.find(a=>a.id==='${balanceCards.kiwi}').card_due??null)()`),null);
+ await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
+ assert.equal(await run('Array.from(document.querySelectorAll(".workflow-bill h4")).filter(el=>el.textContent==="Balance-only Kiwi").length'),1);
+ await run(`(async()=>{const card=(await finwiseAPI.collection('accounts')).data.find(a=>a.id==='${balanceCards.kiwi}');await finwiseAPI.request('accounts/'+card.id,{method:'PATCH',revision:card.revision,body:{card_due:{amount:'5000.00',due_date:'2026-11-09'}}});await renderRoute();})()`);
+ assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
+ assert.equal(await run('plannerInstance.snapshot().plan.items.filter(x=>x.destination==="Balance-only Kiwi").length'),1);
+ const kiwiSnapshot=await run('plannerInstance.snapshot().plan.items.find(x=>x.destination==="Balance-only Kiwi").statementSnapshot');assert.equal(kiwiSnapshot.recordedDue,5000);assert.equal(kiwiSnapshot.planningOnly,false);
+ await run(`document.querySelector('.scope-segments [data-scope="family"]').click()`);await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&!!document.querySelector(".workflow-summary")');
+ assert.ok(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.shared}"]')`));assert.equal(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.unknown}"]')`),false);
+ assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
+ assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, guided income import without double counting, subscription/SIP suggestions, partial card payments, server budget creation/activation, independent months, current card due refresh, monthly planning overrides/reset without account writes, balance-only/unknown card visibility, explicit estimates without account writes, real-due adoption without duplication, and 320–1440px layouts.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 })();

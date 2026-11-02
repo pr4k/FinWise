@@ -44,7 +44,7 @@
         if(!bill){bill={id:billId,scope:state.scope,currency:state.currency,card:account.name,statementMonth,dueDate:account.dueDate,statementAmount:account.due,paid:0,status:'estimated',account:planBanks()[0]?.name||'Manual opening pool',evidence:'Recorded remaining payment due; statement month is estimated. Verify against your statement.'};plannerStore.cardBills.push(bill);}
         for(const old of plannerStore.cardBills.filter(b=>b.id!==bill.id&&b.hostAccountId===account.id&&b.scope===state.scope&&b.currency===state.currency))old.supersededFrom=account.dueDate.slice(0,7);
         delete bill.supersededFrom;
-        Object.assign(bill,{hostAccountId:account.id,recordedDue:account.due,recordedDueDate:account.dueDate,card:account.name,dueDate:account.dueDate,autoForecast:false});
+        Object.assign(bill,{hostAccountId:account.id,recordedDue:account.due,recordedDueDate:account.dueDate,planningOnly:false,card:account.name,dueDate:account.dueDate,autoForecast:false});
       }
       planSave();
     }

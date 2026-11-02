@@ -186,6 +186,7 @@ Answers what happened in the selected month and where available money sits. Over
 **Planner**
 
 - Defaults to next month with a separate planning-month picker; Dashboard reporting keeps its own month.
+- All card accounts in the selected scope/currency remain visible in Planner, including accounts missing statement metadata. Amount owed is shown separately; users can explicitly include an editable planning estimate without modifying Accounts. Older manual estimates are labeled distinctly.
 - Current recorded card dues refresh from Accounts. A separate monthly **Due used for planning** override can be higher or lower, and resets to the latest recorded due without changing account dues or posting payments.
 - The **Build budget** flow collects expected or imported recorded income, full/partial planned card payments, selectable subscription and active SIP schedules, other expenses/buffers, and a remaining-income category split.
 - Shows income left to allocate separately from projected bank cash and available cash after earmarks. Dated bank anchors and partial coverage are visible. Imported income explicitly identifies receipts already included in starting bank funds so the forecast does not add them twice.

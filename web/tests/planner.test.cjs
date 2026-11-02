@@ -133,3 +133,21 @@ test('a new recorded billing cycle supersedes the earlier account snapshot in th
  instance.update({...host,month:'2026-12',accounts:[bank,{...first,due:3000,dueDate:'2026-12-05'}]});
  const current=instance.snapshot();assert.equal(current.totals.card,3000);assert.equal(current.plan.items.filter(x=>x.kind==='card').length,1);
 });
+test('cards with balances but no statement metadata stay visible without automatically counting debt as a bill',()=>{
+ const accounts=[bank,{...card,name:'Kiwi card',balance:18709},{...card,id:'icici',name:'ICICI cc',balance:20308},{...card,id:'unknown',name:'Unknown balance card',balance:null}];
+ const original=JSON.stringify(accounts);const {instance,storage}=load({accounts,workflow:true});const html=instance.html();
+ assert.match(html,/Kiwi card/);assert.match(html,/ICICI cc/);assert.match(html,/Unknown balance card/);
+ assert.match(html,/Amount owed in Accounts/);assert.match(html,/Statement due not recorded/);
+ assert.equal((html.match(/data-workflow-account-card=/g)||[]).length,3);
+ assert.equal(instance.snapshot().totals.card,0);assert.equal(JSON.parse(storage.get('test-planner')).cardBills.length,0);assert.equal(JSON.stringify(accounts),original);
+});
+test('an older manually saved bill estimate is not mislabeled as the current account due',()=>{
+ const saved=stored([]);saved.cardBills=[{id:'manual',scope:'personal',currency:'INR',card:'SBI cc',statementMonth:'2026-10',dueDate:'2026-11-05',statementAmount:3600,paid:0,status:'estimated',account:'Savings'}];
+ const {instance}=load({accounts:[bank,{...card,name:'SBI cc',balance:35107}],saved,workflow:true});const html=instance.html();
+ assert.match(html,/Saved bill estimate/);assert.match(html,/35,107/);assert.doesNotMatch(html,/Recorded due ₹3,600/);
+ assert.equal((html.match(/<h4>SBI cc<\/h4>/g)||[]).length,1);
+});
+test('missing due date still exposes the recorded amount and allows a planning estimate',()=>{
+ const {instance}=load({accounts:[bank,{...card,due:1200,dueDate:null}],workflow:true});const html=instance.html();
+ assert.match(html,/Recorded statement due/);assert.match(html,/Due date not recorded/);assert.match(html,/Set planning estimate/);assert.equal(instance.snapshot().totals.card,0);
+});
