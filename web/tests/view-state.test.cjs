@@ -74,3 +74,27 @@ test('old classification bookmarks discard review filters and preserve the trans
   const saved=new URL(next,'http://localhost').searchParams;
   assert.equal(saved.has('transaction_type'),false);assert.equal(saved.has('classification_status'),false);
 });
+
+const appSource=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
+test('month picker commits on input once and retains November across a later change event',async()=>{
+  const control={id:'report-month',value:'2026-11'};
+  let href='http://localhost/?month=2026-10&scope=personal#overview';
+  let renders=0,writes=0;
+  const context=vm.createContext({
+    state:{month:'2026-10',compareMonth:'2026-09',scope:'personal',view:'overview',transactionFilters:{}},
+    URL,URLSearchParams,viewState:state(),
+    location:{get href(){return href;},hash:'#overview'},
+    history:{replaceState(_state,_title,value){writes++;href=new URL(value,href).href;}},
+    document:{querySelector:()=>control,addEventListener:()=>{}},
+    renderRoute:async()=>{renders++;},navigate:()=>{throw Error('Unexpected navigation');}
+  });
+  vm.runInContext(appSource.slice(appSource.indexOf('function saveView()'),appSource.indexOf('function authForm(')),context);
+  vm.runInContext(appSource.slice(appSource.indexOf('async function changeReportMonth('),appSource.indexOf('// Commit native picker')),context);
+  await context.changeReportMonth({target:control,type:'input'});
+  await context.changeReportMonth({target:control,type:'change'});
+  assert.equal(context.state.month,'2026-11');
+  assert.equal(control.value,'2026-11');
+  assert.equal(new URL(href).searchParams.get('month'),'2026-11');
+  assert.equal(renders,1);assert.equal(writes,1);
+  assert.equal(state().read(new URL(href).search,'2026-10').month,'2026-11');
+});

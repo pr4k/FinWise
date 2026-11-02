@@ -311,7 +311,7 @@ async function assignInvestmentAfterSave(form,transaction) {
 }
 
 function saveView() { viewState.save(state.month,state.scope,location.href,path=>history.replaceState(null,'',path),state.transactionFilters); }
-function setMonth(value) { state.month=value; if(state.compareMonth===value) { const previous=new Date(`${value}-01T00:00:00Z`);previous.setUTCMonth(previous.getUTCMonth()-1);state.compareMonth=previous.toISOString().slice(0,7);const url=new URL(location.href);url.searchParams.set('compare',state.compareMonth);history.replaceState(null,'',url.pathname+url.search+url.hash); } document.querySelector('#report-month').value=value; saveView(); }
+function setMonth(value) { state.month=value; if(state.compareMonth===value) { const previous=new Date(`${value}-01T00:00:00Z`);previous.setUTCMonth(previous.getUTCMonth()-1);state.compareMonth=previous.toISOString().slice(0,7);const url=new URL(location.href);url.searchParams.set('compare',state.compareMonth);history.replaceState(null,'',url.pathname+url.search+url.hash); } const control=document.querySelector('#report-month'); if(control.value!==value)control.value=value; saveView(); }
 function authForm(bootstrap=false) {
   shell.hidden=true; authRoot.hidden=false; dialog.close(); closeTransactionDrawer();
   authRoot.innerHTML=`<section class="panel auth-card"><a class="brand" href="#overview">finwise.</a><h1>${bootstrap?'Set up your household':'Welcome back'}</h1><p>${bootstrap?'Create the first owner account. Your data stays on this server.':'Sign in to your FinWise account.'}</p><form id="auth-form" data-bootstrap="${bootstrap}">${bootstrap?field('Your name',input('name','required autocomplete="name"')):''}${field('Email',input('email','type="email" required autocomplete="username"'))}${field('Password',input('password',`type="password" required minlength="12" maxlength="1024" autocomplete="${bootstrap?'new-password':'current-password'}"`))}${bootstrap?field('Household name',input('household','required value="My household"'))+field('Timezone',input('timezone',`required value="${h(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata')}"`))+field('Base currency',input('currency','required value="INR" pattern="[A-Z]{3}"')):''}<button class="primary-button" type="submit">${bootstrap?'Create household':'Sign in'}</button></form></section>`;
@@ -1725,9 +1725,30 @@ function updateTransactionPreview() {
   warning.textContent=duplicate?'A matching transaction is already recorded for this date and account. Check before saving.':'';
   syncInvestmentAssignment(form);
 }
+async function transactionDetailBalances(transaction) {
+  // The ledger computes balances across history before applying the date filter.
+  // Fetch only the day we display rather than paging through the full account.
+  const next=new Date(`${transaction.effective_date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate()+1);
+  const query=new URLSearchParams({from:transaction.effective_date,to:next.toISOString().slice(0,10)});
+  const accounts=[...new Set(transaction.movements.map(m=>m.account_id))];
+  const results=await Promise.allSettled(accounts.map(account=>api.collection(`accounts/${id(account)}/ledger?${query}`)));
+  const balances=new Map();
+  let unavailable=false;
+  results.forEach((result,index)=>{
+    if(result.status==='rejected') {
+      if(result.reason.status===401)throw result.reason;
+      unavailable=true;
+      return;
+    }
+    const row=result.value.data.find(row=>row.transaction_id===transaction.id);
+    if(row)balances.set(`${accounts[index]}:${transaction.id}`,row);
+  });
+  return {balances,unavailable};
+}
 async function transactionDetail(key) {
   const t=await api.request(`transactions/${id(key)}`);
-  await loadLedgerBalances([t],true);
+  const {balances,unavailable}=await transactionDetailBalances(t);
   const amendment=t.amendment?`<p class="amendment-note"><strong>Amended in FinWise</strong><br>${moneyManagerMode()?'Money Manager original':'Previous value'}: ${amount(t.amendment.original_amount,t.currency)} on ${h(t.amendment.original_date)}.<br>Current amount: ${amount(t.amount,t.currency)} on ${h(t.effective_date)}.${moneyManagerMode()?`<br>${h(t.amendment.reason)} · Update the source app using the amendment export.`:''}</p>`:t.reconciliation_created?`<p class="amendment-note"><strong>${t.reconciliation_created.action==='update_transfer'?'Converted to an internal transfer':'Created from a bank statement'}</strong><br>${h(t.reconciliation_created.observation_ids?.length||0)} source statement row(s) attached.${moneyManagerMode()?` ${t.reconciliation_created.action==='update_transfer'?'Update':'Add'} this transaction in Money Manager using the changes export in Reconcile.<br>${h(t.reconciliation_created.reason||'')}`:''}</p>`:'';
   const evidence=t.reconciliation_evidence||[];
   const investmentEligible=['expense','refund'].includes(t.event_type) && t.allocations?.length && t.allocations.some(allocation=>(allocation.transaction_type||t.classification?.transaction_type||(state.categories.find(category=>category.id===allocation.category_id)?.tracking_type==='investment'?'investment':t.event_type))==='investment');
@@ -1736,7 +1757,7 @@ async function transactionDetail(key) {
   const source=state.accounts.find(a=>a.id===t.movements[0]?.account_id);
   const canConvert=t.event_type==='expense' && ['bank','cash'].includes(source?.subtype) && state.accounts.some(a=>a.subtype==='credit_card' && a.active!==false && a.currency===t.currency);
   const host=window.matchMedia('(min-width:761px)').matches?transactionDrawer:dialog;
-  editor('Transaction details',`<p>${h(t.effective_date)} · ${h(transactionKindLabel(t))} · ${amount(t.amount,t.currency)}</p>${transactionIndicators(t)}`+amendment+table(['Account','Movement','Balance after'],t.movements.map(m=>{const row=state.ledgerBalances.get(`${m.account_id}:${t.id}`);return [h(accountName(m.account_id)),amount(m.amount,t.currency),row?`${amount(row.balance_after,row.currency)}<small>${h(balanceLabel(row))}${groupBalanceLabel(row,m.account_id)}</small>`:'Unknown'];}))+table(['Category','Scope','Amount'],t.allocations.map(a=>[h(categoryName(a.category_id)),h(a.scope),amount(a.amount,t.currency)]))+`<h3>Reconciliation evidence</h3>`+(evidence.length?table(['Account','Statement date','Statement row','Attached amount'],evidence.map(v=>[h(accountName(v.account_id)),h(v.statement_date),`${h(v.statement_description)}${v.statement_reference?`<small>Ref ${h(v.statement_reference)}</small>`:''}`,amount(v.matched_amount,t.currency)])):empty('No statement rows attached yet.'))+`<p>${['expense','refund'].includes(t.event_type)?`Paid by: ${h(payerName(t))} · `:''}Entered by: ${t.entered_by===state.me.user.id?'You':'Household member'} · Revision ${t.revision}</p><p>${t.source_refs.length} source references preserved.</p>${t.investment_id?button('View investment','investment-transaction',`data-id="${h(t.investment_id)}"`):investmentAction+(canConvert?button('Convert to card payment','convert-card-payment',`data-id="${h(t.id)}"`):'')+(t.event_type==='expense'?button('Connect subscription','subscription-link',`data-id="${h(t.id)}"`):'')+button('Edit transaction','edit-transaction',`data-id="${h(t.id)}"`)+button('Delete transaction','delete-transaction',`data-id="${h(t.id)}"`)}`,'transaction-detail-form','Close',host);
+  editor('Transaction details',`<p>${h(t.effective_date)} · ${h(transactionKindLabel(t))} · ${amount(t.amount,t.currency)}</p>${transactionIndicators(t)}`+amendment+table(['Account','Movement','Balance after'],t.movements.map(m=>{const row=balances.get(`${m.account_id}:${t.id}`);return [h(accountName(m.account_id)),amount(m.amount,t.currency),row?`${amount(row.balance_after,row.currency)}<small>${h(balanceLabel(row))}${groupBalanceLabel(row,m.account_id)}</small>`:'Unknown'];}))+(unavailable?'<p class="helper" role="status">Account balances could not be loaded. You can still view and edit this transaction. Reopen details to retry.</p>':'')+table(['Category','Scope','Amount'],t.allocations.map(a=>[h(categoryName(a.category_id)),h(a.scope),amount(a.amount,t.currency)]))+`<h3>Reconciliation evidence</h3>`+(evidence.length?table(['Account','Statement date','Statement row','Attached amount'],evidence.map(v=>[h(accountName(v.account_id)),h(v.statement_date),`${h(v.statement_description)}${v.statement_reference?`<small>Ref ${h(v.statement_reference)}</small>`:''}`,amount(v.matched_amount,t.currency)])):empty('No statement rows attached yet.'))+`<p>${['expense','refund'].includes(t.event_type)?`Paid by: ${h(payerName(t))} · `:''}Entered by: ${t.entered_by===state.me.user.id?'You':'Household member'} · Revision ${t.revision}</p><p>${t.source_refs.length} source references preserved.</p>${t.investment_id?button('View investment','investment-transaction',`data-id="${h(t.investment_id)}"`):investmentAction+(canConvert?button('Convert to card payment','convert-card-payment',`data-id="${h(t.id)}"`):'')+(t.event_type==='expense'?button('Connect subscription','subscription-link',`data-id="${h(t.id)}"`):'')+button('Edit transaction','edit-transaction',`data-id="${h(t.id)}"`)+button('Delete transaction','delete-transaction',`data-id="${h(t.id)}"`)}`,'transaction-detail-form','Close',host);
 }
 async function convertCardPaymentEditor(key) {
   const t=await api.request(`transactions/${id(key)}`);
@@ -2287,6 +2308,17 @@ document.addEventListener('click',async event=>{
   el.disabled=true;
   try { await action(el); } catch(e) { if(state.me) failure(e,dialog.open?dialog:transactionDrawer.hidden?root:transactionDrawer); } finally { el.disabled=false; }
 });
+async function changeReportMonth(event) {
+  const control=event.target;
+  if(control.id!=='report-month' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(control.value) || control.value===state.month)return;
+  setMonth(control.value);
+  if(state.view==='transactions' && location.hash.slice(1)==='transactions/all')navigate('transactions');
+  else await renderRoute({inPlace:['transactions','overview'].includes(state.view)});
+}
+// Commit native picker selections before blur; change also supports text fallbacks.
+for(const type of ['input','change'])document.addEventListener(type,event=>{
+  changeReportMonth(event).catch(error=>{if(state.me)failure(error);});
+});
 document.addEventListener('change',async event=>{
   if(event.target.id==='statement-create-type') updateStatementCreateType();
   if(event.target.id==='category-kind') {
@@ -2325,7 +2357,6 @@ document.addEventListener('change',async event=>{
   if(event.target.form?.id==='match-form' && ['ledger','observation'].includes(event.target.name)) {
     updateMatchComparison();
   }
-  if(event.target.id==='report-month' && /^\d{4}-\d{2}$/.test(event.target.value)) { setMonth(event.target.value); if(state.view==='transactions' && location.hash.slice(1)==='transactions/all') navigate('transactions'); else await renderRoute({inPlace:['transactions','overview'].includes(state.view)}); }
   if(event.target.id==='bulk-scope-all') {
     document.querySelectorAll('#bulk-scope-form [name="transaction_id"]').forEach(box=>{box.checked=event.target.checked;});
   }

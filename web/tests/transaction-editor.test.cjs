@@ -15,7 +15,7 @@ test('transaction details show the same content and host from every page',async(
   const context=vm.createContext({
     state:{view:'transactions',accounts:[{id:'cash',subtype:'cash'}],categories:[],members:[],me:{user:{id:'me'}},ledgerBalances:new Map()},
     api:{request:async()=>transaction},id:encodeURIComponent,h:String,
-    loadLedgerBalances:async()=>{},transactionKindLabel:()=> 'Expense',transactionIndicators:()=>'',
+    transactionDetailBalances:async()=>({balances:new Map(),unavailable:false}),transactionKindLabel:()=> 'Expense',transactionIndicators:()=>'',
     accountName:()=> 'Cash',categoryName:()=> 'Food',payerName:()=> 'You',
     amount:(value,currency)=>`${currency} ${value}`,table:(headers,rows)=>JSON.stringify({headers,rows}),
     empty:String,button:(label,action)=>`${label}:${action}`,
@@ -54,4 +54,35 @@ test('opening the edit modal clears the details drawer and its layout state',()=
   assert.equal(classes.has('transaction-drawer-open'),false);
   assert.equal(dialog.open,true);
   assert.match(dialog.innerHTML,/transaction-full-edit-form/);
+});
+
+function balanceContext(collection) {
+  const context=vm.createContext({api:{collection},id:encodeURIComponent,URLSearchParams});
+  load(context,'async function transactionDetailBalances(','async function transactionDetail(');
+  return context;
+}
+test('transaction details load only their date, including month and year boundaries',async()=>{
+  for(const [date,to] of [['2026-10-31','2026-11-01'],['2026-12-31','2027-01-01']]) {
+    const calls=[];
+    const row={transaction_id:'tx',balance_after:'10.00'};
+    const context=balanceContext(async path=>{calls.push(path);return {data:[row]};});
+    const result=await context.transactionDetailBalances({id:'tx',effective_date:date,movements:[{account_id:'cash'},{account_id:'cash'}]});
+    assert.deepEqual(calls,[`accounts/cash/ledger?from=${date}&to=${to}`]);
+    assert.equal(result.balances.get('cash:tx'),row);
+    assert.equal(result.unavailable,false);
+  }
+});
+test('a failed transfer account balance does not block transaction details or reuse stale balances',async()=>{
+  const context=balanceContext(async path=>{
+    if(path.includes('/bank/'))throw new TypeError('Load failed');
+    return {data:[{transaction_id:'tx',balance_after:'50.00'}]};
+  });
+  const result=await context.transactionDetailBalances({id:'tx',effective_date:'2026-11-02',movements:[{account_id:'bank'},{account_id:'card'}]});
+  assert.equal(result.unavailable,true);
+  assert.equal(result.balances.has('bank:tx'),false);
+  assert.equal(result.balances.get('card:tx').balance_after,'50.00');
+});
+test('expired sessions still stop opening transaction details',async()=>{
+  const context=balanceContext(async()=>{throw Object.assign(new Error('Sign in'),{status:401});});
+  await assert.rejects(context.transactionDetailBalances({id:'tx',effective_date:'2026-11-02',movements:[{account_id:'bank'}]}),{status:401});
 });
