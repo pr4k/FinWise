@@ -4,12 +4,12 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const path=require('node:path');
 const source=name=>fs.readFileSync(path.join(__dirname,'..',name),'utf8');
-function load({accounts=[],records=[],saved=null,currency='INR',scope='personal',month='2026-11'}={}) {
+function load({accounts=[],records=[],saved=null,currency='INR',scope='personal',month='2026-11',workflow=false,suggestions=[],categoryRows=[]}={}) {
   const storage=new Map(saved?[['test-planner',JSON.stringify(saved)]]:[]),listeners=[];
   const document={querySelector:()=>null,querySelectorAll:()=>[],createElement:()=>({innerHTML:'',textContent:''}),addEventListener:(...args)=>listeners.push(args)};
   const window={document,localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)}};
   vm.runInNewContext(source('planner.js'),{window,AbortController,Intl,Date,structuredClone,console});
-  const host={accounts,records,scope,currency,month,categories:{Food:'#387554'},storageKey:'test-planner',person:'Test User',people:['Test User'],escape:String,toast:()=>{},active:()=>true};
+  const host={workflow,suggestions,categoryRows,accounts,records,scope,currency,month,categories:{Food:'#387554'},storageKey:'test-planner',person:'Test User',people:['Test User'],escape:String,toast:()=>{},active:()=>true};
   const instance=window.finwisePlanner.create(host);
   return {instance,storage,host};
 }
@@ -70,4 +70,34 @@ test('actual totals respect reporting corrections and exclude paid-on-behalf sha
  // Feed prior month to exercise category suggestions, which exclude non-consumption.
  const previous=mapped.records.map(r=>({...r,date:'2026-10-02'}));
  const planned=load({accounts:[bank],records:previous}).instance.snapshot();assert.equal(planned.totals.spend,35);
+});
+test('income envelope stays independent from an older bank balance and excludes received income from future cash',()=>{
+ const saved=stored([item('Received salary','income',100000,'Savings',{cashIncluded:true}),item('SIP','investment',10000),item('Rent','expense',20000)],200000);
+ const {instance}=load({accounts:[{...bank,balance:200000}],saved,workflow:true});
+ const {workflow,totals,forecast}=instance.snapshot();
+ assert.equal(workflow.remainingIncome,70000);assert.equal(workflow.bankCash,170000);assert.equal(forecast.end,170000);
+ assert.equal(totals.bankCashflow,-30000);assert.equal(totals.cashReceipts,0);
+ assert.equal(totals.income,100000);
+});
+test('partial card plans retain the unpaid obligation without changing paid evidence',()=>{
+ const saved=stored([item('Salary','income',50000)]);
+ saved.cardBills=[{id:'statement',scope:'personal',currency:'INR',card:'Test Card',statementMonth:'2026-10',dueDate:'2026-11-05',statementAmount:20000,paid:5000,plannedPayment:6000,status:'confirmed',account:'Savings',evidence:'Test'}];
+ const {instance,storage}=load({accounts:[bank,card],saved,workflow:true});
+ assert.equal(instance.snapshot().totals.card,6000);assert.equal(instance.snapshot().workflow.remainingIncome,44000);
+ const bill=JSON.parse(storage.get('test-planner')).cardBills.find(b=>b.id==='statement');assert.equal(bill.paid,5000);assert.equal(bill.statementAmount-bill.paid-bill.plannedPayment,9000);
+});
+test('guided plans pull confirmed schedules once, preserve monthly exclusions, and do not preallocate historic category spending',()=>{
+ const suggestions=[{id:'sub-1',title:'Streaming',amount:500,kind:'expense',lane:'must',category:'Food',account:'Savings',subscriptionKey:'service',enabled:false,day:5,source:'Confirmed subscription'}, {id:'sip-1',title:'Index fund',amount:5000,kind:'investment',lane:'future',account:'Savings',sip:true,holding:'holding',enabled:true,day:5,source:'Active SIP'}];
+ const records=[{id:'old',date:'2026-10-01',currency:'INR',type:'expense',category:'Food',amount:9000}];
+ const {instance}=load({accounts:[bank],workflow:true,suggestions,records});const first=instance.snapshot(),second=instance.snapshot();
+ assert.equal(first.plan.items.length,2);assert.equal(second.plan.items.length,2);assert.equal(first.totals.spend,0);assert.equal(first.totals.invested,5000);
+});
+test('schedule adapter includes subscriptions and date-effective SIPs without needing last-month investment transactions',()=>{
+ const input={...defaults,month:'2026-11',transactions:[],subscriptions:[{key:'streaming',name:'Streaming',subscription:true,account_id:'bank',currency:'INR',frequency:'monthly',last_date:'2026-10-31',max_amount:'499'}],investments:[{id:'fund',name:'Index',currency:'INR',owner_id:'me',visibility:'private',sip:{status:'active',amount:'5000',day:31,start_month:'2026-10'}}]};
+ const mapped=prepare(input);assert.equal(mapped.suggestions.length,2);assert.equal(mapped.suggestions[1].day,30);assert.equal(mapped.suggestions[0].day,30);
+ const paused=prepare({...input,investments:[{...input.investments[0],plannerSip:null}]});assert.equal(paused.suggestions.length,1);
+});
+test('next planning month handles year rollover without depending on the selected report month',()=>{
+ const window={};vm.runInNewContext(source('planner-data.js'),{window});
+ assert.equal(window.finwisePlannerData.nextMonth('2026-11-02'),'2026-12');assert.equal(window.finwisePlannerData.nextMonth('2026-12-31'),'2027-01');
 });

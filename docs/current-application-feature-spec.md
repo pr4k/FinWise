@@ -1,7 +1,7 @@
 # FinWise — Current Application Feature Specification
 
 **Version:** 1.0  
-**As of:** 31 October 2026
+**As of:** 2 November 2026
 **Scope:** Application behavior represented by the current local working tree, including uncommitted changes. This is an implementation inventory, not a roadmap or a production certification.
 
 ## 1. Product purpose
@@ -185,9 +185,13 @@ Answers what happened in the selected month and where available money sits. Over
 
 **Planner**
 
+- Defaults to next month with a separate planning-month picker; Dashboard reporting keeps its own month.
+- The **Build budget** flow collects expected or imported recorded income, full/partial planned card payments, selectable subscription and active SIP schedules, other expenses/buffers, and a remaining-income category split.
+- Shows income left to allocate separately from projected bank cash and available cash after earmarks. Dated bank anchors and partial coverage are visible. Imported income explicitly identifies receipts already included in starting bank funds so the forecast does not add them twice.
+- **Review & create budget** saves a real Personal or Family budget draft with consumption category limits. Fixed consumption and flexible allowances count once; card repayments, investment contributions and earmarks remain outside spending budgets. The saved draft can be activated and inspected from Planner. Existing budgets are not overwritten, and server authorization applies.
 - Adds a monthly canvas, cash calendar (month, agenda and table), what-if scenarios, sinking funds, explicit plan/actual matching, revision history and draft/active/closed states in the current FinWise theme. Future months work without ledger records.
 - Uses real authorized accounts and reporting allocations, with Personal/Family and currency isolation. Card charges reserve bank cash; due statement payments release matching reservations without counting consumption twice. Opening balances remain frozen planning assumptions; unknown funding and shortfalls are labeled.
-- Canvas plans, card evidence, fund targets and activation allowances are browser-local and namespaced by household/user. Activation opens a local allowance view; it does not create server family budgets or actual ledger entries. See [Planner integration](planner-module.md).
+- Canvas plans, card evidence, fund targets and activation allowances are browser-local and namespaced by household/user. Canvas activation opens a local allowance view. The guided budget-creation action separately publishes a server budget; neither action posts actual ledger entries. See [Planner integration](planner-module.md).
 - The **Saved expenses & family budget commitments** disclosure retains the existing server-backed workflow below.
 
 - Records title, due date, expected amount/currency, optional expense category/account, and Personal/Household visibility.

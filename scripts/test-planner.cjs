@@ -54,6 +54,47 @@ try{
  await run(`document.querySelector('.scope-segments [data-scope="family"]').click()`);await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&!!document.querySelector(".plan-empty-currency")');
  assert.equal(await run('plannerInstance.snapshot().totals.spend'),0);
  assert.equal(await run("(async()=> (await finwiseAPI.collection('transactions')).data.length)()"),0);
- assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, and 320–1440px layouts.');
+
+ // Exercise the guided workflow with real API income, subscription, SIP and card data.
+ await run(`(async()=>{
+  const accounts=(await finwiseAPI.collection('accounts')).data,bank=accounts.find(a=>a.name==='Savings'),card=accounts.find(a=>a.name==='Travel Card');
+  const salary=await finwiseAPI.request('categories',{method:'POST',body:{name:'Salary',kind:'income',visibility:'private'}});
+  const subs=await finwiseAPI.request('categories',{method:'POST',body:{name:'Subscriptions',kind:'expense',tracking_type:'subscription',visibility:'private'}});
+  const food=await finwiseAPI.request('categories',{method:'POST',body:{name:'Food',kind:'expense',visibility:'private'}});window.workflowFoodId=food.id;
+  await finwiseAPI.request('transactions',{method:'POST',body:{event_type:'income',description:'November salary',effective_date:'2026-11-01',amount:'50000.00',currency:'INR',movements:[{account_id:bank.id,amount:'50000.00'}],allocations:[{category_id:salary.id,scope:'personal',amount:'50000.00'}]}});
+  await finwiseAPI.request('transactions',{method:'POST',body:{event_type:'expense',description:'Streaming',effective_date:'2026-10-05',amount:'500.00',currency:'INR',movements:[{account_id:bank.id,amount:'-500.00'}],allocations:[{category_id:subs.id,scope:'personal',amount:'500.00'}],subscription:{name:'Streaming'}}});
+  await finwiseAPI.request('investments',{method:'POST',body:{name:'Monthly fund',type:'investment',asset_class:'mutual_fund',currency:'INR',visibility:'private',sip:{amount:'5000.00',day:10,start_month:'2026-10',status:'active'}}});
+  await finwiseAPI.request('accounts/'+card.id,{method:'PATCH',revision:card.revision,body:{card_due:{amount:'2000.00',due_date:'2026-11-05'}}});
+  state.scope='personal';syncScopeControl();saveView();await renderRoute();
+ })()`);
+ await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&!!document.querySelector("#planner-month")');
+ assert.equal(await run('state.month'),'2026-11');
+ assert.equal(await run('document.querySelector("#planner-month").value'),await run('finwisePlannerData.nextMonth(householdDate())'));
+ await run(`(()=>{const month=document.querySelector('#planner-month');month.value='2026-11';month.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+ await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&document.querySelector("#planner-month").value==="2026-11"');
+ await click('[data-plan-tab="setup"]');
+ assert.equal(await run('plannerInstance.snapshot().totals.invested'),5000);
+ assert.equal(await run('plannerInstance.snapshot().totals.spend'),500);
+ await click('[data-workflow="import-income"]');await run(`document.querySelector('#workflow-income-form').requestSubmit()`);
+ assert.equal(await run('plannerInstance.snapshot().workflow.income'),50000);
+ const incomeBank=await run('plannerInstance.snapshot().forecast.start.bank');
+ assert.equal(await run('plannerInstance.snapshot().totals.cashReceipts'),0);
+ await click('[data-workflow-bill]');await run(`(()=>{const form=document.querySelector('#workflow-payment-form');form.elements.mode.value='partial';form.elements.amount.value='1000';form.requestSubmit();})()`);
+ assert.equal(await run('plannerInstance.snapshot().totals.card'),1000);
+ assert.equal(await run('plannerInstance.snapshot().workflow.beforeCategories'),43500);
+ await run(`(()=>{const form=document.querySelector('#workflow-category-form');form.elements['category-'+window.workflowFoodId].value='40000';form.requestSubmit();})()`);
+ assert.equal(await run('plannerInstance.snapshot().workflow.remainingIncome'),3500);
+ assert.equal(await run('plannerInstance.snapshot().workflow.bankCash'),incomeBank-46500);
+ await click('[data-workflow="review-budget"]');await run(`document.querySelector('#workflow-publish-form').requestSubmit()`);
+ await until('!!document.querySelector("[data-workflow=activate-budget]")');
+ const published=await run(`(async()=>{const budgets=await finwiseAPI.collection('budgets?month=2026-11&scope=personal');return budgets.data[0];})()`);
+ assert.equal(published.state,'draft');assert.equal(published.expected_income,'50000.00');assert.equal(published.lines.length,2);
+ assert.equal(published.lines.reduce((n,l)=>n+Number(l.amount),0),40500);
+ await click('[data-workflow="activate-budget"]');await until('plannerInstance.snapshot().plan.serverBudget.state==="active"');
+ assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
+ for(const width of [1440,768,390,320]){await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<760});await pause(100);assert.equal(await run('document.documentElement.scrollWidth>innerWidth'),false,'Guided workflow overflow at '+width);if(process.env.FINWISE_SCREENSHOT_DIR&&(width===1440||width===390)){const screenshot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile(path.join(process.env.FINWISE_SCREENSHOT_DIR,`workflow-${width}.png`),Buffer.from(screenshot.data,'base64'));}}
+ await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().workflow.remainingIncome'),3500);
+ await run(`location.hash='overview'`);await until('!!document.querySelector(".dashboard-page")');assert.equal(await run('document.querySelector("#report-month").value'),'2026-11');
+ assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, guided income import without double counting, subscription/SIP suggestions, partial card payments, server budget creation/activation, independent months, and 320–1440px layouts.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 })();

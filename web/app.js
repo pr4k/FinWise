@@ -73,6 +73,8 @@ let transactionFiltersExpanded=false;
 let previousRoute='';
 let plannerInstance=null,plannerIdentity='';
 let plannerCurrency='';
+let plannerSelectedMonth='';
+function planningMonth(){if(plannerSelectedMonth)return plannerSelectedMonth;const key='fw-planner-selected:'+state.me.household.id+':'+state.me.user.id;try{const saved=sessionStorage.getItem(key);if(/^\d{4}-(0[1-9]|1[0-2])$/.test(saved||''))return plannerSelectedMonth=saved;}catch{}return plannerSelectedMonth=window.finwisePlannerData.nextMonth(householdDate());}
 function familyMode() { return state.me?.household?.family_only===true; }
 function moneyManagerMode() { return state.me?.household?.money_manager_extension!==false; }
 function syncMoneyManagerNavigation() {
@@ -353,7 +355,7 @@ async function start() {
   catch(e) { authRoot.innerHTML='<section class="panel auth-card"><h1>FinWise is unavailable</h1><p>Could not complete startup. Check the NAS connection, then reload this page.</p><button class="primary-button" onclick="location.reload()">Retry connection</button></section>'; failure(e.name==='AbortError'?new Error('The FinWise API did not respond within 15 seconds.'):e,authRoot); }
   finally { clearTimeout(timer); }
 }
-function resetSession() { plannerInstance?.dispose();plannerInstance=null;plannerIdentity='';state.generation++; state.me=null; state.accounts=[]; state.categories=[]; recentTransactions=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); root.replaceChildren(); authForm(); }
+function resetSession() { plannerInstance?.dispose();plannerInstance=null;plannerIdentity='';plannerSelectedMonth='';plannerCurrency='';state.generation++; state.me=null; state.accounts=[]; state.categories=[]; recentTransactions=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); root.replaceChildren(); authForm(); }
 window.addEventListener('session-expired',resetSession);
 function navigate(view,parts=[]) { const hash=[view,...parts].map(encodeURIComponent).join('/'); if(location.hash.slice(1)===hash) renderRoute(); else location.hash=hash; }
 async function loadLedgerBalances(values,allDates=false,extraAccountIds=[]) {
@@ -465,6 +467,7 @@ async function renderRoute({inPlace=false}={}) {
   syncMoneyManagerNavigation();
   if(view!=='transactions')closeTransactionDrawer();
   document.querySelector('#planner-dialog')?.close();
+  document.querySelector('.month-filter').hidden=view==='planner';
   shell.dataset.activeView=view;
   document.querySelector('#breadcrumb-current').textContent=labels[view];
   document.querySelectorAll('.sidebar [data-view], .bottom-nav [data-view]').forEach(el=>{
@@ -1084,23 +1087,28 @@ const views = {
     return `<div class="transaction-page">${transactionHeading}${mobile?'':scopeTabs()+`<p class="analytics-scope-note">${state.scope==='combined'?'Your personal and shared family transactions together.':state.scope==='family'?'Shared family transactions.':'Your personal transactions.'} Each transaction appears once. Amounts show allocations in this view.</p>`+movePanel}<section class="panel ledger-workspace" aria-label="Transaction ledger">${ledgerHeading}${picker}${mobile?'':`<div class="ledger-caption"><span>${h(filters.sort||'Date descending')}</span>${legend}</div>`}${transactionTable(values.data,balanceEvents,filters.account)}<div class="ledger-footer"><span>${values.data.length} ${values.data.length===1?'transaction':'transactions'} shown</span><span>Transfers match either participating account.</span></div></section>${mobile?movePanel:''}${coverage()}</div>`;
   },
   async planner(parts,generation) {
-    const saved=await views.plannerSaved();
+    const month=planningMonth();
+    const saved=await views.plannerSaved(month);
     if(generation!==state.generation)return '';
     if(state.scope==='combined')return heading('Planner','Choose Personal or Family to plan a separate pool of money.')+scopeTabs()+panel('Plan within one scope','<p>Personal and shared funds have separate opening balances, card reserves and monthly plans.</p>')+saved;
     const currency=plannerCurrency||state.overviewCurrency||state.me.household.base_currency;
-    const previous=new Date(`${state.month}-02T12:00:00`);previous.setMonth(previous.getMonth()-1);
-    const from=previous.toISOString().slice(0,7)+'-01',to=period().to;
-    const transactions=await api.collection(`transactions?scope=${state.scope}&from=${from}&to=${to}`);
+    const previous=new Date(`${month}-02T12:00:00`);previous.setMonth(previous.getMonth()-1);
+    const from=previous.toISOString().slice(0,7)+'-01',to=period(month).to;
+    const [transactions,recurring,holdings,budgets]=await Promise.all([api.collection(`transactions?scope=${state.scope}&from=${from}&to=${to}`),api.request('recurring-transactions'),allInvestments(),api.collection(`budgets?month=${month}&scope=${state.scope}`)]);
     if(generation!==state.generation)return '';
     const identity=state.me.household.id+':'+state.me.user.id;
-    const host={...window.finwisePlannerData.prepare({accounts:state.accounts,categories:state.categories,members:state.members,transactions:transactions.data,user:state.me.user,scope:state.scope,currency}),scope:state.scope==='family'?'household':'personal',currency,month:state.month,storageKey:'fw-planner-v1:'+identity,escape:h,toast:notify,active:()=>state.view==='planner'&&!!state.me,inspect:transactionId=>actions['transaction-detail']({dataset:{id:transactionId}})};
+    const host={...window.finwisePlannerData.prepare({accounts:state.accounts,categories:state.categories,members:state.members,transactions:transactions.data,user:state.me.user,scope:state.scope,currency,month,subscriptions:recurring.data,investments:holdings.map(holding=>({...holding,plannerSip:investmentSipForMonth(holding,month)}))}),workflow:true,scope:state.scope==='family'?'household':'personal',currency,month,storageKey:'fw-planner-v1:'+identity,escape:h,toast:notify,active:()=>state.view==='planner'&&!!state.me,inspect:transactionId=>actions['transaction-detail']({dataset:{id:transactionId}}),savedBudgets:budgets.data.filter(b=>b.currency===currency&&b.state!=='archived'),canPublish:state.scope==='personal'||['owner','admin'].includes(state.me.membership.role),
+      async publishBudget(body){const existing=await api.collection(`budgets?month=${body.month}&scope=${body.scope}`);if(existing.data.some(b=>b.currency===body.currency&&b.state!=='archived'))throw new Error('A budget already exists for this month, scope and currency. Review it before making changes.');return api.request('budgets',{method:'POST',body});},
+      activateBudget:budget=>api.request(`budgets/${id(budget.id)}/activate`,{method:'POST',revision:budget.revision,body:{}}),
+      async inspectBudget(budget){const tracking=await api.request(`budgets/${id(budget.id)}/tracking`);detailDialog(`${budget.name} · ${budget.state}`,table(['Category','Budget','Actual'],tracking.data.map(line=>[h(categoryName(line.category_id)),amount(line.planned,budget.currency),amount(line.actual,budget.currency)])));}
+    };
     if(plannerIdentity!==identity){plannerInstance?.dispose();plannerInstance=null;plannerIdentity=identity;}
     if(!plannerInstance)plannerInstance=window.finwisePlanner.create(host);else plannerInstance.update(host);
     const currencies=[...new Set([state.me.household.base_currency,...state.accounts.map(a=>a.currency),currency])];
-    return heading('Planner',`${state.month} · Give the month ahead a plan`)+`<div class="planner-toolbar">${scopeTabs()}${field('Planning currency',`<select id="planner-currency">${currencies.map(c=>option(c,c,c===currency)).join('')}</select>`)}</div>`+plannerInstance.html()+`<details class="planner-saved"><summary>Saved expenses & family budget commitments</summary>${saved}</details>`;
+    return heading('Planner',`${month} · Income first, then commitments, then your budget`)+`<div class="planner-toolbar">${field('Planning month',`<input id="planner-month" type="month" value="${month}" required>`)}${field('Planning currency',`<select id="planner-currency">${currencies.map(c=>option(c,c,c===currency)).join('')}</select>`)}</div>`+plannerInstance.html()+`<details class="planner-saved"><summary>Saved expenses & family budget commitments</summary>${saved}</details>`;
   },
-  async plannerSaved() {
-    const [response,budgets]=await Promise.all([api.request(`planned-items?month=${id(state.month)}`),api.collection(`budgets?month=${id(state.month)}&scope=family`)]);
+  async plannerSaved(month=state.month) {
+    const [response,budgets]=await Promise.all([api.request(`planned-items?month=${id(month)}`),api.collection(`budgets?month=${id(month)}&scope=family`)]);
     const commitmentSets=await Promise.all(budgets.data.map(b=>api.request(`budgets/${id(b.id)}/commitments`)));
     const commitmentStates=new Map(commitmentSets.flatMap(result=>result.data.map(item=>[item.id,item.state])));
     state.plannedItems=response.data;
@@ -1109,8 +1117,8 @@ const views = {
       <div class="compact-item-end"><strong class="compact-amount">${amount(item.amount,item.currency)}</strong><span class="quiet-tag ${h(item.status)}">${h(commitmentStates.get(item.id)==='needs_review'?'Needs review':item.status==='done'?(item.budget_commitment?'Matched':'Done'):item.status==='skipped'?'Skipped':item.budget_commitment?'Committed':'Planned')}</span><span class="quiet-tag">${h(item.visibility==='shared'?'Household':'Personal')}</span></div>
       ${item.owner_id===state.me.user.id?`<div class="compact-item-actions">${button('Edit','edit-plan',`data-id="${h(item.id)}"`)}${item.budget_commitment?(item.status==='done'?button('Unmatch','unmatch-plan',`data-id="${h(item.id)}"`):item.status==='planned'?button('Match posted expense','match-plan',`data-id="${h(item.id)}"`):''):button(item.status==='planned'?'Mark done':'Mark planned','toggle-plan',`data-id="${h(item.id)}"`)}${item.budget_commitment&&item.status!=='done'?button(item.status==='skipped'?'Restore':'Skip','skip-plan',`data-id="${h(item.id)}"`):''}${button('Remove','delete-plan',`data-id="${h(item.id)}"`)}</div>`:''}
     </li>`).join('');
-    return heading('Planner',`${h(state.month)} · Expected expenses and bills`,'<button type="button" class="primary-button" data-action="add-plan">Add planned expense</button>')+
-      panel('Planned expenses',`<p class="helper">Budget commitments reduce available funds until matched to a posted expense. Other plans are reminders only. Recording a payment changes balances and spending; matching it prevents counting the commitment twice.</p>${items?`<ul class="compact-list" aria-label="Planned expenses for ${h(state.month)}">${items}</ul>`:empty('No expenses planned for this month.')}`);
+    return heading('Planner',`${h(month)} · Expected expenses and bills`,'<button type="button" class="primary-button" data-action="add-plan" data-plan-month="${h(month)}">Add planned expense</button>')+
+      panel('Planned expenses',`<p class="helper">Budget commitments reduce available funds until matched to a posted expense. Other plans are reminders only. Recording a payment changes balances and spending; matching it prevents counting the commitment twice.</p>${items?`<ul class="compact-list" aria-label="Planned expenses for ${h(month)}">${items}</ul>`:empty('No expenses planned for this month.')}`);
   },
   async accounts(parts) {
     const ownerLabel=account=>account.owner_id===state.me.user.id?'My account':`${state.members?.find(member=>member.user_id===account.owner_id)?.name||'Family member'}’s account`;
@@ -1533,10 +1541,10 @@ function updateInvestmentTransactionForm() {
   form.elements.account_id.innerHTML=accounts.map(a=>option(a.id,`${a.name} · ${a.currency}`,a.id===previous)).join('');
   form.querySelector('#investment-transaction-hint').textContent=holding?`Adds to ${holding.name} from the selected account without counting as an expense. Enter its updated value if known. Use this when money moves into this fund; to reserve money already held in a bank account, use a goal.`:'Creates a new lump sum holding and records its first account movement. Choose Stock market for shares; a valuation can be added later.';
 }
-function planEditor(key=null) {
+function planEditor(key=null,month=state.month) {
   const item=state.plannedItems.find(v=>v.id===key);
   const currency=item?.currency||state.me.household.base_currency;
-  const defaultDueDate=localDate().startsWith(`${state.month}-`)?localDate():`${state.month}-01`;
+  const defaultDueDate=localDate().startsWith(`${month}-`)?localDate():`${month}-01`;
   const accountChoices=state.accounts.filter(a=>a.currency===currency && a.active!==false && (item?.visibility!=='shared'||a.visibility==='shared'));
   editor(item?'Edit planned expense':'Add planned expense',
     input('plan_id',`type="hidden" value="${h(item?.id||'')}"`)+input('revision',`type="hidden" value="${item?.revision||''}"`)+
@@ -2221,7 +2229,7 @@ const actions = {
   'metric-transaction':el=>{closeMetricDetail();return transactionDetail(el.dataset.id);},
   'share-account':async el=>{const account=state.accounts.find(a=>a.id===el.dataset.id);if(!account)return;if(!window.confirm(`Share ${account.name} and its full account history with every household member?`))return;await api.request(`accounts/${id(account.id)}`,{method:'PATCH',revision:account.revision,body:{visibility:'shared'}});await catalogs();notify('Account moved to household access.');await renderRoute();},
   'share-category':async el=>{const category=state.categories.find(c=>c.id===el.dataset.id);if(!category)return;if(!window.confirm(`Share ${category.name} with every household member?`))return;await api.request(`categories/${id(category.id)}`,{method:'PATCH',revision:category.revision,body:{visibility:'shared'}});await catalogs();notify('Category moved to household access.');await renderRoute();},
-  'add-plan':()=>planEditor(),
+  'add-plan':el=>planEditor(null,el.dataset.planMonth),
   'edit-plan':el=>planEditor(el.dataset.id),
   'match-plan':el=>matchPlanEditor(el.dataset.id),
   'unmatch-plan':async el=>{const item=state.plannedItems.find(v=>v.id===el.dataset.id);if(!item)return;const reason=window.prompt(`Reason for unmatching ${item.title}?`);if(!reason?.trim())return;await api.request(`planned-items/${id(item.id)}/match`,{method:'DELETE',revision:item.revision,body:{reason:reason.trim()}});notify('Expense unmatched. The commitment is planned again.');await renderRoute();},
@@ -2905,3 +2913,5 @@ start();
 document.addEventListener('keydown',event=>{const tab=event.target.closest?.('.metric-detail-tabs [role=tab]');if(!tab||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const tabs=[...tab.parentElement.querySelectorAll('[role=tab]')],index=tabs.indexOf(tab);const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;event.preventDefault();tabs[next].click();});
 
 document.addEventListener('change',event=>{if(event.target.id==='planner-currency'){plannerCurrency=event.target.value;document.querySelector('#planner-dialog')?.close();renderRoute();}});
+
+document.addEventListener('change',event=>{if(event.target.id==='planner-month'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(event.target.value)){plannerSelectedMonth=event.target.value;try{sessionStorage.setItem('fw-planner-selected:'+state.me.household.id+':'+state.me.user.id,plannerSelectedMonth);}catch{}renderRoute();}});
