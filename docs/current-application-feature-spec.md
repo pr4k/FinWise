@@ -186,6 +186,7 @@ Answers what happened in the selected month and where available money sits. Over
 **Planner**
 
 - Defaults to next month with a separate planning-month picker; Dashboard reporting keeps its own month.
+- Current recorded card dues refresh from Accounts. A separate monthly **Due used for planning** override can be higher or lower, and resets to the latest recorded due without changing account dues or posting payments.
 - The **Build budget** flow collects expected or imported recorded income, full/partial planned card payments, selectable subscription and active SIP schedules, other expenses/buffers, and a remaining-income category split.
 - Shows income left to allocate separately from projected bank cash and available cash after earmarks. Dated bank anchors and partial coverage are visible. Imported income explicitly identifies receipts already included in starting bank funds so the forecast does not add them twice.
 - **Review & create budget** saves a real Personal or Family budget draft with consumption category limits. Fixed consumption and flexible allowances count once; card repayments, investment contributions and earmarks remain outside spending budgets. The saved draft can be activated and inspected from Planner. Existing budgets are not overwritten, and server authorization applies.

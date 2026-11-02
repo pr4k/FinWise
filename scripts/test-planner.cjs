@@ -94,7 +94,21 @@ try{
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
  for(const width of [1440,768,390,320]){await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<760});await pause(100);assert.equal(await run('document.documentElement.scrollWidth>innerWidth'),false,'Guided workflow overflow at '+width);if(process.env.FINWISE_SCREENSHOT_DIR&&(width===1440||width===390)){const screenshot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile(path.join(process.env.FINWISE_SCREENSHOT_DIR,`workflow-${width}.png`),Buffer.from(screenshot.data,'base64'));}}
  await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().workflow.remainingIncome'),3500);
+
+ // The recorded due stays read-only while a monthly hypothetical due can be higher or lower.
+ await click('[data-workflow-bill]');
+ assert.equal(await run('document.querySelector("#workflow-planning-due").value'),'2000');
+ await run(`(()=>{const form=document.querySelector('#workflow-payment-form');form.elements.dueAmount.value='3500';form.elements.mode.value='full';form.requestSubmit();})()`);
+ assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
+ assert.equal(await run(`(async()=> (await finwiseAPI.collection('accounts')).data.find(a=>a.name==='Travel Card').card_due.amount)()`),'2000.00');
+ await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
+ await run(`(async()=>{const card=(await finwiseAPI.collection('accounts')).data.find(a=>a.name==='Travel Card');await finwiseAPI.request('accounts/'+card.id,{method:'PATCH',revision:card.revision,body:{card_due:{amount:'2400.00',due_date:'2026-11-05'}}});await renderRoute();})()`);
+ assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
+ assert.equal(await run('plannerInstance.snapshot().plan.items.find(x=>x.statementId).statementSnapshot.recordedDue'),2400);
+ await click('[data-workflow-reset-bill]');assert.equal(await run('plannerInstance.snapshot().totals.card'),2400);
+ assert.equal(await run(`(async()=> (await finwiseAPI.collection('accounts')).data.find(a=>a.name==='Travel Card').card_due.amount)()`),'2400.00');
+ assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
  await run(`location.hash='overview'`);await until('!!document.querySelector(".dashboard-page")');assert.equal(await run('document.querySelector("#report-month").value'),'2026-11');
- assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, guided income import without double counting, subscription/SIP suggestions, partial card payments, server budget creation/activation, independent months, and 320–1440px layouts.');
+ assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, guided income import without double counting, subscription/SIP suggestions, partial card payments, server budget creation/activation, independent months, current card due refresh, monthly planning overrides/reset without account writes, and 320–1440px layouts.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
 })();

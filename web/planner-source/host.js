@@ -35,12 +35,18 @@
 
     /* PLANNER_MODULES */
 
-    // Recorded due amounts seed evidence once. Outstanding debt is never a bill.
+    // Refresh recorded account dues independently from monthly planning overrides.
     function syncHostBills(){
-    for(const account of accounts().filter(a=>a.type==='card'&&a.due!=null&&a.dueDate)){
-      const billId='account-due-'+account.id+'-'+account.dueDate;
-      if(!plannerStore.cardBills.some(b=>b.id===billId||(b.scope===state.scope&&b.currency===state.currency&&b.card===account.name&&b.statementMonth===shiftMonth(account.dueDate.slice(0,7),-1))))plannerStore.cardBills.push({id:billId,scope:state.scope,currency:state.currency,card:account.name,statementMonth:shiftMonth(account.dueDate.slice(0,7),-1),dueDate:account.dueDate,statementAmount:account.due,paid:0,status:'estimated',account:planBanks()[0]?.name||'Manual opening pool',evidence:'Recorded remaining payment due; statement month is estimated. Verify against your statement.'});
-    }
+      for(const account of accounts().filter(a=>a.type==='card'&&a.due!=null&&a.dueDate)){
+        const billId='account-due-'+account.id+'-'+account.dueDate;
+        const statementMonth=shiftMonth(account.dueDate.slice(0,7),-1);
+        let bill=plannerStore.cardBills.find(b=>b.scope===state.scope&&b.currency===state.currency&&(b.id===billId||(b.hostAccountId===account.id&&b.recordedDueDate?.slice(0,7)===account.dueDate.slice(0,7))||(b.card===account.name&&b.statementMonth===statementMonth)));
+        if(!bill){bill={id:billId,scope:state.scope,currency:state.currency,card:account.name,statementMonth,dueDate:account.dueDate,statementAmount:account.due,paid:0,status:'estimated',account:planBanks()[0]?.name||'Manual opening pool',evidence:'Recorded remaining payment due; statement month is estimated. Verify against your statement.'};plannerStore.cardBills.push(bill);}
+        for(const old of plannerStore.cardBills.filter(b=>b.id!==bill.id&&b.hostAccountId===account.id&&b.scope===state.scope&&b.currency===state.currency))old.supersededFrom=account.dueDate.slice(0,7);
+        delete bill.supersededFrom;
+        Object.assign(bill,{hostAccountId:account.id,recordedDue:account.due,recordedDueDate:account.dueDate,card:account.name,dueDate:account.dueDate,autoForecast:false});
+      }
+      planSave();
     }
     syncHostBills();
     document.addEventListener('click',event=>{

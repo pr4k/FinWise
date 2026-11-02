@@ -101,3 +101,35 @@ test('next planning month handles year rollover without depending on the selecte
  const window={};vm.runInNewContext(source('planner-data.js'),{window});
  assert.equal(window.finwisePlannerData.nextMonth('2026-11-02'),'2026-12');assert.equal(window.finwisePlannerData.nextMonth('2026-12-31'),'2027-01');
 });
+test('recorded account dues refresh while a higher monthly planning due stays local and independent',()=>{
+ const saved=stored([]);const dueCard={...card,due:2000,dueDate:'2026-11-05'};
+ const id='account-due-card-2026-11-05';saved.plans['personal:INR:2026-11'].cardDueOverrides={[id]:5000};saved.plans['personal:INR:2026-11'].cardPaymentOverrides={[id]:'full'};
+ const accounts=[bank,dueCard],before=JSON.stringify(accounts);const {instance,host,storage}=load({accounts,saved,workflow:true});
+ assert.equal(instance.snapshot().totals.card,5000);
+ instance.update({...host,accounts:[bank,{...dueCard,due:3000,dueDate:'2026-11-08'}]});
+ const bills=JSON.parse(storage.get('test-planner')).cardBills;assert.equal(bills.length,1);assert.equal(bills[0].recordedDue,3000);assert.equal(bills[0].recordedDueDate,'2026-11-08');
+ assert.equal(instance.snapshot().totals.card,5000);assert.equal(JSON.stringify(accounts),before);
+ assert.equal(instance.snapshot().plan.items.find(x=>x.statementId===id).day,8);
+ instance.update({...host,month:'2026-12',accounts:[bank,{...dueCard,due:3000}]});
+ assert.equal(instance.snapshot().plan.cardDueOverrides,undefined);
+});
+test('a reset full-payment plan follows a refreshed actual due and never substitutes outstanding debt',()=>{
+ const saved=stored([]),id='account-due-card-2026-11-05';saved.plans['personal:INR:2026-11'].cardPaymentOverrides={[id]:'full'};
+ const dueCard={...card,due:1200,dueDate:'2026-11-05'}, {instance,host}=load({accounts:[bank,dueCard],saved,workflow:true});
+ assert.equal(instance.snapshot().totals.card,1200);
+ instance.update({...host,accounts:[bank,{...dueCard,due:1800}]});assert.equal(instance.snapshot().totals.card,1800);
+ instance.update({...host,accounts:[bank,{...dueCard,due:0}]});assert.equal(instance.snapshot().totals.card,0);
+});
+test('closed plans keep saved card dues and planning overrides when the account due changes',()=>{
+ const dueCard={...card,due:2000,dueDate:'2026-11-05'}, {instance,host,storage}=load({accounts:[bank,dueCard],workflow:true});
+ const snapshot=instance.snapshot(),saved=JSON.parse(storage.get('test-planner'));
+ saved.plans['personal:INR:2026-11']={...snapshot.plan,status:'closed'};
+ const closed=load({accounts:[bank,{...dueCard,due:3000}],saved,workflow:true}).instance;
+ assert.equal(closed.snapshot().totals.card,2000);assert.equal(closed.snapshot().plan.items[0].statementSnapshot.recordedDue,2000);
+});
+test('a new recorded billing cycle supersedes the earlier account snapshot in the new planning month',()=>{
+ const first={...card,due:2000,dueDate:'2026-11-05'}, {instance,host}=load({accounts:[bank,first],workflow:true});
+ assert.equal(instance.snapshot().totals.card,2000);
+ instance.update({...host,month:'2026-12',accounts:[bank,{...first,due:3000,dueDate:'2026-12-05'}]});
+ const current=instance.snapshot();assert.equal(current.totals.card,3000);assert.equal(current.plan.items.filter(x=>x.kind==='card').length,1);
+});
