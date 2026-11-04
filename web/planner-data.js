@@ -23,7 +23,7 @@
         const category=categories.find(c=>c.id===a.category_id);
         const classification=a.transaction_type||t.classification?.transaction_type||t.event_type;
         const type=classification==='investment'?(Number(movements[0]?.amount)>0?'withdrawal':'investment'):classification==='paid_on_behalf'?'behalf':classification;
-        records.push({...base,id:`${t.id}:${index}`,amount:Number(a.amount),type,categoryId:a.category_id,offsetExpense:a.offset_expense===true,category:category?.name||'Uncategorized',subscription:category?.tracking_type==='subscription',recurring:!!t.recurring_id});
+        records.push({...base,id:`${t.id}:${index}`,amount:Number(a.amount),type,...(t.event_type==='income'?{personId:a.member_id||t.entered_by,person:members.find(m=>m.user_id===(a.member_id||t.entered_by))?.name||user.name}:{}),categoryId:a.category_id,offsetExpense:a.offset_expense===true,category:category?.name||'Uncategorized',subscription:category?.tracking_type==='subscription',recurring:!!t.recurring_id});
       }
     }
     const categoryRows=categories.filter(c=>c.kind==='expense'&&c.archived!==true&&(scope!=='family'||c.visibility!=='private'));
@@ -41,7 +41,7 @@
       if(!sip||sip.status!=='active'||(month&&month<sip.start_month)||(sip.end_month&&month>sip.end_month))continue;
       suggestions.push({id:'sip-'+holding.id,title:holding.name,kind:'investment',lane:'future',amount:Number(sip.amount),day:Math.min(Number(sip.day)||1,new Date(Number(month?.slice(0,4)||2026),Number(month?.slice(5)||1),0).getDate()),timing:'once',account:adapted.find(a=>a.id===holding.account_id)?.name||adapted.find(a=>a.type==='bank')?.name||'Manual opening pool',category:'Investment',holding:holding.id,sip:true,source:'Active SIP schedule · planned contribution',enabled:true});
     }
-    return {accounts:adapted,categories:colors,categoryRows,suggestions,records,person:family?'Shared pool':user.name,people:family?['Shared pool',...members.map(m=>m.name)]:[user.name]};
+    return {members:members.filter(m=>m.active!==false),currentUserId:user.id,accounts:adapted,categories:colors,categoryRows,suggestions,records,person:family?'Shared pool':user.name,people:family?['Shared pool',...members.map(m=>m.name)]:[user.name]};
   }
   window.finwisePlannerData={prepare,nextMonth(today){const [year,month]=today.slice(0,7).split('-').map(Number);return `${month===12?year+1:year}-${String(month===12?1:month+1).padStart(2,'0')}`;}};
 })();

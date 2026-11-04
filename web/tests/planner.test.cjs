@@ -151,3 +151,8 @@ test('missing due date still exposes the recorded amount and allows a planning e
  const {instance}=load({accounts:[bank,{...card,due:1200,dueDate:null}],workflow:true});const html=instance.html();
  assert.match(html,/Recorded statement due/);assert.match(html,/Due date not recorded/);assert.match(html,/Set planning estimate/);assert.equal(instance.snapshot().totals.card,0);
 });
+test('recorded income pulled into Planner keeps the selected earner separately from its recorder',()=>{
+ const input={...defaults,scope:'family',members:[{user_id:'me',name:'Recorder'},{user_id:'partner',name:'Earner'}],transactions:[{id:'salary',entered_by:'me',event_type:'income',currency:'INR',effective_date:'2026-11-01',movements:[{account_id:'shared',amount:'50000'}],allocations:[{scope:'family',category_id:'salary',amount:'50000',member_id:'partner'}]}]};
+ const prepared=prepare(input);assert.equal(prepared.records[0].personId,'partner');assert.equal(prepared.records[0].person,'Earner');
+ assert.equal(prepared.currentUserId,'me');assert.equal(prepared.members.length,2);
+});

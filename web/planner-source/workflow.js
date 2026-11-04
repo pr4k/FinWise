@@ -25,8 +25,18 @@ function workflowTotals(p=currentPlan()){
  const beforeCategories=workflowRound(income-commitments),remainingIncome=workflowRound(beforeCategories-allocated),forecast=reserveForecast(p);
  return {income,commitments,beforeCategories,allocated,remainingIncome,bankCash:forecast.closing.bank,availableCash:forecast.end,partial:p.partial||forecast.unknownFunding,forecast};
 }
+function plannerPersonOptions(kind,item={}){
+ const members=(host.members||host.people.map(name=>({user_id:name,name}))).filter(member=>state.scope==='household'||member.user_id===(host.currentUserId||host.person));
+ const selected=members.find(member=>member.user_id===item.personId)||members.find(member=>member.name===item.person)||members.find(member=>member.user_id===host.currentUserId)||members[0];
+ return (kind==='income'?'':`<option value="" ${!item.personId&&item.person==='Shared pool'?'selected':''}>Shared pool</option>`)+members.map(member=>`<option value="${esc(member.user_id)}" ${selected?.user_id===member.user_id&&(kind==='income'||item.person!=='Shared pool')?'selected':''}>${esc(member.name)}</option>`).join('');
+}
+function plannerPersonAttribution(value,kind){
+ const member=(host.members||host.people.map(name=>({user_id:name,name}))).find(member=>member.user_id===value);
+ if(kind==='income'&&(!member||(state.scope==='personal'&&member.user_id!==(host.currentUserId||host.person))))throw new Error('Choose whose income this is. Use Family scope for another household member.');
+ return {personId:member?.user_id||null,person:member?.name||'Shared pool'};
+}
 function workflowRows(items,emptyText){
- const p=currentPlan();return items.map(x=>`<div class="workflow-row"><label class="workflow-choice"><input type="checkbox" data-plan-toggle="${esc(x.id)}" ${x.enabled?'checked':''} ${p.status==='closed'?'disabled':''}><span><b>${esc(x.title)}</b><small>${esc(x.account)} · ${x.day} ${plannerMonth(state.month)}${x.cashIncluded?' · Already included in starting bank funds':''}</small></span></label><strong>${money(x.amount)}</strong><button type="button" class="button" data-plan-edit="${esc(x.id)}">Edit</button></div>`).join('')||`<p class="note">${emptyText}</p>`;
+ const p=currentPlan();return items.map(x=>`<div class="workflow-row"><label class="workflow-choice"><input type="checkbox" data-plan-toggle="${esc(x.id)}" ${x.enabled?'checked':''} ${p.status==='closed'?'disabled':''}><span><b>${esc(x.title)}</b><small>${esc(x.person||host.person)} · ${esc(x.account)} · ${x.day} ${plannerMonth(state.month)}${x.cashIncluded?' · Already included in starting bank funds':''}</small></span></label><strong>${money(x.amount)}</strong><button type="button" class="button" data-plan-edit="${esc(x.id)}">Edit</button></div>`).join('')||`<p class="note">${emptyText}</p>`;
 }
 function workflowSavedBudget(){const p=currentPlan();return (host.savedBudgets||[]).find(b=>b.id===p.serverBudget?.id)||(host.savedBudgets||[])[0]||p.serverBudget;}
 function workflowCategoryLines(p=currentPlan()){
@@ -66,7 +76,7 @@ function plannerWorkflow(){
 }
 function workflowIncomeForm(){
  const p=currentPlan(),rows=data().filter(t=>t.type==='income');
- openDrawer('Pull this month’s income',monthName()+' · '+scopeName(),`<form id="workflow-income-form">${rows.map(t=>{const linked=p.items.some(x=>x.incomeRecordId===t.id||(x.matchIds||[]).includes(t.id)),account=planBanks().find(a=>a.name===t.account),asOf=p.openingAsOf||account?.projectedAsOf?.slice(0,10),included=asOf&&asOf!=='Unknown'&&asOf>=t.date;return `<div class="workflow-income-row"><label class="workflow-row"><input type="checkbox" name="income" value="${esc(t.id)}" ${linked?'disabled':'checked'}><span><b>${esc(t.description)}</b><small>${esc(t.date)} · ${esc(t.account)}${linked?' · Already linked':''}</small></span><strong>${money(t.amount)}</strong></label><label class="workflow-received"><input type="checkbox" name="included" value="${esc(t.id)}" ${included?'checked':''} ${linked?'disabled':''}> Already included in my starting bank funds</label></div>`;}).join('')||'<p class="note">No recorded income exists in this planning month, scope and currency. Enter expected income manually or select a month with recorded income.</p>'}<label class="workflow-row"><input type="checkbox" name="replace" checked> Replace existing unlinked expected income with these recorded amounts</label><p class="note">For each receipt, verify whether your starting funds already include it. Checked receipts count toward income but are not added to bank cash again. Leave this unchecked if your opening funds predate that receipt.</p><div class="form-actions"><button type="button" class="button" data-action="close">Cancel</button><button class="button primary" ${!rows.length?'disabled':''}>Use selected income</button></div></form>`);
+ openDrawer('Pull this month’s income',monthName()+' · '+scopeName(),`<form id="workflow-income-form">${rows.map(t=>{const linked=p.items.some(x=>x.incomeRecordId===t.id||(x.matchIds||[]).includes(t.id)),account=planBanks().find(a=>a.name===t.account),asOf=p.openingAsOf||account?.projectedAsOf?.slice(0,10),included=asOf&&asOf!=='Unknown'&&asOf>=t.date;return `<div class="workflow-income-row"><label class="workflow-row"><input type="checkbox" name="income" value="${esc(t.id)}" ${linked?'disabled':'checked'}><span><b>${esc(t.description)}</b><small>${esc(t.person||host.person)} · ${esc(t.date)} · ${esc(t.account)}${linked?' · Already linked':''}</small></span><strong>${money(t.amount)}</strong></label><label class="workflow-received"><input type="checkbox" name="included" value="${esc(t.id)}" ${included?'checked':''} ${linked?'disabled':''}> Already included in my starting bank funds</label></div>`;}).join('')||'<p class="note">No recorded income exists in this planning month, scope and currency. Enter expected income manually or select a month with recorded income.</p>'}<label class="workflow-row"><input type="checkbox" name="replace" checked> Replace existing unlinked expected income with these recorded amounts</label><p class="note">For each receipt, verify whether your starting funds already include it. Checked receipts count toward income but are not added to bank cash again. Leave this unchecked if your opening funds predate that receipt.</p><div class="form-actions"><button type="button" class="button" data-action="close">Cancel</button><button class="button primary" ${!rows.length?'disabled':''}>Use selected income</button></div></form>`);
 }
 function workflowAccountCardForm(id){
  const account=accounts().find(a=>a.type==='card'&&a.id===id),p=currentPlan();if(!account||p.status==='closed')return;
@@ -115,7 +125,7 @@ document.addEventListener('submit',async event=>{
   const selected=new Set(values.getAll('income')),records=data().filter(t=>t.type==='income'&&selected.has(t.id)&&!p.items.some(x=>x.incomeRecordId===t.id||(x.matchIds||[]).includes(t.id)));
   if(!records.length)return toast('Choose income that is not already linked.');
   if(values.has('replace'))p.items=p.items.filter(x=>x.kind!=='income'||x.incomeRecordId||(x.matchIds||[]).length);
-  for(const t of records)p.items.push({id:'income-'+t.id,title:t.description,kind:'income',lane:'income',amount:t.amount,day:+t.date.slice(8),category:t.category,account:t.account,person:t.person,source:'Recorded income · '+t.date,enabled:true,timing:'once',matchIds:[t.id],incomeRecordId:t.id,cashIncluded:values.getAll('included').includes(t.id)});
+  for(const t of records)p.items.push({id:'income-'+t.id,title:t.description,kind:'income',lane:'income',amount:t.amount,day:+t.date.slice(8),category:t.category,account:t.account,person:t.person,personId:t.personId,source:'Recorded income · '+t.date,enabled:true,timing:'once',matchIds:[t.id],incomeRecordId:t.id,cashIncluded:values.getAll('included').includes(t.id)});
   planRevise('Recorded income pulled into the plan; bank inclusion explicitly chosen');closeDrawer();renderPlanner();return;
  }
  if(form.id==='workflow-account-card-form'){
@@ -153,4 +163,11 @@ document.addEventListener('submit',async event=>{
    const budget=await host.publishBudget(body);p.serverBudget=budget;p.serverBudgetRevision=revision;planSave();if(host.active()&&state.month===month&&state.scope===scope&&state.currency===currency){host.savedBudgets=(host.savedBudgets||[]).concat(budget);closeDrawer();renderPlanner();toast('Budget draft created on the server.');}
   }finally{delete form.dataset.busy;submit.disabled=false;}
  }
+});
+
+document.addEventListener('change',event=>{
+ const form=event.target.form;if(form?.id!=='planner-item-form'||event.target.name!=='kind')return;
+ const select=form.elements.person,kind=event.target.value;
+ select.innerHTML=plannerPersonOptions(kind,{personId:select.value});select.required=kind==='income';
+ form.querySelector('label[for="plan-person"]').textContent=kind==='income'?'Whose income is this?':'Who funds this?';
 });

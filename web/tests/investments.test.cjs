@@ -176,3 +176,42 @@ test('emergency fund holdings are separate from the regular investment value',()
   assert.match(root.innerHTML,/emergency fund/);
   assert.match(root.innerHTML,/CC emergency/);
 });
+
+test('regular holdings expose Add money while shared, archived, and full-history holdings stay protected',()=>{
+  const {context,state,root}=workspace();
+  context.button=(label,action,attrs='')=>`<button data-action="${action}" ${attrs}>${label}</button>`;
+  const original=state.investmentViewData.holdings[0];
+  state.investmentViewData.holdings=[original,{...original,id:'other',owner_id:'other',visibility:'shared'},{...original,id:'archived',archived:true,archived_at:'2026-11-01'},{...original,id:'full',tracking_mode:'full_history'}];
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/investment-add-money.*?data-id=\\"h\\"/);
+  for(const id of ['other','archived','full'])assert.doesNotMatch(root.innerHTML,new RegExp('investment-add-money[^>]*data-id=\\\\"'+id+'\\\\"'));
+});
+
+test('SIP manual recording is available before a debit is matched and unavailable after processing',()=>{
+  const {context,state,root}=workspace();
+  context.button=(label,action)=>`[${action}:${label}]`;
+  context.investmentSipForMonth=()=>({amount:'100',status:'active'});
+  context.sipDueDate=()=> '2026-10-12';
+  state.investmentTab='sips';
+  const holding=state.investmentViewData.holdings[0];
+  holding.records=[];
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/investment-process-sip:Record investment/);
+  holding.sip_occurrences=[{month:state.month,status:'payment_found'}];
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/investment-process-sip:Record allotment/);
+  for(const status of ['skipped','failed','cancelled']){
+    holding.sip_occurrences[0].status=status;
+    context.renderInvestmentTab();
+    assert.doesNotMatch(root.innerHTML,/investment-process-sip/);
+  }
+  holding.sip_occurrences=[];
+  for(const record of [{contribution:'100',sip_processed:true},{contribution:'50'},{withdrawal:'25'}]){
+    holding.records=[{month:state.month,...record}];
+    context.renderInvestmentTab();
+    assert.doesNotMatch(root.innerHTML,/investment-process-sip/);
+  }
+  holding.records=[];holding.owner_id='other';holding.visibility='shared';
+  context.renderInvestmentTab();
+  assert.doesNotMatch(root.innerHTML,/investment-process-sip/);
+});

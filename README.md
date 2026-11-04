@@ -4,6 +4,7 @@ An open-source, self-hosted personal and household budgeting app in development:
 
 **Stack direction:** Rust + Axum, SQLite + SQLx, Svelte 5 + TypeScript, packaged for a NAS with Docker Compose. SQLite is confirmed for v1.
 
+- [Current application scope and feature specification](docs/current-application-feature-spec.md): consolidated implemented features, screen index, permissions, persistence, and current limitations.
 - [Architecture](docs/architecture.md): system boundaries, household model, ledger, import pipeline, reconciliation, AI, and deployment.
 - [HTTP API specification](docs/api-spec.md): versioned REST routes, request/response conventions, permissions, imports, ledger, reconciliation, analytics, budgets, and AI settings.
 - [Apple Shortcuts quick expenses](docs/quick-expense-shortcuts.md): opt-in LAN/private-VPN expense entry without a login cookie or API token.

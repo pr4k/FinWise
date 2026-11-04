@@ -131,6 +131,8 @@ A recorded balance check can anchor projections when the opening amount is unkno
 
 ### Transactions
 
+Income allocations may include `member_id`, the active household user ID whose income it is. Family allocations may select another member; Personal allocations must select the authenticated user. Create and edit validate household membership. `entered_by` continues to identify the recorder; Household reports and member-specific analytics use the selected allocation member, with the recorder as the legacy fallback. Income attribution changes do not create or move money.
+
 `GET /transactions` accepts allowlisted filters: `account_id`, `account_type` (`bank`, `credit_card`, `cash`, `settle_up`), `member_id` (only if authorized), `category_id`, `event_type`, `reconciliation_state`, `from`, `to`, `q`, `cursor`, `limit`, `sort`. Account type matches any participating account leg, including either side of a transfer. Each item includes `id`, `event_type`, positive magnitude `amount`, `currency`, `effective_date`, description/merchant, category allocations, account movements, `entered_by`, payer/account owner if visible, `source_refs`, `revision`, and reconciliation status. Private names and evidence must not leak via aggregates or candidate text.
 
 | Method and path | Purpose |

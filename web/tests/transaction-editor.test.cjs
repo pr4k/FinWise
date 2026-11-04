@@ -86,3 +86,11 @@ test('expired sessions still stop opening transaction details',async()=>{
   const context=balanceContext(async()=>{throw Object.assign(new Error('Sign in'),{status:401});});
   await assert.rejects(context.transactionDetailBalances({id:'tx',effective_date:'2026-11-02',movements:[{account_id:'bank'}]}),{status:401});
 });
+
+test('income earner options use member IDs and allow other members only in Family scope',()=>{
+ const context=vm.createContext({state:{me:{user:{id:'me'}},members:[{user_id:'me',name:'Alex'},{user_id:'partner',name:'Alex'},{user_id:'inactive',name:'Inactive',active:false}]},option:(id,label,selected)=>`<option value="${id}"${selected?' selected':''}>${label}</option>`});
+ load(context,'const incomeMemberId =','function syncIncomeMemberChoices(');
+ assert.equal(vm.runInContext("incomeMemberName({entered_by:'me'},{member_id:'partner'})",context),'Alex');
+ const personal=context.incomeMemberOptions('partner','personal');assert.match(personal,/value="me" selected/);assert.doesNotMatch(personal,/value="partner"/);
+ const family=context.incomeMemberOptions('partner','family');assert.match(family,/value="partner" selected/);assert.doesNotMatch(family,/inactive/);
+});

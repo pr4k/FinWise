@@ -1778,6 +1778,17 @@ pub(crate) async fn validate_ledger_with_history(
         }
     }
     for allocation in v["allocations"].as_array().unwrap() {
+        if v["event_type"] == "income" {
+            if let Some(member) = allocation.get("member_id") {
+                let member = member.as_str().ok_or_else(|| ApiError::invalid("Income belongs to an active household member."))?;
+                let active: i64 = sqlx::query_scalar("SELECT count(*) FROM memberships WHERE household_id=? AND user_id=? AND active=1")
+                    .bind(&p.household_id).bind(member).fetch_one(&mut *db).await?;
+                if active == 0 { return Err(ApiError::invalid("Income belongs to an active household member.")); }
+                if allocation["scope"] == "personal" && member != p.user_id {
+                    return Err(ApiError::invalid("Use Family scope to record income for another household member."));
+                }
+            }
+        }
         if let Some(destination) = allocation.get("budget_destination") {
             if !["expense", "refund"].contains(&v["event_type"].as_str().unwrap_or_default()) {
                 return Err(ApiError::invalid("Only expense and refund allocations have a budget destination."));

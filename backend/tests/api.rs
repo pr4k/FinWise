@@ -7896,3 +7896,57 @@ async fn paid_on_behalf_batch_is_atomic_and_reversal_releases_shared_credit_capa
     let summary=c.call("GET","analytics/summary?from=2026-08-01&to=2027-01-01&scope=family",json!({}),None,None).await.1;
     assert_eq!(summary["income"],"0.00");assert_eq!(summary["net_spending"],"100.00");
 }
+
+#[tokio::test]
+async fn income_member_attribution_credits_the_earner_and_preserves_the_recorder() {
+    let (owner, _) = setup().await;
+    let (member, _) = partner(&owner).await;
+    let owner_id=owner.call("GET","me",json!({}),None,None).await.1["user"]["id"].clone();
+    let member_id=member.call("GET","me",json!({}),None,None).await.1["user"]["id"].clone();
+    let bank=owner.create("accounts",json!({"name":"Salary account","subtype":"bank","currency":"INR","visibility":"shared","opening_balance":{"amount":"0.00","as_of":"2026-09-01T00:00:00+05:30"}})).await;
+    let salary=owner.create("categories",json!({"name":"Salary","kind":"income","visibility":"shared"})).await;
+    let mut body=transaction("income","50000.00",&bank,&salary,"family");
+    body["allocations"][0]["member_id"]=member_id.clone();
+    let saved=owner.create("transactions",body).await;
+    assert_eq!(saved["entered_by"],owner_id);
+    assert_eq!(saved["allocations"][0]["member_id"],member_id);
+    let report_path="analytics/household?from=2026-09-01&to=2026-10-01&currency=INR";
+    for viewer in [&owner,&member] {
+        let report=viewer.call("GET",report_path,json!({}),None,None).await;
+        assert_eq!(report.0,StatusCode::OK,"{}",report.1);
+        let rows=report.1["data"].as_array().unwrap();
+        assert_eq!(rows.iter().find(|r|r["id"]==member_id).unwrap()["income"],"50000.00");
+        assert_eq!(rows.iter().find(|r|r["id"]==owner_id).unwrap()["income"],"0.00");
+    }
+    let summary=owner.call("GET",&format!("analytics/summary?from=2026-09-01&to=2026-10-01&scope=family&currency=INR&member_id={}",member_id.as_str().unwrap()),json!({}),None,None).await;
+    assert_eq!(summary.1["income"],"50000.00");
+    let before=owner.call("GET",&format!("accounts/{}",bank["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    let mut allocations=saved["allocations"].clone();allocations[0]["member_id"]=owner_id.clone();
+    let updated=owner.call("PATCH",&format!("transactions/{}",saved["id"].as_str().unwrap()),json!({"allocations":allocations}),None,saved["revision"].as_i64()).await;
+    assert_eq!(updated.0,StatusCode::OK,"{}",updated.1);
+    assert_eq!(updated.1["entered_by"],owner_id);
+    assert_eq!(updated.1["movements"],saved["movements"]);
+    let report=owner.call("GET",report_path,json!({}),None,None).await.1;
+    assert_eq!(report["data"].as_array().unwrap().iter().find(|r|r["id"]==owner_id).unwrap()["income"],"50000.00");
+    assert_eq!(report["data"].as_array().unwrap().iter().find(|r|r["id"]==member_id).unwrap()["income"],"0.00");
+    let after=owner.call("GET",&format!("accounts/{}",bank["id"].as_str().unwrap()),json!({}),None,None).await.1;
+    assert_eq!(after["balance"]["amount"],before["balance"]["amount"]);
+}
+
+#[tokio::test]
+async fn income_member_attribution_validates_household_membership_and_personal_scope() {
+    let (owner,pool)=setup().await;
+    let (member,_)=partner(&owner).await;
+    let member_id=member.call("GET","me",json!({}),None,None).await.1["user"]["id"].clone();
+    let bank=owner.create("accounts",json!({"name":"Shared income","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+    let salary=owner.create("categories",json!({"name":"Salary","kind":"income","visibility":"shared"})).await;
+    for (who,scope) in [(json!("not-a-household-member"),"family"),(json!(123),"family"),(member_id.clone(),"personal")] {
+        let mut body=transaction("income","100.00",&bank,&salary,scope);body["allocations"][0]["member_id"]=who;
+        let result=owner.call("POST","transactions",body,Some(&uuid::Uuid::new_v4().to_string()),None).await;
+        assert_eq!(result.0,StatusCode::BAD_REQUEST,"{}",result.1);
+    }
+    sqlx::query("UPDATE memberships SET active=0 WHERE user_id=?").bind(member_id.as_str().unwrap()).execute(&pool).await.unwrap();
+    let mut body=transaction("income","100.00",&bank,&salary,"family");body["allocations"][0]["member_id"]=member_id;
+    let result=owner.call("POST","transactions",body,Some("inactive-income-member"),None).await;
+    assert_eq!(result.0,StatusCode::BAD_REQUEST,"{}",result.1);
+}

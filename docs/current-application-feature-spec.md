@@ -1,6 +1,7 @@
 # FinWise — Current Application Feature Specification
 
-**Version:** 1.0  
+**Version:** 1.1
+
 **As of:** 2 November 2026
 **Scope:** Application behavior represented by the current local working tree, including uncommitted changes. This is an implementation inventory, not a roadmap or a production certification.
 
@@ -22,7 +23,7 @@ The main application is an authenticated, responsive browser interface backed by
 | Shared account | Accessible to household members; sharing includes account history and reconciliation evidence. |
 | Personal report scope | Reports the signed-in user's eligible personal allocations. Investment views additionally use the ownership and payer rules in section 12. |
 | Family report scope | Reports accessible family allocations and the family budget. |
-| Combined report scope | Combines eligible personal and family allocations without counting them twice. Budgets are available only in Family view. |
+| Combined report scope | Combines eligible personal and family allocations without counting them twice. The Budgets workspace is available only in Family view; Planner can separately publish Personal or Family budgets (section 9). |
 
 Allocation scope, account visibility, payer identity, budget beneficiary, and investment ownership are separate concepts. Changing one does not automatically change the others. All views remain limited by server-side authorization.
 
@@ -35,6 +36,29 @@ The browser provides a unified Dashboard, Household 360, Transactions, Recurring
 - Screens provide loading, empty, and error states. Forms use dialogs or a transaction drawer, with validation, submission progress, and success feedback.
 - Layouts adapt to phone, tablet, and desktop. Tables may become cards or scrollable regions; charts provide supporting numeric detail.
 - Browser state is distinct from saved household data. For example, the default transaction scope is stored per user in the browser.
+
+### Screen and workflow index
+
+| Area | Entry point | Included scope |
+| --- | --- | --- |
+| Dashboard | `#overview` | Monthly totals, contributor details, account funds, commitments, investment observations, and integrated reports. |
+| Dashboard reports | `#overview/reports`; legacy `#analytics` redirects here | Trends, Planning, Detailed reports, comparisons, and transaction drilldowns. |
+| Household 360 | `#household`, `#household/{memberId}` | Accessible earned, spent, and invested totals with member category detail. |
+| Transactions | `#transactions`, `#transactions/all` | Ledger search, filters, sorting, shared detail drawer, entry, correction, and voiding. |
+| Recurring | `#recurring` | Candidate review, confirmed subscriptions, ignored patterns, and payment history. |
+| Planner | `#planner` | Guided budget creation, monthly canvas, cash calendar, scenarios, sinking funds, and saved expenses. |
+| Accounts | `#accounts`, `#accounts/{accountId}` | Accessible accounts, available funds, activity, card payments, opening balances, and observed checks. |
+| Budgets | `#budgets` | Family budget setup, tracking, category limits, commitments, forecasts, and reviewed amendments. |
+| Settle up | `#settlements` | Private obligations, purchase splits, repayments, Paid on Behalf, and reimbursement matching. |
+| Investments | `#investments` | Holdings, funding, trades, valuations, SIPs, goals, emergency reserves, and review. |
+| Categories | `#categories` | Income/expense hierarchy, tracking types, visibility, and archive/restore. |
+| Statements | `#statements`, `#statements/{accountId}` | Monthly account activity and imported statement evidence. |
+| Reconcile | `#reconcile`, `#reconcile/{sessionId}` | Statement matching, partial evidence, ledger corrections, transfer identification, and balance comparison. |
+| Money Manager changes | `#changes` | External update work and completion tracking in Extension mode. |
+| Imports | `#imports`, `#imports/{batchId}/{fileId}` | Multi-file upload, mapping, preview, commit, history, and reimport cleanup. |
+| Settings | `#settings` | Household access, operating modes, reset, quick-entry configuration, and widget configuration. |
+
+The sections below specify each feature's behavior and limits. An API capability does not imply that its full workflow is exposed in the browser. Planner drafts, scenarios, and local allowances also have different persistence from server-saved budgets and ledger records.
 
 ## 4. Financial rules
 
@@ -71,6 +95,8 @@ These rules apply across features and are part of their expected behavior.
 
 **Account model:** Bank, credit card, cash, investment cash, and settle-up account types are supported by the backend. The standard account-creation UI exposes bank/card/cash/settle-up choices; investment cash also participates in portfolio reporting and goal reservations.
 
+The Accounts workspace lists all accounts accessible to the signed-in user regardless of the Personal/Family/Combined report selector. Accounts are grouped by owner, including another member's shared accounts; inaccessible private accounts remain excluded. Archived accounts are omitted from active selection while historical references remain available. Planner uses its own narrower account pools (section 9).
+
 **Account setup and maintenance**
 
 - Record name, currency, type, visibility, and an optional known starting balance with date/time.
@@ -83,6 +109,7 @@ These rules apply across features and are part of their expected behavior.
 - Shows month or all-date activity, signed movements, transaction details, largest expense movements, subscription activity, balance anchors, and observed checks.
 - Bank/cash account cards and detail headers lead with available funds when reservation data exists. The detail breakdown retains the full recorded balance.
 - Credit-card pages show amount owed and allow partial or full payment from an eligible bank/cash account. Payment creates a transfer.
+- Activity stays newest first in both month and all-date views. Starting balances and observed checks appear alongside ledger activity according to their effective instant.
 - Entries sharing a timestamp can show a balance after the whole group rather than imply a reliable order within that group.
 
 **Balance verification**
@@ -107,6 +134,7 @@ These rules apply across features and are part of their expected behavior.
 
 - Create expenses, income, refunds, and transfers with amount, currency, effective date, optional precise time, description, and account movement(s).
 - Categorized events have allocations whose magnitudes sum to the transaction amount. Allocations support category, Personal/Family scope, and eligible household budget attribution.
+- Income entry and editing provide **Whose income is this?**. Each income allocation stores the selected active household user ID; Family scope allows another member, while Personal scope stays with the current user. The recorder remains separate.
 - Expense/refund payer identity is separate from the entrant and account owner. Family attribution can target a member, Shared pool, or Unassigned.
 - The editor supports category search/selection, amount calculation, description history, and quick creation of eligible accounts/categories.
 - Edit or void transactions with revision checks. Details show movements, allocations, balance context, source evidence, reconciliation state, and relevant investment/subscription links.
@@ -151,7 +179,7 @@ Answers what happened in the selected month and where available money sits. Over
 
 - Shows visible Earned, Spent, and Invested totals per active household member for the selected month in the household base currency.
 - Member detail shows expense category totals.
-- Income uses the entrant; expenses/refunds use the recorded payer with legacy/import fallbacks. Investment visibility follows the applicable sharing rules.
+- Income uses the explicitly selected allocation member, falling back to the entrant for older entries; expenses/refunds use the recorded payer with legacy/import fallbacks. Investment visibility follows the applicable sharing rules.
 - Private accounts and holdings do not become visible through household totals. Transfers do not become spending or new investment contributions.
 
 ### Integrated dashboard reports
@@ -168,8 +196,8 @@ Answers what happened in the selected month and where available money sits. Over
 
 **Budget setup and lifecycle**
 
-- Budget management, dashboard cards, and budget reports appear only in Family view. New plans use Family scope with currency, name, expected income, savings goal, shared category limits, and draft/active/archived lifecycle.
-- Existing personal plans remain stored for compatibility and history; the current UI does not display or create personal plans.
+- The Budgets workspace, dashboard budget cards, and integrated budget reports appear only in Family view. Plans created through the Budgets workspace use Family scope with currency, name, expected income, savings goal, shared category limits, and draft/active/archived lifecycle.
+- Existing personal budgets remain stored. The Budgets workspace does not display or create them; Planner can create, inspect, and activate a saved Personal budget through its separate guided workflow.
 - Limits apply either to one category or a pooled parent with descendants. Overlapping child limits under a pooled parent are rejected.
 - There are no per-person allowances or person-level budget controls. Three prior months' Family-scope exact-category averages can populate category limits, with coverage caveats.
 - Authorized managers can activate plans, copy them to the next month as drafts, and make permitted lifecycle changes.
@@ -185,16 +213,25 @@ Answers what happened in the selected month and where available money sits. Over
 
 **Planner**
 
-- Defaults to next month with a separate planning-month picker; Dashboard reporting keeps its own month.
+- Defaults to next month in the household timezone with a separate planning-month picker remembered for the signed-in session; Dashboard reporting keeps its own month. Personal and Family plans use separate pools; Combined asks the user to choose a pool.
+- Expected income identifies its earner using an active household member ID. Family plans can select another member; Personal plans stay with the current user. Pulling recorded income preserves that attribution, can replace unlinked expectations, and prevents importing the same linked receipt twice. Expected income does not enter Household 360 actuals.
 - All card accounts in the selected scope/currency remain visible in Planner, including accounts missing statement metadata. Amount owed is shown separately; users can explicitly include an editable planning estimate without modifying Accounts. Older manual estimates are labeled distinctly.
 - Current recorded card dues refresh from Accounts. A separate monthly **Due used for planning** override can be higher or lower, and resets to the latest recorded due without changing account dues or posting payments.
 - The **Build budget** flow collects expected or imported recorded income, full/partial planned card payments, selectable subscription and active SIP schedules, other expenses/buffers, and a remaining-income category split.
 - Shows income left to allocate separately from projected bank cash and available cash after earmarks. Dated bank anchors and partial coverage are visible. Imported income explicitly identifies receipts already included in starting bank funds so the forecast does not add them twice.
 - **Review & create budget** saves a real Personal or Family budget draft with consumption category limits. Fixed consumption and flexible allowances count once; card repayments, investment contributions and earmarks remain outside spending budgets. The saved draft can be activated and inspected from Planner. Existing budgets are not overwritten, and server authorization applies.
-- Adds a monthly canvas, cash calendar (month, agenda and table), what-if scenarios, sinking funds, explicit plan/actual matching, revision history and draft/active/closed states in the current FinWise theme. Future months work without ledger records.
+- The monthly canvas provides five lanes, editable amounts and timing, account selection, item toggles, opening funds, and a protected cash floor. New guided plans do not preallocate historical category spending.
+- The cash calendar offers month, agenda, and data-table views with daily drilldowns into bank cash, card reservations, other earmarks, available cash, and funding shortfalls.
+- What-if scenarios adjust spending, investment or purchase amounts, and receipt delays. Users can save scenarios or explicitly apply one as a new draft revision.
+- Sinking funds record targets, evidence-backed existing savings, and suggested monthly earmarks. These local assumptions do not create assets or account reservations in the Investments goal system.
+- Plan vs actual uses authorized ledger allocations and explicit matching, with separate income, consumption, and investment comparisons. Local plans support revision history, review/activation, closing as a read-only snapshot, and reopening as a draft. Future months work without ledger records.
 - Uses real authorized accounts and reporting allocations, with Personal/Family and currency isolation. Card charges reserve bank cash; due statement payments release matching reservations without counting consumption twice. Opening balances remain frozen planning assumptions; unknown funding and shortfalls are labeled.
-- Canvas plans, card evidence, fund targets and activation allowances are browser-local and namespaced by household/user. Canvas activation opens a local allowance view. The guided budget-creation action separately publishes a server budget; neither action posts actual ledger entries. See [Planner integration](planner-module.md).
+- Card planning accepts full, partial, or zero payment and retains the unpaid remainder separately from already-paid evidence. Closed plans retain their snapshots; a newer recorded billing cycle supersedes the earlier account snapshot for the new planning month. Default cycle dates and inferred statement months remain unverified assumptions. Interest and fees are not estimated.
+- Canvas plans, card evidence, scenarios, fund targets, and activation allowances are browser-local under `fw-planner-v1:<household-id>:<user-id>`, further separated by scope, currency, and month. They do not synchronize across browsers or members; clearing browser storage removes them. Failed storage writes display a message.
+- Canvas activation opens a local allowance view. The guided budget-creation action separately publishes a server budget; neither action posts actual ledger entries or locks bank funds. Local edits after publication do not overwrite the saved budget. Owners/admins can publish Family budgets; users can publish their own Personal budgets. Existing Family budgets use the Family amendment editor; updating an existing Personal budget from the guided split is not supported. See [Planner integration](planner-module.md).
 - The **Saved expenses & family budget commitments** disclosure retains the existing server-backed workflow below.
+
+**Saved expenses and family budget commitments**
 
 - Records title, due date, expected amount/currency, optional expense category/account, and Personal/Household visibility.
 - Ordinary plans are reminders that can be marked done or planned; they do not post transactions.
@@ -241,6 +278,8 @@ Answers what happened in the selected month and where available money sits. Over
 
 **Workspace:** Overview, Holdings, SIPs, Activity, Goals & Emergency, and Review tabs. The Overview leads with four compact totals: Portfolio value, Net invested, Tracking return, and Emergency fund, including a target progress indicator. Coverage stays visible in short captions; full cash-flow calculations, payer/ownership attribution, valuation dates, and access rules expand under “How these totals work.” Holdings appear as compact cards with detail links, while the Holdings tab retains the full table. Tagged investment transactions are collapsed by default in Overview. Values use the selected period/cutoff; prices are manually observed rather than live market quotes.
 
+Manual payments can be recorded from **Investments → SIPs → Record investment**, selecting the funding account and payment date. A matched debit uses **Record allotment** without a second bank movement. **Holdings → Add money** records additional contributions against the selected baseline holding and its folio; full-history holdings use dated trade/events. Add money is limited to eligible holdings owned by the current user, excludes archived holdings, and restricts funding accounts to the holding currency. Emergency-fund additions are investment contributions, with their values shown separately from the regular portfolio.
+
 **Holding setup and access**
 
 - Supports mutual funds, direct stocks, ETFs, deposits, retirement assets, manually valued assets, and emergency funds.
@@ -277,6 +316,7 @@ Answers what happened in the selected month and where available money sits. Over
 - Schedule amount, day, start/end month, and active/paused status. Short months use their last day. Dated schedule changes preserve earlier expectations.
 - A schedule alone creates no contribution, units, or bank transaction.
 - Users can process a monthly SIP or match an existing payment. A payment-found occurrence can remain awaiting allotment without posting investment activity. Processing is protected against duplicate execution.
+- Manual recording is available before a debit is matched; a matched debit switches the action to Record allotment. Processed monthly records and skipped, failed, or cancelled occurrences do not offer another manual recording action.
 
 **Goals and emergency reserves**
 
@@ -358,6 +398,17 @@ Current limitations include integrated AI configuration/providers, automatic Mon
 
 Live market prices, automatic bank synchronization, automatic scheduled SIP execution, foreign-exchange consolidation, and offline ledger editing are not provided by the inspected workflows.
 
+### Persistence and operational coverage
+
+| Data or capability | Current boundary |
+| --- | --- |
+| Ledger, imports, statement evidence, account checks, budgets, holdings, goals, obligations, and saved expenses | Server-persisted household data with resource-specific authorization and correction rules. |
+| Planner canvas, local card evidence, scenarios, sinking funds, and local allowance view | Browser-local drafts; publishing a budget is an explicit separate server action. |
+| Report month, scope, filters, sorting, and supported screen tabs | Browser/URL preferences; not financial records. |
+| Financial reads and retries | Collections follow cursor pagination; retried creates retain their idempotency key. Revision conflicts require refreshed data. |
+| Investment workspace loading | Tab/filter changes reuse loaded data; initial funding candidates use the selected month, with older candidates fetched on demand. Short in-memory reads are invalidated after mutations and session changes. |
+| Health and contract tooling | Liveness/readiness, OpenAPI, generated API types, migrations, and deployment assets exist; production readiness is not established by their presence. |
+
 ## 19. Behavioral verification examples
 
 These examples describe the feature contract; they are not a claim that tests were run while writing this document.
@@ -375,15 +426,23 @@ These examples describe the feature contract; they are not a claim that tests we
 | Match an incoming reimbursement to Paid on Behalf | Reduce the receivable without creating another movement or earned income. |
 | Match a posted expense to a commitment | Use the expense as actual spending and clear its planned commitment once. |
 | Switch to Independent mode | Keep imports/reconciliation, hide external update work, and retain prior history. |
+| Record Family income for another member | Attribute earned income to the selected member while retaining the recorder separately; Planner imports that attribution. |
+| Open Accounts in Personal report scope | Keep all authorized shared accounts visible and grouped by owner; hide inaccessible private accounts. |
+| Publish a Personal budget from Planner | Save a server budget accessible in Planner while the main Budgets workspace remains Family-only. |
+| Pull an already-received income receipt into Planner | Count it toward the income envelope without adding it to starting bank funds twice; prevent duplicate linking. |
+| Close a local Planner plan, then refresh Accounts dues | Keep the closed snapshot; open planning months can refresh recorded dues independently of overrides. |
+| Clear browser storage | Remove local Planner drafts and scenarios; retain explicitly saved server budgets and ledger data. |
 | View another member's household totals | Exclude financial data outside the viewer's access. |
 
 ## 20. Evidence and maintenance
 
-Implementation sources take precedence over older design proposals. This document was prepared by inspecting source, tests, and feature documentation, without running the application or its test suites.
+Implementation sources take precedence over older design proposals. This inventory was refreshed on 2 November 2026 by inspecting the current working tree, tests, and feature documentation. Application and financial test suites were not run for this documentation-only update; examples above describe expected behavior rather than newly executed acceptance results.
 
 - Browser workflows: [`web/app.js`](../web/app.js), [`web/index.html`](../web/index.html), [`web/view-state.js`](../web/view-state.js), [`web/analytics.js`](../web/analytics.js).
 - Backend behavior: [`backend/src/api.rs`](../backend/src/api.rs), [`planning.rs`](../backend/src/planning.rs), [`classification.rs`](../backend/src/classification.rs), [`reimbursements.rs`](../backend/src/reimbursements.rs), [`recurring.rs`](../backend/src/recurring.rs), [`reconciliation.rs`](../backend/src/reconciliation.rs), [`balances.rs`](../backend/src/balances.rs).
 - Behavioral evidence: [`backend/tests/api.rs`](../backend/tests/api.rs) and [`web/tests/`](../web/tests/), including investment, account-funds, subscription, transaction-editor, and view-state cases.
+- Planner implementation: [`planner-module.md`](planner-module.md), [`web/planner-data.js`](../web/planner-data.js), and [`web/planner-source/`](../web/planner-source/).
+- Workspace and loading behavior: [`frontend-features-and-screen-specs.md`](frontend-features-and-screen-specs.md) and [`performance.md`](performance.md).
 - Current reporting policy: [`transaction-intelligence.md`](transaction-intelligence.md).
 - Integration behavior: [`independent-app-mode.md`](independent-app-mode.md), [`quick-expense-shortcuts.md`](quick-expense-shortcuts.md), [`widgets-api.md`](widgets-api.md).
 - Prototype boundary: [`ai-service/README.md`](../ai-service/README.md).
