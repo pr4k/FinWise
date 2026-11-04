@@ -5,7 +5,7 @@
 .dashboard-toolbar p {margin:0;color:var(--muted);font-size:12px}
 .dashboard-toolbar .field {margin:0;flex:none;font-size:10px;gap:4px}
 .dashboard-toolbar select {min-height:36px;padding:6px 30px 6px 12px}
-.dashboard-page .overview-summary {gap:16px;border:0;background:none;overflow:visible}
+.dashboard-page .overview-summary {grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;border:0;background:none;overflow:visible}
 .dashboard-page .overview-summary .overview-metric {border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface);min-height:167px}
 .dashboard-page .overview-summary .position-card {background:#eaf1e5;border-color:#dce7d3;overflow:hidden}
 .dashboard-page .overview-summary .metric-number {font-size:clamp(20px,2.1vw,33px);color:var(--ink);margin:18px 0 12px;letter-spacing:-.045em}

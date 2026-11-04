@@ -54,7 +54,7 @@ test('dashboard separates recorded balances, available funds, reserves, currenci
   const context=helpers();
   const card={id:'card',name:'Card',currency:'INR',subtype:'credit_card',balance:{amount:'5000.00'}};
   const usd={...account,id:'usd',currency:'USD',balance:{amount:'999.00'}};
-  const transfers=[{id:'payment',event_type:'transfer',amount:'20.00',movements:[{account_id:'bank',amount:'-20.00'},{account_id:'card',amount:'20.00'}]}];
+  const transfers=[{id:'payment',event_type:'transfer',currency:'INR',effective_date:'2026-10-12',amount:'20.00',movements:[{account_id:'bank',amount:'-20.00'},{account_id:'card',amount:'20.00'}]}];
   Object.assign(context,{
     state:{members:[],month:'2026-10',scope:'combined',me:{household:{base_currency:'INR'}},accounts:[account,card,usd],categories:[]},
     reportQuery:()=>'',period:()=>({from:'2026-10-01',to:'2026-11-01'}),Date,Map,URLSearchParams,smartReviewPanel:()=>'',
@@ -81,9 +81,26 @@ test('dashboard separates recorded balances, available funds, reserves, currenci
   assert.match(html,/Bank & cash recorded/);
   assert.match(html,/After reserves/);
   assert.match(html,/Internal transfers[\s\S]*?INR 80.00/);
-  assert.match(html,/Card payments[\s\S]*?INR 20.00/);
+  assert.match(html,/Credit card payments[\s\S]*?INR 20.00/);
+  assert.match(html,/1 payment recorded/);
+  assert.match(html,/data-metric="economic_surplus"[\s\S]*?class="overview-metric position-card"/);
   assert.doesNotMatch(html,/999.00/);
   assert.match(html,/Credit card owed[\s\S]*?INR 5000.00/);
+  transfers.push(
+    {...transfers[0],id:'voided',voided:true},
+    {...transfers[0],id:'prior',effective_date:'2026-09-30'},
+    {...transfers[0],id:'purchase',event_type:'expense',movements:[{account_id:'card',amount:'-20.00'}]},
+    {...transfers[0],id:'foreign',currency:'USD'},
+    {...transfers[0],id:'split',amount:'50.00',movements:[{account_id:'bank',amount:'-50.00'},{account_id:'card',amount:'30.00'},{account_id:'other-bank',amount:'20.00'}]}
+  );
+  const withMore=await context.view.overview();
+  assert.match(withMore,/Credit card payments[\s\S]*?INR 50.00/);
+  assert.match(withMore,/2 payments recorded/);
+  transfers.length=0;
+  const none=await context.view.overview();
+  assert.match(none,/Credit card payments[\s\S]*?INR 0.00/);
+  assert.match(none,/0 payments recorded/);
+
 });
 
 test('opened account leads with the reduced available balance and retains the recorded breakdown',async()=>{
