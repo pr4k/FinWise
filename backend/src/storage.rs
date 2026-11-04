@@ -279,12 +279,45 @@ pub async fn audit(
         .bind(&p.household_id).bind(&p.user_id).bind(id).bind(action).bind(before.map(Value::to_string)).bind(after.map(Value::to_string)).bind(now()).execute(db).await?;
     Ok(())
 }
+/// Editing never widens visibility: the household switch only delegates writes
+/// to records already accessible to the current active member.
+pub async fn family_controls_enabled(db: &mut SqliteConnection, p: &Principal) -> Result<bool> {
+    let document: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id).fetch_one(db).await?;
+    let household: Value = serde_json::from_str(&document)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+    Ok(household["family_member_controls"] == true)
+}
+pub async fn can_manage(db: &mut SqliteConnection, p: &Principal, value: &Value) -> Result<bool> {
+    if value["owner_id"] == p.user_id { return Ok(true); }
+    if !family_controls_enabled(db, p).await? { return Ok(false); }
+    if value.get("subtype").is_some() { return account_visible(db, p, value).await; }
+    Ok(value["visibility"] == "shared")
+}
+pub async fn require_account_write(db: &mut SqliteConnection, p: &Principal, account_id: &str) -> Result<()> {
+    let account = get(db, p, "accounts", account_id).await?;
+    if can_manage(db, p, &account).await? { Ok(()) } else { Err(ApiError::forbidden()) }
+}
+async fn authorize_financial_write(db: &mut SqliteConnection, p: &Principal, kind: &str, value: &Value) -> Result<()> {
+    if ["accounts", "investments", "investment_goals", "planned_items"].contains(&kind)
+        && value.get("owner_id").is_some() && !can_manage(db, p, value).await? {
+        return Err(ApiError::forbidden());
+    }
+    if let Some(account_id) = value["account_id"].as_str() {
+        require_account_write(db, p, account_id).await?;
+    }
+    for movement in value["movements"].as_array().into_iter().flatten() {
+        require_account_write(db, p, text(movement, "account_id")?).await?;
+    }
+    Ok(())
+}
 pub async fn create(
     db: &mut SqliteConnection,
     p: &Principal,
     kind: &str,
     mut value: Value,
 ) -> Result<Value> {
+    authorize_financial_write(db, p, kind, &value).await?;
     if kind == "transactions" && value["source_refs"].as_array().is_some_and(Vec::is_empty) {
         let document: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
             .bind(&p.household_id).fetch_one(&mut *db).await?;
@@ -314,6 +347,10 @@ pub async fn update(
     mut value: Value,
     action: &str,
 ) -> Result<Value> {
+    let kind: String = sqlx::query_scalar("SELECT kind FROM resources WHERE id=? AND household_id=?")
+        .bind(text(before, "id")?).bind(&p.household_id).fetch_one(&mut *db).await?;
+    authorize_financial_write(db, p, &kind, before).await?;
+    authorize_financial_write(db, p, &kind, &value).await?;
     if value.get("event_type").is_some() && value["event_type"] != before["event_type"] && value["classification"] == before["classification"] {
         value["classification"] = crate::classification::baseline(&value,true);
     }

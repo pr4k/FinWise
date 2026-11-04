@@ -239,8 +239,8 @@ async fn validate_ownership(db: &mut SqliteConnection, p: &Principal, shares: &V
     if total != 10000 { return Err(ApiError::invalid("Economic ownership must sum to 100%.")); }
     Ok(())
 }
-fn owner(p: &Principal, v: &Value) -> Result<()> {
-    if v["owner_id"] == p.user_id {
+async fn owner(db: &mut SqliteConnection, p: &Principal, v: &Value) -> Result<()> {
+    if storage::can_manage(db, p, v).await? {
         Ok(())
     } else {
         Err(ApiError::missing())
@@ -942,13 +942,13 @@ pub async fn route(
     match (method, parts.as_slice()) {
         ("GET",["settle-ups",id,"reimbursement-candidates"])=>{
             api::allowed_query(q,&[])?;
-            let v=storage::get(db,p,"settlement_obligations",id).await?;owner(p,&v)?;active(&v)?;
+            let v=storage::get(db,p,"settlement_obligations",id).await?;owner(db, p, &v).await?;active(&v)?;
             if v["reversed"]==true || v["direction"]!="owed_to_me" {return Err(ApiError::invalid("Choose an active receivable."));}
             ok(crate::reimbursements::candidates(db,p,&v).await?)
         },
         ("POST",["settle-ups",id,"reverse"])=>{
             api::allowed_body(body,&[])?;
-            let v=storage::get(db,p,"settlement_obligations",id).await?;owner(p,&v)?;api::revision(headers,body,&v)?;
+            let v=storage::get(db,p,"settlement_obligations",id).await?;owner(db, p, &v).await?;api::revision(headers,body,&v)?;
             let mut saved=crate::reimbursements::reverse(db,p,&v).await?;decorate_obligation(&mut saved)?;ok(saved)
         },
         ("GET", ["settle-ups"]) => {
@@ -1098,7 +1098,7 @@ pub async fn route(
         ("DELETE", ["settle-ups", id]) => {
             api::allowed_body(body, &[])?;
             let anchor = storage::get(db, p, "settlement_obligations", id).await?;
-            owner(p, &anchor)?;
+            owner(db, p, &anchor).await?;
             active(&anchor)?;
             api::revision(headers, body, &anchor)?;
             if anchor["kind"]=="paid_on_behalf" {crate::reimbursements::reverse(db,p,&anchor).await?;return Ok((StatusCode::NO_CONTENT,Value::Null));}
@@ -1122,7 +1122,7 @@ pub async fn route(
         ("PATCH", ["settle-ups", id]) => {
             api::allowed_body(body, &["person", "amount", "date", "description"])?;
             let before = storage::get(db, p, "settlement_obligations", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let mut after = before.clone();
@@ -1159,7 +1159,7 @@ pub async fn route(
         ("POST", ["settle-ups", id, "repayments"]) => {
             api::allowed_body(body, &["amount", "date", "note", "transaction_id", "matches"])?;
             let before = storage::get(db, p, "settlement_obligations", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             if before["reversed"]==true {return Err(ApiError::conflict("This receivable has been reversed."));}
@@ -1199,7 +1199,7 @@ pub async fn route(
         ("DELETE", ["settle-ups", id, "repayments", payment_id]) => {
             api::allowed_body(body, &[])?;
             let before = storage::get(db, p, "settlement_obligations", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             crate::reimbursements::unlink(db,p,&before,payment_id).await?;
@@ -1234,7 +1234,7 @@ pub async fn route(
         ("PATCH", ["investments", "goals", id]) => {
             api::allowed_body(body, &["name","target_amount","target_months","essential_monthly","beneficiary","visibility","allocations","notes"])?;
             let before = storage::get(db,p,"investment_goals",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             if before["archived"] == true { return Err(ApiError::missing()); }
             api::revision(headers,body,&before)?;
             let mut after = before.clone();
@@ -1249,7 +1249,7 @@ pub async fn route(
         ("POST", ["investments", "goals", id, "archive"]) => {
             api::allowed_body(body,&[])?;
             let before = storage::get(db,p,"investment_goals",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             if before["archived"] == true { return Err(ApiError::missing()); }
             api::revision(headers,body,&before)?;
             let mut after = before.clone();
@@ -1275,7 +1275,7 @@ pub async fn route(
                 let id = text(item, "holding_id")?;
                 if !seen.insert(id.to_owned()) { return Err(ApiError::invalid("A holding can be valued only once per batch.")); }
                 let before = storage::get(db, p, "investments", id).await?;
-                owner(p, &before)?;
+                owner(db, p, &before).await?;
                 active(&before)?;
                 if item["revision"].as_i64() != before["revision"].as_i64() { return Err(ApiError::conflict("A holding changed. Reload values and try again.")); }
                 let as_of = text(item, "valuation_date")?;
@@ -1543,14 +1543,14 @@ pub async fn route(
         }
         ("POST", ["investments", id, "events", "import-preview"]) => {
             let holding = storage::get(db,p,"investments",id).await?;
-            owner(p,&holding)?;
+            owner(db, p, &holding).await?;
             active(&holding)?;
             if holding["tracking_mode"] != "full_history" { return Err(ApiError::invalid("CSV activity import requires a full-history holding.")); }
             ok(investment_import_preview(body,&holding)?)
         }
         ("POST", ["investments", id, "events", "import-commit"]) => {
             let before = storage::get(db,p,"investments",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             if before["tracking_mode"] != "full_history" { return Err(ApiError::invalid("CSV activity import requires a full-history holding.")); }
             api::revision(headers,body,&before)?;
@@ -1593,7 +1593,7 @@ pub async fn route(
         ("POST", ["investments", id, "events"]) => {
             api::allowed_body(body,&["type","trade_date","amount","units","charges","note","source_id","account_id"])?;
             let before = storage::get(db,p,"investments",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers,body,&before)?;
             if before["tracking_mode"] != "full_history" { return Err(ApiError::invalid("Add full-history events only to a full-history holding.")); }
@@ -1652,7 +1652,7 @@ pub async fn route(
             let reason = text(body,"reason")?;
             if reason.trim().is_empty() || reason.len() > 200 { return Err(ApiError::invalid("Give a reason for reversing the event.")); }
             let before = storage::get(db,p,"investments",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers,body,&before)?;
             let mut after = before.clone();
@@ -1673,7 +1673,7 @@ pub async fn route(
         ("POST", ["investments", id, "events", event_id, "evidence"]) => {
             api::allowed_body(body,&["transaction_id","amount"])?;
             let before = storage::get(db,p,"investments",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers,body,&before)?;
             if before["tracking_mode"] != "full_history" { return Err(ApiError::invalid("Evidence links require a full-history holding.")); }
@@ -1713,7 +1713,7 @@ pub async fn route(
         ("DELETE", ["investments", id, "events", event_id, "evidence", transaction_id]) => {
             api::allowed_body(body,&[])?;
             let before = storage::get(db,p,"investments",id).await?;
-            owner(p,&before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers,body,&before)?;
             let mut after = before.clone();
@@ -1729,7 +1729,7 @@ pub async fn route(
         ("POST", ["investments", id, "ownership-changes"]) => {
             api::allowed_body(body, &["effective_date", "shares"])?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let date = text(body, "effective_date")?;
@@ -1747,7 +1747,7 @@ pub async fn route(
         ("POST", ["investments", id, "archive"]) => {
             api::allowed_body(body, &[])?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let mut after = before.clone();
@@ -1760,7 +1760,7 @@ pub async fn route(
         ("DELETE", ["investments", id]) => {
             api::allowed_body(body, &[])?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             if before["opening_value"].is_string() || before["records"].as_array().is_some_and(|records| !records.is_empty()) {
@@ -1786,7 +1786,7 @@ pub async fn route(
                 &["name", "asset_class", "instrument", "identifier", "platform", "folio", "target", "monthly_goal", "notes", "visibility", "sip", "sip_effective_month", "opening_value", "opening_month"],
             )?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let mut after = before.clone();
@@ -1857,7 +1857,7 @@ pub async fn route(
         ("POST", ["investments", id, "contributions"]) => {
             api::allowed_body(body, &["amount", "account_id", "transaction_date", "value"])?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             if before["tracking_mode"] == "full_history" { return Err(ApiError::invalid("Record a dated purchase event for a full-history holding.")); }
             api::revision(headers, body, &before)?;
@@ -1899,7 +1899,7 @@ pub async fn route(
         ("POST", ["investments", id, "linked-transactions"]) => {
             api::allowed_body(body, &["transaction_id", "amount", "replace_movement_id", "value"])?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             if before["tracking_mode"] == "full_history" { return Err(ApiError::invalid("Full-history funding must link to its economic event.")); }
             api::revision(headers, body, &before)?;
@@ -1975,7 +1975,7 @@ pub async fn route(
         ("DELETE", ["investments", id, "linked-transactions", transaction_id]) => {
             api::allowed_body(body, &["value"])?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let transaction = storage::get(db, p, "transactions", transaction_id).await?;
@@ -2001,7 +2001,7 @@ pub async fn route(
             api::allowed_body(body, &["status", "transaction_id"])?;
             month(record_month)?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let sip = sip_for_month(&before, record_month);
@@ -2064,7 +2064,7 @@ pub async fn route(
             api::allowed_body(body, &["account_id", "transaction_date", "value"])?;
             month(record_month)?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             if before["type"] != "investment" || sip_for_month(&before, record_month).is_null() {
@@ -2136,7 +2136,7 @@ pub async fn route(
             if method == "PATCH" { api::allowed_body(body, &["amount", "account_id", "transaction_date"])?; }
             else { api::allowed_body(body, &[])?; }
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             api::revision(headers, body, &before)?;
             let currency = text(&before, "currency")?;
@@ -2206,7 +2206,7 @@ pub async fn route(
             api::allowed_body(body, &["contribution", "withdrawal", "value", "account_id", "transaction_date"])?;
             month(record_month)?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             if before["tracking_mode"] == "full_history" { return Err(ApiError::invalid("Use dated events and bulk valuations for full-history holdings.")); }
             api::revision(headers, body, &before)?;
@@ -2282,7 +2282,7 @@ pub async fn route(
             api::allowed_body(body, &[])?;
             month(record_month)?;
             let before = storage::get(db, p, "investments", id).await?;
-            owner(p, &before)?;
+            owner(db, p, &before).await?;
             active(&before)?;
             if before["tracking_mode"] == "full_history" { return Err(ApiError::invalid("Reverse events or correct valuations instead of deleting a full-history month.")); }
             api::revision(headers, body, &before)?;

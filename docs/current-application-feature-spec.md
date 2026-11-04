@@ -448,3 +448,7 @@ Implementation sources take precedence over older design proposals. This invento
 - Prototype boundary: [`ai-service/README.md`](../ai-service/README.md).
 
 Older frontend, household-budgeting, investment, architecture, and API design documents contain both implemented and proposed behavior. Use this document as the consolidated current feature inventory; consult source and the implemented API contract for exact validation and permissions.
+
+### Family member controls
+
+Settings → Family member controls lets an owner or admin enable management of finances already shared with family members. The switch starts off. When enabled, members can edit each other’s accessible accounts and credit-card dues, record payments, and manage investments, SIPs, goals, and planned expenses. When disabled, other members retain view-only access while record owners retain control. Private visibility, economic ownership, and audit attribution remain unchanged. API permission checks use the current setting on every write, and navigation refreshes the browser controls.

@@ -19,6 +19,7 @@ function workspace() {
     api:{collection:async path=>{calls.network.push(path);return {data:[{id:path}]};}}
   };
   vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf("const familyControlsEnabled ="),source.indexOf("const accountOptions =")),context);
   vm.runInContext(source.slice(source.indexOf('function investmentSnapshot('),source.indexOf('function updateLinkedInvestmentView(')),context);
   return {context,state,calls,root};
 }
@@ -50,6 +51,7 @@ test('investment workspace initially requests the selected month',async()=>{
     period:()=>({from:'2026-10-01',to:'2026-11-01'}),URLSearchParams,
     allInvestments:async()=>[],api:{collection:async path=>{calls.push(path);return {data:[]};},request:async()=>({data:[]})},investmentContent:()=> 'workspace'};
   vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf("const familyControlsEnabled ="),source.indexOf("const accountOptions =")),context);
   const start=source.indexOf('  async investments() {');
   const end=source.indexOf('\n  async imports(',start);
   vm.runInContext('var view={'+source.slice(start,end)+'};',context);
@@ -131,12 +133,13 @@ test('Add money preselects an emergency fund and limits the source account curre
   const form={elements:{holding_id:{value:''},investment_name:{},account_id:{value:''},amount:{focus:()=>{}}},querySelector:selector=>panels[selector]};
   const rendered=[];
   const context=vm.createContext({
-    state:{view:'investments',month:'2026-10',me:{user:{id:'u'}},transactionFilters:{},accounts:[{id:'bank',name:'Bank',currency:'INR'},{id:'usd',name:'Dollar bank',currency:'USD'}]},
+    state:{view:'investments',month:'2026-10',me:{user:{id:'u'}},transactionFilters:{},accounts:[{id:'bank',name:'Bank',currency:'INR',owner_id:'u'},{id:'usd',name:'Dollar bank',currency:'USD',owner_id:'u'}]},
     allInvestments:async()=>[fund,{...fund,id:'archived',archived:true},{...fund,id:'other',owner_id:'someone-else'}],
     dialog:{querySelector:()=>form},document:{querySelector:()=>form},
     h:String,option:(value,label)=>`<option value="${value}">${label}</option>`,field:(_label,html)=>html,input:()=>'',moneyInput:()=>'',
     localDate:()=> '2026-10-24',lastTransactionAccount:()=>'',editor:(...args)=>rendered.push(args)
   });
+  vm.runInContext(source.slice(source.indexOf('const familyControlsEnabled ='),source.indexOf('const accountOptions =')),context);
   vm.runInContext(source.slice(source.indexOf('async function investmentTransactionEditor('),source.indexOf('function planEditor(')),context);
   await context.investmentTransactionEditor('cc');
   assert.equal(rendered[0][0],'Add money to emergency fund');
@@ -214,4 +217,26 @@ test('SIP manual recording is available before a debit is matched and unavailabl
   holding.records=[];holding.owner_id='other';holding.visibility='shared';
   context.renderInvestmentTab();
   assert.doesNotMatch(root.innerHTML,/investment-process-sip/);
+});
+
+
+test('family controls expose management for another member’s shared holding and SIP',()=>{
+  const {context,state,root}=workspace();
+  context.button=(label,action)=>`[${action}:${label}]`;
+  context.investmentSipForMonth=()=>({amount:'100',status:'active'});
+  context.sipDueDate=()=> '2026-10-12';
+  const holding=state.investmentViewData.holdings[0];
+  holding.owner_id='other';holding.visibility='shared';holding.records=[];
+  context.renderInvestmentTab();
+  assert.doesNotMatch(root.innerHTML,/investment-add-money/);
+  state.me.household.family_member_controls=true;
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/investment-add-money/);
+  state.investmentTab='sips';
+  context.renderInvestmentTab();
+  assert.match(root.innerHTML,/investment-process-sip:Record investment/);
+  state.me.household.family_member_controls=false;
+  context.renderInvestmentTab();
+  assert.doesNotMatch(root.innerHTML,/investment-process-sip|investment-sip:Edit SIP/);
+  assert.match(root.innerHTML,/View only/);
 });

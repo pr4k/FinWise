@@ -11,6 +11,7 @@ function helpers() {
     analyticsView:{sumMoney:values=>values.reduce((sum,value)=>sum+Number(value),0).toFixed(2)},
     householdDate:()=> '2026-10-24',investmentSnapshot:holding=>holding
   });
+  vm.runInContext(source.slice(source.indexOf('const familyControlsEnabled ='),source.indexOf('const accountOptions =')),context);
   vm.runInContext(source.slice(source.indexOf('const accountAvailable ='),source.indexOf('const field =')),context);
   return context;
 }
@@ -113,10 +114,14 @@ test('opened account leads with the reduced available balance and retains the re
   selected.owner_id='family-member';
   selected.visibility='shared';
   const sharedCard=await context.view.accounts(['bank']);
-  assert.match(sharedCard,/data-action="opening-balance">Set known balance/);
+  assert.match(sharedCard,/View only/);
+  assert.doesNotMatch(sharedCard,/data-action="opening-balance"/);
+  context.state.me.household={family_member_controls:true};
+  assert.match(await context.view.accounts(['bank']),/data-action="opening-balance">Set known balance/);
   assert.doesNotMatch(sharedCard,/data-action="edit-account"/);
   selected.opening_balance={amount:'2000.00',as_of:'2026-10-01T00:00:00Z'};
   assert.match(await context.view.accounts(['bank']),/data-action="opening-balance">Edit known balance/);
+  context.state.me.household.family_member_controls=false;
   selected.visibility='private';
   assert.doesNotMatch(await context.view.accounts(['bank']),/data-action="opening-balance"/);
 });

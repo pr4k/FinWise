@@ -712,6 +712,7 @@ pub async fn route(
     }
     let s = session(db, p, parts[2]).await?;
     if method == "POST" {
+        storage::require_account_write(db, p, text(&s, "account_id")?).await?;
         api::revision(headers, body, &s)?;
     }
     let value = match (method, &parts[3..]) {

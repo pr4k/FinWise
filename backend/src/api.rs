@@ -573,7 +573,7 @@ pub(crate) async fn route(
         ("PATCH", ["planned-items", id]) => {
             allowed_body(body, &["title","due_date","amount","currency","category_id","account_id","visibility","status","budget_commitment","budget_destination"])?;
             let before = storage::get(db,p,"planned_items",id).await?;
-            if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
+            if !storage::can_manage(db, p, &before).await? || before["deleted"] == true { return Err(ApiError::forbidden()); }
             revision(headers,body,&before)?;
             let mut after = patch(&before,body,&["title","due_date","amount","currency","category_id","account_id","visibility","status","budget_commitment","budget_destination"]);
             if family_only(db,p).await? { after["visibility"] = json!("shared"); }
@@ -591,7 +591,7 @@ pub(crate) async fn route(
         }
         ("DELETE", ["planned-items", id]) => {
             let before = storage::get(db,p,"planned_items",id).await?;
-            if before["owner_id"] != p.user_id { return Err(ApiError::forbidden()); }
+            if !storage::can_manage(db, p, &before).await? { return Err(ApiError::forbidden()); }
             revision(headers,body,&before)?;
             let matched: i64 = sqlx::query_scalar("SELECT count(*) FROM planned_item_matches WHERE household_id=? AND planned_item_id=?")
                 .bind(&p.household_id).bind(id).fetch_one(&mut *db).await?;
@@ -603,7 +603,7 @@ pub(crate) async fn route(
         ("POST", ["planned-items", id, "match"]) => {
             allowed_body(body, &["transaction_id", "reason"])?;
             let before = storage::get(db, p, "planned_items", id).await?;
-            if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
+            if !storage::can_manage(db, p, &before).await? || before["deleted"] == true { return Err(ApiError::forbidden()); }
             revision(headers, body, &before)?;
             if before["budget_commitment"] != true || before["status"] != "planned" {
                 return Err(ApiError::conflict("Only a planned budget commitment can be matched."));
@@ -626,7 +626,7 @@ pub(crate) async fn route(
         ("DELETE", ["planned-items", id, "match"]) => {
             allowed_body(body, &["reason"])?;
             let before = storage::get(db, p, "planned_items", id).await?;
-            if before["owner_id"] != p.user_id || before["deleted"] == true { return Err(ApiError::forbidden()); }
+            if !storage::can_manage(db, p, &before).await? || before["deleted"] == true { return Err(ApiError::forbidden()); }
             revision(headers, body, &before)?;
             let reason = text(body, "reason")?.trim();
             if reason.is_empty() || reason.len() > 500 { return Err(ApiError::invalid("Unmatch reason must be 1–500 characters.")); }
@@ -759,6 +759,9 @@ pub(crate) async fn route(
                 .as_bool()
                 .ok_or_else(|| ApiError::invalid("synced must be a boolean."))?;
             let before = storage::get(db, p, "transactions", id).await?;
+            for movement in before["movements"].as_array().into_iter().flatten() {
+                storage::require_account_write(db, p, text(movement, "account_id")?).await?;
+            }
             revision(headers, body, &before)?;
             if before["money_manager_excluded"] == true { return Err(ApiError::missing()); }
             if before["amendment"].is_null()
@@ -806,17 +809,20 @@ pub(crate) async fn route(
             auth::admin(p)?;
             let before = auth::me(db, p).await?["household"].clone();
             revision(headers, body, &before)?;
-            allowed_body(body, &["name", "timezone", "base_currency", "locale", "family_only", "money_manager_extension"])?;
+            allowed_body(body, &["name", "timezone", "base_currency", "locale", "family_only", "money_manager_extension", "family_member_controls"])?;
             let mut after = patch(
                 &before,
                 body,
-                &["name", "timezone", "base_currency", "locale", "family_only", "money_manager_extension"],
+                &["name", "timezone", "base_currency", "locale", "family_only", "money_manager_extension", "family_member_controls"],
             );
             if !after["family_only"].is_null() && !after["family_only"].is_boolean() {
                 return Err(ApiError::invalid("family_only must be a boolean."));
             }
             if body.get("money_manager_extension").is_some() && !body["money_manager_extension"].is_boolean() {
                 return Err(ApiError::invalid("money_manager_extension must be a boolean."));
+            }
+            if body.get("family_member_controls").is_some() && !body["family_member_controls"].is_boolean() {
+                return Err(ApiError::invalid("family_member_controls must be a boolean."));
             }
             text(&after, "name")?;
             domain::exponent(text(&after, "base_currency")?)?;
@@ -1017,12 +1023,7 @@ pub(crate) async fn route(
             if family_only(db, p).await? { force_family(kind, &mut after); }
             match *kind {
                 "accounts" => {
-                    let shared_balance_update = before["visibility"] == "shared"
-                        && body.get("opening_balance").is_some()
-                        && body.as_object().unwrap().keys().all(|key| {
-                            matches!(key.as_str(), "opening_balance" | "expected_revision")
-                        });
-                    if before["owner_id"] != p.user_id && !shared_balance_update {
+                    if !storage::can_manage(db, p, &before).await? {
                         return Err(ApiError::forbidden());
                     }
                     if before["visibility"] == "private" && after["visibility"] == "shared" {
@@ -1137,7 +1138,7 @@ pub(crate) async fn route(
             allowed_body(body, &[])?;
             let before = storage::get(db, p, "accounts", id).await?;
             revision(headers, body, &before)?;
-            if before["owner_id"] != p.user_id {
+            if !storage::can_manage(db, p, &before).await? {
                 return Err(ApiError::forbidden());
             }
             if before["active"] == false {
@@ -1315,7 +1316,7 @@ pub(crate) async fn route(
             if before["account_id"] != account["id"] {
                 return Err(ApiError::missing());
             }
-            if before["owner_id"] != p.user_id && account["owner_id"] != p.user_id {
+            if !storage::can_manage(db, p, &account).await? {
                 return Err(ApiError::forbidden());
             }
             revision(headers, body, &before)?;
@@ -1328,7 +1329,7 @@ pub(crate) async fn route(
             if before["account_id"] != account["id"] {
                 return Err(ApiError::missing());
             }
-            if before["owner_id"] != p.user_id && account["owner_id"] != p.user_id {
+            if !storage::can_manage(db, p, &account).await? {
                 return Err(ApiError::forbidden());
             }
             revision(headers, body, &before)?;
@@ -1762,6 +1763,7 @@ pub(crate) async fn validate_ledger_with_history(
     }
     for movement in v["movements"].as_array().unwrap() {
         let a = storage::get(db, p, "accounts", text(movement, "account_id")?).await?;
+        storage::require_account_write(db, p, text(&a, "id")?).await?;
         let previously_used = before.is_some_and(|old| old["movements"].as_array().is_some_and(|legs| legs.iter().any(|leg| leg["account_id"] == a["id"])));
         if (a["active"] == false && !previously_used) || a["currency"] != v["currency"] {
             return Err(ApiError::invalid(

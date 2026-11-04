@@ -13,7 +13,7 @@ test('transaction details show the same content and host from every page',async(
   const rendered=[];
   let desktop=true;
   const context=vm.createContext({
-    state:{view:'transactions',accounts:[{id:'cash',subtype:'cash'}],categories:[],members:[],me:{user:{id:'me'}},ledgerBalances:new Map()},
+    state:{view:'transactions',accounts:[{id:'cash',subtype:'cash',owner_id:'me'}],categories:[],members:[],me:{user:{id:'me'}},ledgerBalances:new Map()},
     api:{request:async()=>transaction},id:encodeURIComponent,h:String,
     transactionDetailBalances:async()=>({balances:new Map(),unavailable:false}),transactionKindLabel:()=> 'Expense',transactionIndicators:()=>'',
     accountName:()=> 'Cash',categoryName:()=> 'Food',payerName:()=> 'You',
@@ -22,6 +22,7 @@ test('transaction details show the same content and host from every page',async(
     window:{matchMedia:()=>({matches:desktop})},dialog:{},transactionDrawer:{},
     editor:(...args)=>rendered.push(args)
   });
+  load(context,'const familyControlsEnabled =','const accountOptions =');
   load(context,'async function transactionDetail(','async function convertCardPaymentEditor(');
   for(const wide of [true,false]) {
     desktop=wide;
@@ -36,6 +37,14 @@ test('transaction details show the same content and host from every page',async(
       assert.match(rendered.at(-1)[1],/Reconciliation evidence/);
     }
   }
+  context.state.accounts[0].owner_id='other';
+  await context.transactionDetail('tx');
+  assert.match(rendered.at(-1)[1],/View only/);
+  assert.doesNotMatch(rendered.at(-1)[1],/Edit transaction:edit-transaction|Delete transaction:delete-transaction/);
+  context.state.me.household={family_member_controls:true};
+  await context.transactionDetail('tx');
+  assert.match(rendered.at(-1)[1],/Edit transaction:edit-transaction/);
+
 });
 
 test('opening the edit modal clears the details drawer and its layout state',()=>{

@@ -1647,6 +1647,7 @@ async fn commit(
         }
         if kind == "observation" {
             let inserted = record_occurrence(db, p, row, None).await?;
+            storage::require_account_write(db, p, text(row, "account_id")?).await?;
             crate::reconciliation::store_observation(db, p, row).await?;
             counts[if inserted { "observations" } else { "reused" }] = json!(
                 counts[if inserted { "observations" } else { "reused" }]

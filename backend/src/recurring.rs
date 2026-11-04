@@ -261,6 +261,7 @@ pub async fn tag(
         .find(|v| v["key"] == key)
         .cloned()
         .ok_or_else(ApiError::missing)?;
+    storage::require_account_write(db, p, text(&item, "account_id")?).await?;
     let before = sqlx::query(
         "SELECT subscription,ignored FROM recurring_labels WHERE household_id=? AND key=?",
     )
@@ -333,6 +334,9 @@ pub async fn assign(
     transaction: &Value,
     assignment: &Value,
 ) -> Result<Value> {
+    for movement in transaction["movements"].as_array().into_iter().flatten() {
+        storage::require_account_write(db, p, text(movement, "account_id")?).await?;
+    }
     let transaction_id = text(transaction, "id")?;
     let previous: Option<String> = sqlx::query_scalar(
         "SELECT key FROM recurring_payment_links WHERE household_id=? AND transaction_id=?",

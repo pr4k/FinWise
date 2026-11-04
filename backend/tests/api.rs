@@ -10,34 +10,57 @@ use serde_json::{Value, json};
 use std::path::Path;
 use tower::ServiceExt;
 
+async fn set_family_controls(owner: &Client, enabled: bool) -> Value {
+    let household=owner.call("GET","settings/household",json!({}),None,None).await.1;
+    let saved=owner.call("PATCH","settings/household",json!({"family_member_controls":enabled}),None,household["revision"].as_i64()).await;
+    assert_eq!(saved.0,StatusCode::OK,"{}",saved.1);
+    saved.1
+}
+
 #[tokio::test]
-async fn family_members_can_set_shared_card_starting_balances_only() {
+async fn family_controls_delegate_accounts_cards_and_investments_and_revoke_immediately() {
     let (owner, _) = setup().await;
     let (member, _) = partner(&owner).await;
-    // Exercise both a household owner editing a member's card and the reverse.
+    let household=owner.call("GET","settings/household",json!({}),None,None).await.1;
+    let denied=member.call("PATCH","settings/household",json!({"family_member_controls":true}),None,household["revision"].as_i64()).await;
+    assert_eq!(denied.0,StatusCode::FORBIDDEN);
+    let invalid=owner.call("PATCH","settings/household",json!({"family_member_controls":"true"}),None,household["revision"].as_i64()).await;
+    assert_eq!(invalid.0,StatusCode::BAD_REQUEST);
     for (creator, editor) in [(&member, &owner), (&owner, &member)] {
-        let card = creator.create("accounts", json!({"name":"Family card","subtype":"credit_card","currency":"INR","visibility":"shared"})).await;
-        let path = format!("accounts/{}", card["id"].as_str().unwrap());
-        let opening = json!({"amount":"2500.00","as_of":"2026-09-01T00:00:00+05:30"});
-        let saved = editor.call("PATCH", &path, json!({"opening_balance":opening}), None, card["revision"].as_i64()).await;
-        assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
-        assert_eq!(saved.1["balance"]["amount"], "2500.00");
-        assert_eq!(saved.1["owner_id"], card["owner_id"]);
-        let revision = saved.1["revision"].as_i64();
-        let stale = editor.call("PATCH", &path, json!({"opening_balance":opening}), None, card["revision"].as_i64()).await;
-        assert_eq!(stale.0, StatusCode::CONFLICT);
-        for body in [json!({"name":"Renamed"}), json!({"opening_balance":opening,"visibility":"private"})] {
-            let denied = editor.call("PATCH", &path, body, None, revision).await;
-            assert_eq!(denied.0, StatusCode::FORBIDDEN, "{}", denied.1);
-        }
-        let corrected = editor.call("PATCH", &path, json!({"opening_balance":{"amount":"3000.00","as_of":"2026-09-02T00:00:00+05:30"},"expected_revision":revision}), None, None).await;
-        assert_eq!(corrected.0, StatusCode::OK, "{}", corrected.1);
-        assert_eq!(corrected.1["balance"]["amount"], "3000.00");
-        let read = creator.call("GET", &path, json!({}), None, None).await;
-        assert_eq!(read.1["opening_balance"]["amount"], "3000.00");
-        let private = creator.create("accounts", json!({"name":"Private card","subtype":"credit_card","currency":"INR","visibility":"private"})).await;
-        let denied = editor.call("PATCH", &format!("accounts/{}", private["id"].as_str().unwrap()), json!({"opening_balance":opening}), None, private["revision"].as_i64()).await;
-        assert_eq!(denied.0, StatusCode::NOT_FOUND, "{}", denied.1);
+        let card=creator.create("accounts",json!({"name":"Family card","subtype":"credit_card","currency":"INR","visibility":"shared"})).await;
+        let bank=creator.create("accounts",json!({"name":"Family bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
+        let holding=creator.create("investments",json!({"name":"Family fund","type":"investment","currency":"INR","visibility":"shared","folio":"FOLIO-123","sip":{"amount":"100.00","day":4,"start_month":"2026-11","status":"active"}})).await;
+        let private=creator.create("investments",json!({"name":"Private fund","type":"investment","currency":"INR","visibility":"private"})).await;
+        let path=format!("accounts/{}",card["id"].as_str().unwrap());
+        let fund_path=format!("investments/{}",holding["id"].as_str().unwrap());
+        let due=json!({"card_due":{"amount":"2500.00","due_date":"2026-11-20"}});
+        assert_eq!(editor.call("PATCH",&path,due.clone(),None,Some(1)).await.0,StatusCode::FORBIDDEN);
+        assert_eq!(editor.call("GET",&path,json!({}),None,None).await.0,StatusCode::OK);
+        assert_ne!(editor.call("PATCH",&fund_path,json!({"name":"Changed"}),None,Some(1)).await.0,StatusCode::OK);
+        set_family_controls(&owner,true).await;
+        let saved=editor.call("PATCH",&path,due.clone(),None,Some(1)).await;
+        assert_eq!(saved.0,StatusCode::OK,"{}",saved.1);
+        assert_eq!(saved.1["owner_id"],card["owner_id"]);
+        assert_eq!(saved.1["card_due"]["amount"],"2500.00");
+        assert_eq!(editor.call("PATCH",&path,due.clone(),None,Some(1)).await.0,StatusCode::CONFLICT);
+        let payment=editor.call("POST","transactions",json!({"event_type":"transfer","currency":"INR","amount":"500.00","effective_date":"2026-11-04","description":"Family card payment","movements":[{"account_id":bank["id"],"amount":"-500.00"},{"account_id":card["id"],"amount":"500.00"}],"allocations":[]}),Some("family-card-payment"),None).await;
+        assert_eq!(payment.0,StatusCode::CREATED,"{}",payment.1);
+        assert_eq!(payment.1["entered_by"],editor.call("GET","me",json!({}),None,None).await.1["user"]["id"]);
+        let invested=editor.call("POST",&format!("{fund_path}/sip/2026-11/process"),json!({"account_id":bank["id"],"transaction_date":"2026-11-04"}),Some("family-sip"),Some(1)).await;
+        assert_eq!(invested.0,StatusCode::OK,"{}",invested.1);
+        assert_eq!(invested.1["owner_id"],holding["owner_id"]);
+        assert_eq!(invested.1["folio"],"FOLIO-123");
+        assert_eq!(editor.call("PATCH",&format!("investments/{}",private["id"].as_str().unwrap()),json!({"name":"No access"}),None,Some(1)).await.0,StatusCode::NOT_FOUND);
+        set_family_controls(&owner,false).await;
+        assert_eq!(editor.call("PATCH",&path,due.clone(),None,saved.1["revision"].as_i64()).await.0,StatusCode::FORBIDDEN);
+        let addition=editor.call("POST",&format!("{fund_path}/contributions"),json!({"amount":"50.00","account_id":bank["id"],"transaction_date":"2026-11-04"}),Some("disabled-addition"),invested.1["revision"].as_i64()).await;
+        assert_ne!(addition.0,StatusCode::OK);
+        let blocked_payment=editor.call("POST","transactions",json!({"event_type":"transfer","currency":"INR","amount":"10.00","effective_date":"2026-11-04","movements":[{"account_id":bank["id"],"amount":"-10.00"},{"account_id":card["id"],"amount":"10.00"}],"allocations":[]}),Some("disabled-card-payment"),None).await;
+        assert_eq!(blocked_payment.0,StatusCode::FORBIDDEN);
+        let edit=editor.call("PATCH",&format!("transactions/{}",payment.1["id"].as_str().unwrap()),json!({"description":"No longer permitted"}),None,payment.1["revision"].as_i64()).await;
+        assert_eq!(edit.0,StatusCode::FORBIDDEN);
+        assert_eq!(editor.call("GET",&fund_path,json!({}),None,None).await.0,StatusCode::OK);
+        assert_eq!(creator.call("PATCH",&path,due,None,saved.1["revision"].as_i64()).await.0,StatusCode::OK);
     }
 }
 
@@ -267,6 +290,7 @@ async fn family_only_mode_converts_history_and_forces_new_records() {
 #[tokio::test]
 async fn household_promotion_unlocks_shared_review_without_leaking_private_categories() {
     let (owner, _) = setup().await;
+    set_family_controls(&owner,true).await;
     let (member, _) = partner(&owner).await;
     let account = owner.create("accounts", json!({"name":"Owner bank","subtype":"bank","currency":"INR","visibility":"private"})).await;
     let category = owner.create("categories", json!({"name":"Groceries","kind":"expense","visibility":"private"})).await;
@@ -397,6 +421,7 @@ async fn household_report_groups_visible_activity_and_opted_in_investments() {
 #[tokio::test]
 async fn household_report_respects_other_members_private_records() {
     let (owner, _) = setup().await;
+    set_family_controls(&owner,true).await;
     let (member, _) = partner(&owner).await;
     let account = owner
         .create(
@@ -3000,6 +3025,7 @@ async fn quick_expense_rejects_invalid_inputs_and_keeps_other_routes_authenticat
 #[tokio::test]
 async fn quick_expense_permissions_idempotency_and_concurrent_retries() {
     let (owner, pool) = setup().await;
+    set_family_controls(&owner,true).await;
     let (member, _) = partner(&owner).await;
     let shared = owner
         .create(
@@ -3142,6 +3168,7 @@ async fn quick_expense_permissions_idempotency_and_concurrent_retries() {
 #[tokio::test]
 async fn invited_member_can_record_family_spending() {
     let (owner, _) = setup().await;
+    set_family_controls(&owner,true).await;
     let (member, membership) = partner(&owner).await;
     assert_eq!(membership["role"], "member");
     let account = owner
@@ -3185,6 +3212,7 @@ async fn invited_member_can_record_family_spending() {
 #[tokio::test]
 async fn combined_reports_and_transactions_include_own_personal_and_shared_once() {
     let (owner, _) = setup().await;
+    set_family_controls(&owner,true).await;
     let (member, _) = partner(&owner).await;
     let account = owner
         .create(
@@ -6513,6 +6541,7 @@ async fn reconciliation_partial_matching_conserves_value_and_edits_invalidate() 
 #[tokio::test]
 async fn reconciliation_authorization_atomic_missing_entry_rejection_and_replay() {
     let (owner, pool) = setup().await;
+    set_family_controls(&owner,true).await;
     let (partner, member) = partner(&owner).await;
     let bank = owner.account("Private", "bank").await;
     bank_evidence(&owner, &bank).await;
@@ -7858,7 +7887,8 @@ async fn paid_on_behalf_partial_reimbursements_share_credit_capacity_and_block_u
 
 #[tokio::test]
 async fn paid_on_behalf_batch_is_atomic_and_reversal_releases_shared_credit_capacity() {
-    let (c,_)=setup().await;let (other,_)=partner(&c).await;
+    let (c,_)=setup().await;
+    set_family_controls(&c,true).await;let (other,_)=partner(&c).await;
     let bank=c.create("accounts",json!({"name":"Shared bank","subtype":"bank","currency":"INR","visibility":"shared"})).await;
     let food=c.create("categories",json!({"name":"Purchases","kind":"expense","visibility":"shared"})).await;
     let income=c.create("categories",json!({"name":"Incoming","kind":"income","visibility":"shared"})).await;
