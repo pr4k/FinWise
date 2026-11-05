@@ -38,7 +38,7 @@ Restart or redeploy the updated server. Startup applies migration 0013 automatic
 
 ## Remaining architecture work
 
-1. Measure initial account loading and the Analytics/Budgets workspaces on representative NAS data: request duration, response bytes, database wait, and browser rendering time. Account balance projections currently scan JSON movements per account, and workspaces request multiple reports.
+1. Measure initial account loading and the Analytics/Budgets workspaces on representative NAS data: request duration, response bytes, database wait, and browser rendering time. Account lists now batch their projections; single-account detail and report fan-out remain candidates for representative NAS profiling.
 2. If account projection scans dominate, introduce a transaction-movement table indexed by household/account/date. Backfill and maintain it atomically with every transaction mutation, including imports and reset paths. Keep account balance visibility rules: an authorized account balance can include its side of a transfer even when the other leg is private.
 3. If report fan-out dominates, add a combined workspace response that computes shared authorized inputs once. Keep permission scope and period explicit.
 4. All-date collections still load and hash the full result on each page to preserve snapshot cursors. Replace this only with a versioned cursor contract that validates household ledger and access revisions before seeking by date/ID.
@@ -65,3 +65,58 @@ report context; a failed report read can be retried by reopening the disclosure.
 The dashboard regression test deliberately delays detailed reports and verifies
 that the main dashboard still renders without invoking them. This checks the
 loading dependency, rather than asserting a timing target for production NAS data.
+
+## Shared account and browser optimizations — 6 November 2026
+
+Accounts lists and analytics account reports now load account movements and balance
+checks once per batch. They retain authorization before projection, include only
+the authorized side of private transfers in balances, preserve dated anchor and
+card-sign rules, and keep missing balances unknown. Goal reservations are read
+once per batch, including private goals whose amounts must still be reserved;
+private goal names and IDs remain masked. Report movement totals use one pass.
+
+Account ledgers build one current account-access map rather than querying access
+for every transaction leg. Ledger anchors and balance-check histories reuse loaded
+movements instead of rereading them at every observed check. Access grants and
+revocations are read afresh for each request. The single-writer database policy
+and existing pagination snapshot validation remain intact. No schema migration
+or cross-request server cache is introduced.
+
+The browser shares simultaneous identical GET requests without caching subsequent
+uncached reads. Successful writes and session changes invalidate pending reuse;
+requests with abort signals remain independent. Sign-in reuses its freshly loaded
+catalogs for the first route instead of repeating the startup reads.
+
+Ledger rows initially render summaries; movement/allocation detail is built from
+already loaded records when expanded. Open rows remain populated across in-place
+refreshes. Currency/date formatters and chart tick formatters are reused instead
+of constructing them for every cell or tick. The appearance and visible row
+summaries remain unchanged.
+
+### Synthetic measurements
+
+| Workload | Comparison path | Optimized path |
+| --- | ---: | ---: |
+| 24 accounts, 6,000 transactions; file-backed SQLite, debug build | Individual account reads: 282 ms | Batched projections: 94 ms |
+| Render and parse 2,000 ledger rows in headless Chrome | Frozen previous renderer: 171 ms | Summary-first renderer: 23 ms |
+| Initial ledger HTML, same 2,000 summaries | 2,680,512 characters | 1,270,732 characters |
+
+These are local synthetic measurements, not production NAS timing guarantees.
+The browser benchmark compares identical visible summaries and verifies that
+collapsed details are absent initially, expand without a network read, and remain
+available after an in-place refresh. Financial tests compare batch and individual
+projections, actual expected amounts, private transfers and goals, access changes,
+future observations, card balances, unknown anchors and check variance/staleness.
+
+Run after building the current backend:
+
+```sh
+cargo test --locked --workspace
+cargo test --locked --test account_read_performance account_batch_benchmark -- --ignored --nocapture
+cargo build --locked -p finwise-api
+node --test web/tests/*.test.cjs
+node scripts/test-performance.cjs
+node scripts/test-reference-layout.cjs
+node scripts/test-navigation.cjs
+node scripts/test-dashboard-regressions.cjs
+```

@@ -76,3 +76,30 @@ test('investment pages and reports reuse reads and refresh after writes or sessi
   await api.request('investments?limit=200');
   assert.equal(calls.length,7);
 });
+test('simultaneous uncached reads share a request, but later reads stay fresh',async()=>{
+  let calls=0,release;
+  const api=client(async()=>{calls++;return new Promise(resolve=>{release=resolve;});});
+  const first=api.request('recurring-transactions'),second=api.request('recurring-transactions');
+  assert.equal(calls,1);release(response({data:[{amount:'123.45'}]}));
+  assert.deepEqual(await first,await second);
+  const third=api.request('recurring-transactions');assert.equal(calls,2);release(response({data:[]}));await third;
+});
+test('failed shared reads can retry and session changes discard in-flight reuse',async()=>{
+  let calls=0;const releases=[];
+  const api=client(async()=>{calls++;return new Promise((resolve,reject)=>releases.push({resolve,reject}));});
+  const first=api.request('me'),second=api.request('me');assert.equal(calls,1);
+  releases[0].reject(new TypeError('Offline'));await Promise.all([assert.rejects(first),assert.rejects(second)]);
+  const retry=api.request('me');assert.equal(calls,2);
+  api.reset();const fresh=api.request('me');assert.equal(calls,3);
+  releases[2].resolve(response({user:{id:'new-session'}}));assert.equal((await fresh).user.id,'new-session');
+  releases[1].resolve(response({user:{id:'old-session'}}));await retry;
+});
+test('writes break in-flight reuse and abortable reads remain independent',async()=>{
+  let calls=0;const releases=[];
+  const api=client(async(_url,options)=>{calls++;if(options.method==='POST')return response({id:'saved'});return new Promise(resolve=>releases.push(resolve));});
+  const before=api.request('recurring-transactions');await api.request('transactions',{method:'POST',body:{}});
+  const after=api.request('recurring-transactions');assert.equal(calls,3);
+  releases[0](response({data:[]}));releases[1](response({data:[{id:'new'}]}));await before;assert.equal((await after).data[0].id,'new');
+  const a=api.request('me',{signal:{}}),b=api.request('me',{signal:{}});assert.equal(calls,5);
+  releases[2](response({}));releases[3](response({}));await Promise.all([a,b]);
+});

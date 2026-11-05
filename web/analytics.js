@@ -15,7 +15,8 @@
       existing?.destroy();
       const spec=JSON.parse(canvas.dataset.chart);
       const horizontal=spec.horizontal;
-      const compact=value=>new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(value);
+      const compactFormat=new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1});
+      const compact=value=>compactFormat.format(value);
       const chart=new window.Chart(canvas,{
         type:spec.type,
         data:{labels:spec.labels,datasets:spec.datasets.map(dataset=>({

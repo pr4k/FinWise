@@ -3,6 +3,7 @@
   let csrf = '';
   const pending = new Map();
   const reads = new Map();
+  const inFlightReads = new Map();
   const cacheLifetime = 10000;
   let readGeneration = 0;
   function requestKey() {
@@ -36,8 +37,17 @@
         return value;
       } catch(error) { if(reads.get(path)?.promise===promise) reads.delete(path); throw error; }
     }
+    // Share simultaneous reads without extending their freshness or delaying
+    // permission refreshes on later navigation. Abortable reads stay independent.
+    if(method==='GET' && !signal) {
+      if(inFlightReads.has(path))return inFlightReads.get(path);
+      const promise=fetchRequest(path,{method,body,revision,key,signal});
+      inFlightReads.set(path,promise);
+      try { return await promise; }
+      finally { if(inFlightReads.get(path)===promise)inFlightReads.delete(path); }
+    }
     const value=await fetchRequest(path,{method,body,revision,key,signal});
-    if (method !== 'GET') { readGeneration++; reads.clear(); }
+    if (method !== 'GET') { readGeneration++; reads.clear(); inFlightReads.clear(); }
     return value;
   }
   async function fetchRequest(path, { method, body, revision, key, signal }) {
@@ -76,5 +86,5 @@
     } while (cursor);
     return { data, meta };
   }
-  window.finwiseAPI = { request, collection, setCsrf(value) { if(csrf!==value) { readGeneration++; reads.clear(); } csrf = value; }, reset() { csrf = ''; pending.clear(); readGeneration++; reads.clear(); } };
+  window.finwiseAPI = { request, collection, setCsrf(value) { if(csrf!==value) { readGeneration++; reads.clear(); inFlightReads.clear(); } csrf = value; }, reset() { csrf = ''; pending.clear(); readGeneration++; reads.clear(); inFlightReads.clear(); } };
 })();

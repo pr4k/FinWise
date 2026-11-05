@@ -753,20 +753,42 @@ fn goal_allocation_amount(allocation: &Value, asset_value: i64, currency: &str) 
 // Reservations change spendable funds, never the ledger balance. Include all
 // active goals using this account so hidden goals cannot free up reserved money;
 // their names and identifiers remain private.
-pub(crate) async fn account_funds(db: &mut SqliteConnection, p: &Principal, account: &Value) -> Result<Value> {
-    let currency = text(account, "currency")?;
-    let balance = account["balance"]["amount"].as_str().map(|value| money(value, currency)).transpose()?;
+async fn account_fund_goals(db: &mut SqliteConnection, p: &Principal, accounts: &[Value]) -> Result<Vec<(Value, bool)>> {
     let documents: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='investment_goals' ORDER BY id")
         .bind(&p.household_id).fetch_all(&mut *db).await?;
-    let mut reservations = vec![];
+    let mut goals = vec![];
     for document in documents {
         let goal: Value = serde_json::from_str(&document).map_err(|_| ApiError::invalid("Invalid stored goal."))?;
-        if goal["archived"] == true || goal["deleted"] == true || goal["currency"] != currency { continue; }
+        if goal["archived"] == true || goal["deleted"] == true { continue; }
+        if !accounts.iter().any(|account| goal["currency"] == account["currency"] && goal["allocations"].as_array().into_iter().flatten().any(|a| a["asset_kind"] == "account" && a["asset_id"] == account["id"])) { continue; }
         let visible = storage::visible(db, p, "investment_goals", &goal).await?;
+        goals.push((goal, visible));
+    }
+    Ok(goals)
+}
+pub(crate) async fn account_funds(db: &mut SqliteConnection, p: &Principal, account: &Value) -> Result<Value> {
+    let goals = account_fund_goals(db, p, std::slice::from_ref(account)).await?;
+    account_funds_from(account, &goals)
+}
+pub(crate) async fn account_funds_many(db: &mut SqliteConnection, p: &Principal, accounts: &mut [Value]) -> Result<()> {
+    let eligible: Vec<Value> = accounts.iter().filter(|a| matches!(a["subtype"].as_str(), Some("bank" | "cash" | "investment_cash"))).cloned().collect();
+    if eligible.is_empty() { return Ok(()); }
+    let goals = account_fund_goals(db, p, &eligible).await?;
+    for account in accounts.iter_mut().filter(|a| matches!(a["subtype"].as_str(), Some("bank" | "cash" | "investment_cash"))) {
+        account["funds"] = account_funds_from(account, &goals)?;
+    }
+    Ok(())
+}
+fn account_funds_from(account: &Value, goals: &[(Value, bool)]) -> Result<Value> {
+    let currency = text(account, "currency")?;
+    let balance = account["balance"]["amount"].as_str().map(|value| money(value, currency)).transpose()?;
+    let mut reservations = vec![];
+    for (goal, visible) in goals {
+        if goal["archived"] == true || goal["deleted"] == true || goal["currency"] != currency { continue; }
         for allocation in goal["allocations"].as_array().into_iter().flatten() {
             if allocation["asset_kind"] != "account" || allocation["asset_id"] != account["id"] { continue; }
             let requested = balance.map(|value| goal_allocation_amount(allocation, value, currency)).transpose()?;
-            reservations.push((goal["kind"] == "emergency", visible, goal.clone(), requested));
+            reservations.push((goal["kind"] == "emergency", *visible, goal.clone(), requested));
         }
     }
     // Preserve emergency money first if spending has since reduced the balance.

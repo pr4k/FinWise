@@ -283,7 +283,27 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr))}
 .reference-page .planner-module .build-category input {min-width:0;width:100%;font-size:13px;padding:10px;border:1px solid #dfe5da;border-radius:7px;background:white}
 .reference-page .planner-module .build-category>b {overflow-wrap:anywhere;font-size:12px;font-weight:500}
-.reference-account-detail .account-detail-hero {display:flex;flex-wrap:wrap;height:auto;gap:15px;padding:20px;margin-bottom:18px}
+.reference-page .account-detail-hero {height:auto;min-height:0;align-items:flex-end;padding:24px;background:linear-gradient(115deg,#1d3327,#294c36 65%,#3a6542);border:0;color:#f8fbf5}
+.reference-page .account-detail-hero>div {min-width:0}
+.reference-page .account-detail-hero .eyebrow {color:#d5e7c6;font-size:11px;letter-spacing:.08em}
+.reference-page .account-detail-position {flex:0 1 auto;overflow-wrap:anywhere}
+.reference-page .account-detail-position .money-figure {color:#fff}
+.reference-page .account-detail-position .money-figure.debt {color:#ffe0b7}
+.live-dialog[open]:has(.reference-account-detail) {display:flex;flex-direction:column;overflow:hidden;border-radius:0}
+.live-dialog:has(.reference-account-detail)>.dialog-head {flex:none;padding-bottom:16px}
+.live-dialog:has(.reference-account-detail)>.dialog-head .icon-button {min-width:44px;min-height:44px;font-size:24px}
+.live-dialog:has(.reference-account-detail)>.detail-dialog-body {flex:1;min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;padding:0 1px 16px}
+.live-dialog:has(.reference-account-detail)>.dialog-actions {position:static;flex:none;margin:0;padding:14px 0 0}
+.reference-account-detail {padding:0;background:transparent}
+.reference-account-detail .account-detail-metrics {grid-template-columns:repeat(2,minmax(0,1fr))}
+.reference-account-detail .account-detail-grid,.reference-account-detail .account-subscription-list {grid-template-columns:minmax(0,1fr)}
+.reference-account-detail .account-ledger-row {grid-template-columns:90px minmax(0,1fr) minmax(120px,auto);gap:10px}
+.reference-account-detail .account-ledger-row>.outline-button {grid-column:2/-1;justify-self:end}
+@media(max-width:650px) {
+  .reference-page .account-detail-hero {padding:20px;align-items:flex-start}
+  .reference-account-detail .account-ledger-row {grid-template-columns:minmax(0,1fr) auto}
+  .reference-account-detail .account-ledger-row>.outline-button {grid-column:1/-1;justify-self:start}
+}
 @media(max-width:760px) {.reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {font-size:10px;gap:8px}.reference-page .planner-module .build-category input {font-size:16px}.reference-page .planner-module .build-category>b {font-size:10px}}
 /* Keep the first dashboard section compact, including Family-only households. */
 .content:has(>.reference-page[data-reference-page="overview"]) {padding-top:22px}
@@ -306,3 +326,83 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .credit-card-row small {display:block;margin-top:4px;color:#74866a;font-size:10px;overflow-wrap:anywhere}
 @media(max-width:930px) {.credit-card-summary {grid-template-columns:minmax(0,1fr)}.credit-card-rows {grid-template-columns:minmax(0,1fr)}}
 @media(max-width:760px) {.content:has(>.reference-page[data-reference-page="overview"]) {padding-top:16px}.reference-overview .dc-equation-panel {padding:18px}.credit-card-summary {gap:8px}.credit-card-summary>button,.credit-card-summary>div {padding:12px}.credit-card-row small {font-size:11px}}
+
+/* Visual polish: retain the established grids, navigation and responsive layout. */
+:root,
+.reference-page {
+  --bg: #f5f7f6;
+  --ink: #20352d;
+  --muted: #64756d;
+  --line: #e2e9e5;
+  --green: #24664e;
+  --purple: #24664e;
+  --purple-soft: #e8f2ec;
+  --mint: #edf5f0;
+  --radius: 16px;
+  --shadow: 0 2px 3px #20352d03, 0 8px 24px #20352d05;
+}
+body {background:var(--bg);-webkit-font-smoothing:antialiased}
+::selection {background:#cfe8dc;color:#173d2e}
+.sidebar {background:#fcfdfc;border-color:var(--line)}
+.sidebar .brand {letter-spacing:-1.2px}
+.brand-mark {background:#24664e;color:#fff;box-shadow:0 3px 8px #24664e18}
+.sidebar .nav-item {border-radius:10px;color:#586d62;transition:background-color .16s ease,color .16s ease}
+.sidebar .nav-item:hover {background:#f0f4f1;color:#24664e}
+.sidebar .nav-item.active {background:#e5f0e9;color:#205c44;box-shadow:inset 3px 0 #398060;font-weight:700}
+.workspace-label {color:#697c70;letter-spacing:.12em}
+.household-card span,.profile span {color:#64756d}
+.workspace-note {background:#eff4f0;border:1px solid #e2ebe4;border-radius:12px}
+.workspace-note p {color:#64756d}
+.topbar {background:#fcfdfc;border-color:var(--line)}
+.topbar .breadcrumb,.workspace-status {color:#64756d}
+.topbar .mobile-menu {border-radius:9px;background:#fff}
+.reference-page .page-heading h1 {font-weight:700;letter-spacing:-1.1px;color:var(--ink)}
+.reference-page .page-heading p {color:var(--muted);font-size:12px;line-height:1.65}
+.reference-page .page-heading .eyebrow {color:#64796c;font-weight:600;letter-spacing:.14em}
+.reference-page .cm-head h2 {font-family:var(--display);font-weight:700;letter-spacing:-.5px}
+.reference-page .panel,.reference-page .card,.reference-page .snapshot,
+.reference-page .kpi,.reference-page .cm-account,.reference-page .cm-holding,
+.reference-page .cm-service {
+  border-color:var(--line);
+  border-radius:16px;
+  box-shadow:var(--shadow);
+}
+.reference-page .panel:hover {border-color:var(--line)}
+.reference-page .kpi:hover {transform:none;border-color:#acc8b8;box-shadow:0 4px 18px #20352d0a}
+.reference-page .kpi:last-child {background:#edf5f0;border-color:#d8e8de}
+.reference-page .button,.reference-page .primary-button,.reference-page .outline-button {
+  border-radius:9px;font-weight:600;border-color:#d6e1da;
+  transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.reference-page .button.primary,.reference-page .primary-button,
+.primary-button {background:#24664e;border-color:#24664e;color:#fff;box-shadow:0 2px 4px #163f3014}
+.reference-page .button.primary:hover,.reference-page .primary-button:hover,
+.primary-button:hover {background:#1c523e;border-color:#1c523e;transform:none}
+.reference-page .button:not(.primary):hover,.reference-page .outline-button:hover {background:#f1f6f3;border-color:#b5ccbe;transform:none}
+.reference-page .scope-segments,.reference-page .segmented {background:#eaf0ec;border-color:#dfe8e2;border-radius:10px}
+.reference-page .scope-segments button,.reference-page .segmented button {border-radius:7px;color:#5d7165}
+.reference-page .scope-segments button.selected,.reference-page .segmented button.selected {color:#205c44;box-shadow:0 1px 4px #20352d12}
+.reference-page .month-filter,.reference-page .context-bar>select {border-radius:9px;border-color:#d6e1da}
+.reference-page .month-filter input {color:#405d4e}
+.reference-page .dashboard-note,.reference-page .cashflow,
+.credit-card-summary>div {background:#f0f5f2;border-color:#e0e9e3;color:#5d7165}
+.credit-card-summary>button {background:#e8f2ec}
+.reference-page .dashboard-row small,.reference-page .dashboard-note,
+.reference-page .dashboard-panel-head p,.reference-page .dashboard-compare,
+.reference-page .snapshot .balance-cell>small:last-child {color:#64756d}
+.reference-page .section-label h2,.reference-page .panel h2 {font-weight:700;letter-spacing:-.25px}
+.reference-page .dashboard-row,.reference-page .account-row,.reference-page .movement-row {transition:background-color .16s ease}
+.reference-page .dashboard-row:hover,.reference-page .account-row:hover,.reference-page .movement-row:hover {background:#f6f9f7}
+.field input,.field select,.field textarea,.live-table select {border-color:#d6e1da;border-radius:9px;box-shadow:0 1px 2px #20352d04}
+.field input:focus,.field select:focus,.field textarea:focus {border-color:#398060;box-shadow:0 0 0 3px #3980601a}
+.live-table th {background:#f4f7f5;color:#586e61;font-weight:600}
+.live-table td {border-color:#e8eee9}
+.live-table tbody tr:hover {background:#f7faf8}
+.live-dialog,.auth-card {background:#fff;border-color:#dfe8e2;border-radius:18px;box-shadow:0 24px 80px #16382a26}
+.live-dialog::backdrop {background:#152d245c;backdrop-filter:blur(5px)}
+/* Keep keyboard focus visible even on reference controls with custom resets. */
+:where(body,.reference-page) :is(button,a,summary,input,select,textarea):focus-visible {outline:2px solid #287653;outline-offset:3px}
+@media (prefers-reduced-motion:reduce) {
+  html {scroll-behavior:auto}
+  *,*::before,*::after {transition:none!important;animation:none!important}
+}

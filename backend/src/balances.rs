@@ -8,7 +8,7 @@ use crate::{
 use chrono::{DateTime, TimeZone, Utc};
 use serde_json::{Value, json};
 use sqlx::{Row, SqliteConnection};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub fn timestamp(value: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
@@ -74,6 +74,15 @@ pub async fn project(
     cutoff: DateTime<Utc>,
 ) -> Result<Value> {
     let tz = timezone(db, p, account).await?;
+    let events = events(db, p, account).await?;
+    project_from(account, cutoff, tz, &events)
+}
+fn project_from<'a>(
+    account: &Value,
+    cutoff: DateTime<Utc>,
+    tz: chrono_tz::Tz,
+    events: impl IntoIterator<Item = &'a Value>,
+) -> Result<Value> {
     let currency = text(account, "currency")?;
     let opening = account.get("opening_balance").filter(|v| !v.is_null());
     let opening_at = opening.map(|v| timestamp(text(v, "as_of")?)).transpose()?;
@@ -91,7 +100,7 @@ pub async fn project(
     }
     let mut snapshot = vec![];
     let mut net = 0;
-    for event in events(db, p, account).await? {
+    for event in events {
         let at = effective_at(&event, tz)?;
         let direction = match opening_at {
             Some(anchor) if cutoff < anchor && cutoff < at && at <= anchor => -1,
@@ -138,9 +147,68 @@ pub async fn project(
 }
 pub async fn decorate(db: &mut SqliteConnection, p: &Principal, account: &mut Value) -> Result<()> {
     account["balance"] = derived(db, p, account, Utc::now()).await?;
-    if matches!(account["subtype"].as_str(), Some("bank" | "cash" | "investment_cash")) {
+    if matches!(
+        account["subtype"].as_str(),
+        Some("bank" | "cash" | "investment_cash")
+    ) {
         account["funds"] = crate::planning::account_funds(db, p, account).await?;
     }
+    Ok(())
+}
+
+// Callers must authorize accounts before passing them here, as with decorate().
+// Raw transfers are intentionally included: an authorized account balance must
+// include its own leg even when the counterparty account is private.
+pub async fn decorate_many(
+    db: &mut SqliteConnection,
+    p: &Principal,
+    accounts: &mut [Value],
+) -> Result<()> {
+    if accounts.is_empty() {
+        return Ok(());
+    }
+    let ids: HashSet<String> = accounts
+        .iter()
+        .map(|a| text(a, "id").map(str::to_owned))
+        .collect::<Result<_>>()?;
+    let household = auth::me(db, p).await?["household"].clone();
+    let checks = storage::list(db, p, "balance_checks").await?;
+    let documents: Vec<String> = sqlx::query_scalar("SELECT document FROM resources WHERE household_id=? AND kind='transactions' AND EXISTS(SELECT 1 FROM json_each(document,'$.movements') WHERE json_extract(value,'$.account_id') IN (SELECT value FROM json_each(?))) ORDER BY id")
+        .bind(&p.household_id).bind(json!(ids).to_string()).fetch_all(&mut *db).await?;
+    let events = documents
+        .into_iter()
+        .map(|document| {
+            serde_json::from_str::<Value>(&document)
+                .map_err(|_| ApiError::invalid("Invalid stored transaction."))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut by_account: HashMap<String, Vec<&Value>> = HashMap::new();
+    for event in &events {
+        let account_ids: HashSet<&str> = event["movements"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| m["account_id"].as_str())
+            .filter(|id| ids.contains(*id))
+            .collect();
+        for id in account_ids {
+            by_account.entry(id.to_owned()).or_default().push(event);
+        }
+    }
+    let now = Utc::now();
+    for account in accounts.iter_mut() {
+        let tz = account["timezone"]
+            .as_str()
+            .unwrap_or(household["timezone"].as_str().unwrap_or("UTC"))
+            .parse()
+            .map_err(|_| ApiError::invalid("Invalid IANA timezone."))?;
+        let events = by_account
+            .get(text(account, "id")?)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        account["balance"] = derived_from(account, now, tz, &checks, events.iter().copied())?;
+    }
+    crate::planning::account_funds_many(db, p, accounts).await?;
     Ok(())
 }
 
@@ -153,15 +221,25 @@ pub async fn derived(
     account: &Value,
     cutoff: DateTime<Utc>,
 ) -> Result<Value> {
+    let tz = timezone(db, p, account).await?;
+    let checks = storage::list(db, p, "balance_checks").await?;
+    let events = events(db, p, account).await?;
+    derived_from(account, cutoff, tz, &checks, &events)
+}
+fn derived_from<'a>(
+    account: &Value,
+    cutoff: DateTime<Utc>,
+    tz: chrono_tz::Tz,
+    checks: &[Value],
+    events: impl IntoIterator<Item = &'a Value>,
+) -> Result<Value> {
     let currency = text(account, "currency")?;
     let opening_at = account["opening_balance"]["as_of"]
         .as_str()
         .map(timestamp)
         .transpose()?;
-    let tz = timezone(db, p, account).await?;
-    let checks = storage::list(db, p, "balance_checks").await?;
     let mut anchors = checks
-        .into_iter()
+        .iter()
         .filter(|v| v["account_id"] == account["id"] && v["voided"] != true)
         .map(|v| Ok((timestamp(text(&v, "as_of")?)?, v)))
         .collect::<Result<Vec<_>>>()?;
@@ -186,7 +264,7 @@ pub async fn derived(
                 .checked_neg()
                 .ok_or_else(|| ApiError::invalid("Card balance out of range."))?;
         }
-        for event in events(db, p, account).await? {
+        for event in events {
             if event["voided"] == true {
                 continue;
             }
@@ -222,7 +300,7 @@ pub async fn derived(
             json!({"amount":format_money(value,currency)?,"currency":currency,"basis":basis(account),"as_of":cutoff.to_rfc3339(),"complete":true,"coverage":"unknown","source":"balance_check","anchor_at":anchor_at.to_rfc3339(),"anchor_id":check["id"]}),
         );
     }
-    let mut value = project(db, p, account, cutoff).await?;
+    let mut value = project_from(account, cutoff, tz, events)?;
     value["source"] = json!(if value["complete"] == true {
         "opening_balance"
     } else {
@@ -240,7 +318,9 @@ pub async fn ledger(
     let tz = timezone(db, p, account).await?;
     let currency = text(account, "currency")?;
     let mut rows = vec![];
-    for event in events(db, p, account).await? {
+    let visible_accounts = storage::visible_accounts(db, p).await?;
+    let account_events = events(db, p, account).await?;
+    for event in &account_events {
         if event["voided"] == true {
             continue;
         }
@@ -251,7 +331,7 @@ pub async fn ledger(
                 movement = add(movement, money(text(leg, "amount")?, currency)?)?;
             }
         }
-        let visible = storage::visible(db, p, "transactions", &event).await?;
+        let visible = storage::transaction_visible(event, &visible_accounts)?;
         rows.push(json!({"transaction_id":if visible { event["id"].clone() } else { Value::Null },"effective_date":event["effective_date"],"effective_at":at.to_rfc3339(),"description":if visible { event["description"].clone() } else { json!("Private transfer") },"event_type":if visible { event["event_type"].clone() } else { json!("transfer") },"movement":format_money(movement,currency)?,"currency":currency}));
     }
     rows.sort_by(|a, b| {
@@ -266,7 +346,7 @@ pub async fn ledger(
     }
     let checks = storage::list(db, p, "balance_checks").await?;
     let mut anchors = checks
-        .into_iter()
+        .iter()
         .filter(|v| v["account_id"] == account["id"] && v["voided"] != true)
         .map(|v| Ok((timestamp(text(&v, "as_of")?)?, v)))
         .collect::<Result<Vec<_>>>()?;
@@ -381,12 +461,12 @@ pub async fn ledger(
     // They do not create a money movement.
     if let Some(opening) = opening {
         let at = timestamp(text(opening, "as_of")?)?;
-        let computed = project(db, p, account, at).await?;
-        let displayed = derived(db, p, account, at).await?;
+        let computed = project_from(account, at, tz, &account_events)?;
+        let displayed = derived_from(account, at, tz, &checks, &account_events)?;
         rows.push(json!({"event_type":"opening_balance","effective_date":at.with_timezone(&tz).format("%Y-%m-%d").to_string(),"effective_at":at.to_rfc3339(),"description":"Starting balance","movement":Value::Null,"currency":currency,"computed_from_start":computed["amount"],"balance_after":displayed["amount"],"balance_source":displayed["source"],"anchor_at":opening["as_of"]}));
     }
     for (at, check) in anchors {
-        let computed = project(db, p, account, at).await?;
+        let computed = project_from(account, at, tz, &account_events)?;
         rows.push(json!({"event_type":"balance_check","check_id":check["id"],"effective_date":at.with_timezone(&tz).format("%Y-%m-%d").to_string(),"effective_at":at.to_rfc3339(),"description":format!("Balance check · {}",check["basis"].as_str().unwrap_or("observed")),"movement":Value::Null,"currency":currency,"observed_amount":check["amount"],"computed_from_start":computed["amount"],"balance_after":check["amount"],"balance_source":"balance_check","anchor_at":check["as_of"]}));
     }
     rows.sort_by(|a, b| {
@@ -521,8 +601,15 @@ pub async fn history(
 ) -> Result<Vec<Value>> {
     let mut values = storage::list(db, p, "balance_checks").await?;
     values.retain(|v| v["account_id"] == account["id"]);
+    let tz = timezone(db, p, account).await?;
+    let account_events = events(db, p, account).await?;
     for value in &mut values {
-        let current = project(db, p, account, timestamp(text(value, "as_of")?)?).await?;
+        let current = project_from(
+            account,
+            timestamp(text(value, "as_of")?)?,
+            tz,
+            &account_events,
+        )?;
         value["stale"] = json!(current["ledger_snapshot"] != value["ledger_snapshot"]);
         value["current_calculated"] = current["amount"].clone();
         value["current_variance"] = current["amount"]

@@ -936,9 +936,7 @@ pub(crate) async fn route(
             }
             let mut response = paginate(values, q)?;
             if source == "accounts" {
-                for value in response["data"].as_array_mut().unwrap() {
-                    balances::decorate(db, p, value).await?;
-                }
+                balances::decorate_many(db, p, response["data"].as_array_mut().unwrap()).await?;
             }
             ok(response)
         }
@@ -2573,23 +2571,20 @@ async fn analytics_result(
             ok(json!({"data":data,"balance_snapshots":[],"page":{},"meta":meta}))
         }
         "accounts" | "coverage" => {
-            let accounts = storage::list(db, p, "accounts").await?;
-            let mut data = vec![];
-            for mut a in accounts {
-                if a["currency"] != currency
-                    || q.get("account_id").is_some_and(|id| a["id"] != id.as_str())
-                {
-                    continue;
-                }
-                balances::decorate(db, p, &mut a).await?;
-                let mut sum = 0;
-                for v in &values {
-                    for movement in v["movements"].as_array().unwrap() {
-                        if movement["account_id"] == a["id"] {
-                            sum = add(sum, money(text(movement, "amount")?, &currency)?)?;
-                        }
+            let mut accounts = storage::list(db, p, "accounts").await?;
+            accounts.retain(|a| a["currency"] == currency && !q.get("account_id").is_some_and(|id| a["id"] != id.as_str()));
+            balances::decorate_many(db, p, &mut accounts).await?;
+            let mut movement_totals: HashMap<String, i64> = accounts.iter().map(|a| Ok((text(a, "id")?.to_owned(), 0))).collect::<Result<_>>()?;
+            for value in &values {
+                for movement in value["movements"].as_array().unwrap() {
+                    if let Some(total) = movement["account_id"].as_str().and_then(|id| movement_totals.get_mut(id)) {
+                        *total = add(*total, money(text(movement, "amount")?, &currency)?)?;
                     }
                 }
+            }
+            let mut data = vec![];
+            for mut a in accounts {
+                let sum = movement_totals[text(&a, "id")?];
                 a["signed_movements"] = json!(format_money(sum, &currency)?);
                 a["coverage"] = json!("unknown");
                 data.push(a);

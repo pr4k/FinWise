@@ -235,7 +235,7 @@ pub async fn transactions_in_range(
     Ok(result)
 }
 
-async fn visible_accounts(
+pub(crate) async fn visible_accounts(
     db: &mut SqliteConnection,
     p: &Principal,
 ) -> Result<HashMap<String, bool>> {
@@ -255,7 +255,7 @@ async fn visible_accounts(
     Ok(accounts)
 }
 
-fn transaction_visible(value: &Value, accounts: &HashMap<String, bool>) -> Result<bool> {
+pub(crate) fn transaction_visible(value: &Value, accounts: &HashMap<String, bool>) -> Result<bool> {
     let Some(movements) = value["movements"].as_array() else {
         return Ok(true);
     };
