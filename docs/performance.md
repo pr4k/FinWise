@@ -53,3 +53,15 @@ Investment tabs and holding filters now render the loaded workspace locally with
 The investment report builds a transaction-to-holdings evidence index once, so ordinary unlinked expenses no longer scan every holding's records and trades. Linked amounts retain per-holding ownership rounding and legacy full-transaction links. Holding list pagination validates the snapshot of canonical documents before calculating FIFO and returns for only the requested page.
 
 Regression checks cover request-free tab rendering, skipped hidden activity/chart work, selected-month initial requests, historical candidate loading, investment read-cache invalidation, and paginated calculated fields/cursor conflicts. Existing investment API checks cover funding splits, refunds, ownership, FIFO, XIRR, and private holdings. Browser interaction timings on actual NAS hardware have not been measured; the Activity tab still renders its selected holdings' monthly history when opened.
+
+## Dashboard report loading
+
+The Overview no longer builds and fetches its collapsed detailed reports before
+rendering the dashboard. Opening Detailed reports & comparisons loads that region
+once and hydrates its charts. Direct `#overview/reports` links still load the
+reports immediately. Late responses are ignored after navigating or changing the
+report context; a failed report read can be retried by reopening the disclosure.
+
+The dashboard regression test deliberately delays detailed reports and verifies
+that the main dashboard still renders without invoking them. This checks the
+loading dependency, rather than asserting a timing target for production NAS data.

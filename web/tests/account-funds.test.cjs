@@ -57,7 +57,7 @@ test('dashboard separates recorded balances, available funds, reserves, currenci
   const transfers=[{id:'payment',event_type:'transfer',currency:'INR',effective_date:'2026-10-12',amount:'20.00',movements:[{account_id:'bank',amount:'-20.00'},{account_id:'card',amount:'20.00'}]}];
   Object.assign(context,{
     state:{members:[],month:'2026-10',scope:'combined',me:{household:{base_currency:'INR'}},accounts:[account,card,usd],categories:[]},
-    reportQuery:()=>'',period:()=>({from:'2026-10-01',to:'2026-11-01'}),Date,Map,URLSearchParams,smartReviewPanel:()=>'',
+    location:{hash:'#overview'},reportQuery:()=>'',period:()=>({from:'2026-10-01',to:'2026-11-01'}),Date,Map,URLSearchParams,smartReviewPanel:()=>'',
     api:{request:async path=>path.startsWith('analytics/dashboard')?{summary:{recorded_surplus:'0.00',income:'0.00',net_spending:'0.00',after_investment_cash_flow:'0.00',transfer_volume:'100.00'},series:{data:[]},categories:{data:[]},accounts:{data:[account,card,usd]}}:{data:[]},collection:async path=>({data:path.startsWith('analytics/transactions')?transfers:[]})},
     views:{dashboardReports:async()=>''},scopeTabs:()=>'',allInvestments:async()=>[],categoryView:{rollup:()=>new Map()},moneyTone:()=>'',
     responsiveAmount:(value,currency)=>value==null?'Unknown':`${currency} ${value}`,field:(_label,control)=>control,option:(value,label)=>`<option value="${value}">${label}</option>`,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
@@ -71,7 +71,11 @@ test('dashboard separates recorded balances, available funds, reserves, currenci
   const start=source.indexOf('  async overview() {');
   const end=source.indexOf('\n  async analytics()',start);
   vm.runInContext('var view={'+source.slice(start,end)+'};',context);
+  let reportCalls=0;context.views.dashboardReports=async()=>{reportCalls++;return '<section id="dashboard-reports">Reports</section>';};
   const html=await context.view.overview();
+  assert.equal(reportCalls,0,'collapsed reports must not block dashboard loading');
+  assert.match(html,/data-reports-lazy/);
+  context.location.hash='#overview/reports';await context.view.overview();assert.equal(reportCalls,1,'report deep links still load their content');
   assert.match(html,/Available money and reserves/);
   assert.match(html,/INR 71538.00/);
   assert.match(html,/Account snapshot/);

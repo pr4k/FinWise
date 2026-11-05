@@ -52,6 +52,7 @@ Verification uses isolated SQLite databases and synthetic records:
 ```sh
 node --test web/tests/*.test.cjs
 node scripts/test-reference-layout.cjs
+node scripts/test-dashboard-regressions.cjs
 node scripts/test-navigation.cjs
 node scripts/test-investment-recording.cjs
 node scripts/test-planner.cjs
@@ -62,3 +63,7 @@ checks page overflow and browser errors, and exercises cash-flow drill-downs,
 period controls, account drawers, transaction expansion/edit/search, category
 persistence and mobile navigation. It writes desktop and mobile review images
 to the operating system's temporary directory.
+
+Dashboard regressions additionally cover Family-only spacing, cards without future
+statement metadata, selected-month repayments, dated statement dues and lazy report
+loading. Card repayments, amount owed and statement dues are displayed separately.

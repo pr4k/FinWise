@@ -285,3 +285,24 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .reference-page .planner-module .build-category>b {overflow-wrap:anywhere;font-size:12px;font-weight:500}
 .reference-account-detail .account-detail-hero {display:flex;flex-wrap:wrap;height:auto;gap:15px;padding:20px;margin-bottom:18px}
 @media(max-width:760px) {.reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {font-size:10px;gap:8px}.reference-page .planner-module .build-category input {font-size:16px}.reference-page .planner-module .build-category>b {font-size:10px}}
+/* Keep the first dashboard section compact, including Family-only households. */
+.content:has(>.reference-page[data-reference-page="overview"]) {padding-top:22px}
+.reference-page[data-reference-page="overview"] .context-bar {margin:14px 0 12px;padding-bottom:12px}
+.reference-page[data-reference-page="overview"]:has(.scope-segments[hidden]) .context-bar {margin-top:8px;padding-bottom:8px}
+.reference-overview .dc-equation-panel {padding:20px;margin-bottom:18px}
+.reference-overview .dc-equation-panel>.dc-section-label {margin:0 0 12px}
+.reference-overview .dc-equation {margin:14px 0}
+.reference-page .dashboard-credit-cards {margin:0 0 18px}
+.credit-card-summary {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:0 0 16px;border-bottom:1px solid var(--line)}
+.credit-card-summary>button,.credit-card-summary>div {min-width:0;text-align:left;padding:12px;border:0;border-radius:9px;background:#f6f8f2;color:var(--ink);font:inherit}
+.credit-card-summary span,.credit-card-summary small {display:block;color:#74866a;font-size:11px}
+.credit-card-summary strong {display:block;margin:8px 0;font:650 clamp(20px,2vw,27px)/1.3 var(--display);overflow-wrap:anywhere}
+.credit-card-summary>button {cursor:pointer;background:#eaf1e6}
+.credit-card-rows {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}
+.reference-page .credit-card-row {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:14px 0;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;font:inherit}
+.credit-card-row>span {min-width:0}
+.credit-card-row>span:last-child {text-align:right;flex-shrink:0}
+.credit-card-row b {display:block;font-size:12px}
+.credit-card-row small {display:block;margin-top:4px;color:#74866a;font-size:10px;overflow-wrap:anywhere}
+@media(max-width:930px) {.credit-card-summary {grid-template-columns:minmax(0,1fr)}.credit-card-rows {grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px) {.content:has(>.reference-page[data-reference-page="overview"]) {padding-top:16px}.reference-overview .dc-equation-panel {padding:18px}.credit-card-summary {gap:8px}.credit-card-summary>button,.credit-card-summary>div {padding:12px}.credit-card-row small {font-size:11px}}
