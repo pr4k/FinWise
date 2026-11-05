@@ -33,12 +33,14 @@ try{
  await cdp('Page.reload');
  await until('!!document.querySelector(".transaction-page")&&!document.querySelector("#view-root").hasAttribute("aria-busy")');
  assert.equal(await run('document.querySelector("#report-month").value'),'2026-11');
- await run(`document.querySelector('.activity-table tr[data-action="transaction-detail"]').click()`);
+ await run(`document.querySelector('.reference-records .tx-record:not(.tx-evidence) summary').click()`);
+ assert.ok(await run(`!!document.querySelector('.reference-records .tx-record[open]')`));
+ await run(`document.querySelector('.reference-records .tx-record[open] [data-action="transaction-detail"]').click()`);
  await until('!!document.querySelector("#transaction-detail-form")');
  await run(`document.querySelector('#transaction-detail-form [data-action="edit-transaction"]').click()`);
  await until('!!document.querySelector("#transaction-full-edit-form")');
  assert.equal(await run('document.querySelector("#transaction-full-edit-form").elements.amount.value'),'50.00');
- await run(`dialog.close();window.qaOriginalCollection=finwiseAPI.collection;finwiseAPI.collection=path=>path.includes('/ledger?')?Promise.reject(new TypeError('Load failed')):qaOriginalCollection(path);document.querySelector('.activity-table tr[data-action="transaction-detail"]').click();`);
+ await run(`dialog.close();window.qaOriginalCollection=finwiseAPI.collection;finwiseAPI.collection=path=>path.includes('/ledger?')?Promise.reject(new TypeError('Load failed')):qaOriginalCollection(path);document.querySelector('.reference-records .tx-record[open] [data-action="transaction-detail"]').click();`);
  await until('!!document.querySelector("#transaction-detail-form")');
  assert.ok(await run('document.querySelector("#transaction-detail-form").textContent.includes("Account balances could not be loaded")'));
  assert.ok(await run('!!document.querySelector("#transaction-detail-form [data-action=edit-transaction]")'));

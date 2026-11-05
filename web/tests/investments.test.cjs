@@ -14,7 +14,7 @@ function workspace() {
     amount:value=>{if(value==='7.77')calls.activity++;return String(value);},responsiveAmount:String,
     button:()=>'',heading:()=>'',table:(_headers,rows)=>JSON.stringify(rows),
     trackedCategoryRows:()=>[],investmentGainTone:()=>'',investmentSipForMonth:()=>null,sipDueDate:()=>null,
-    subscriptionBrands:{hydrate:()=>{}},window:{},
+    subscriptionBrands:{hydrate:()=>{}},window:{finwiseReference:{parkControls(){},mountControls(){},page:html=>html}},
     analyticsView:{sumMoney:values=>values.reduce((sum,value)=>sum+Number(value),0).toFixed(2),difference:(a,b)=>(Number(a)-Number(b)).toFixed(2),moneyLines:()=>{calls.charts++;return '<chart>';},hydrateCharts:()=>{}},
     api:{collection:async path=>{calls.network.push(path);return {data:[{id:path}]};}}
   };

@@ -30,7 +30,7 @@ function syncMenuButton() {
   document.querySelector('.sidebar').inert=mobile;
 }
 function syncScopeControl() {
-  document.querySelectorAll('.sidebar [data-view="budgets"],.bottom-nav [data-view="budgets"]').forEach(el=>{el.hidden=state.scope!=='family';});
+
   document.querySelector('.scope-segments').hidden=familyMode();
   document.querySelectorAll('.scope-segments [data-scope]').forEach(el=>{
     const active=el.dataset.scope===state.scope;
@@ -63,7 +63,7 @@ async function reimbursementEditor(key) {
   editor('Match reimbursements',`<p>${h(obligation.person)} · Outstanding ${amount(obligation.remaining,obligation.currency)}</p><p class="helper">Credits from all dates are shown. Name matches are suggestions; select any credit manually and adjust its applied amount. Unused credit stays available for another receivable and is excluded from earned income.</p>${candidates.data.length?table(['Select','Credit','Available','Apply amount'],candidates.data.map(t=>[`<input type="checkbox" name="credit" value="${h(t.id)}" aria-label="Select ${h(t.description)}">`,`${h(t.effective_date)} · ${h(t.description)}${t.suggested?' · Suggested':''}`,amount(t.available,obligation.currency),`<input data-credit-amount="${h(t.id)}" inputmode="decimal" value="${h(t.suggested_amount)}" aria-label="Apply amount for ${h(t.description)}">`])):empty('No available incoming credits. Record or import the incoming transaction first.')}`,'reimbursement-match-form','Apply selected reimbursements');
 }
 
-const labels = { overview:'Dashboard', household:'Household', analytics:'Analytics', transactions:'Transactions', recurring:'Recurring', planner:'Planner', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Family budget', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
+const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', subscriptions:'Subscriptions', recurring:'Recurring', planner:'Planner', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Family budget', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
 const previousMonth=new Date(`${savedView.month}-01T00:00:00Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
 const compareParam=new URLSearchParams(location.search).get('compare');
 const state = { me:null, accounts:[], categories:[], members:[], plannedItems:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), recurringFilter:'review', settlementFilter:'open', investmentFilter:'all', investmentTab:'overview', analyticsTab:'trends', budgetTab:['top','categories','ahead'].includes(savedBudgetTab)?savedBudgetTab:'top', compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, overviewCurrency:new URLSearchParams(location.search).get('report_currency')||'', batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
@@ -381,7 +381,7 @@ async function start() {
   catch(e) { authRoot.innerHTML='<section class="panel auth-card"><h1>FinWise is unavailable</h1><p>Could not complete startup. Check the NAS connection, then reload this page.</p><button class="primary-button" onclick="location.reload()">Retry connection</button></section>'; failure(e.name==='AbortError'?new Error('The FinWise API did not respond within 15 seconds.'):e,authRoot); }
   finally { clearTimeout(timer); }
 }
-function resetSession() { plannerInstance?.dispose();plannerInstance=null;plannerIdentity='';plannerSelectedMonth='';plannerCurrency='';state.generation++; state.me=null; state.accounts=[]; state.categories=[]; recentTransactions=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); root.replaceChildren(); authForm(); }
+function resetSession() { plannerInstance?.dispose();plannerInstance=null;plannerIdentity='';plannerSelectedMonth='';plannerCurrency='';state.generation++; state.referenceDashboard=null;state.referenceCash=null;state.referenceBudgets=null;state.referenceRecurring=null;state.referenceReconcile=null;state.investmentViewData=null; state.me=null; state.accounts=[]; state.categories=[]; recentTransactions=[]; state.selectedChecks=[]; state.editingTransaction=null; state.preview=[]; state.cleanupPreview=null; state.resetPreview=null; state.resetMonths=null; state.fileInfo=null; state.metadata=null; state.importResult=null; state.session=null; state.ledger=[]; state.observations=[]; state.amendments=[]; state.createdEntries=[]; state.ignoreSelection=null; state.createObservationIds=null; state.transferSelection=null; state.transferCandidates=[]; state.recentMatch=null; state.amendmentGroup=null; state.inviteLink=null; api.reset(); window.finwiseReference.parkControls();root.replaceChildren(); authForm(); }
 window.addEventListener('session-expired',resetSession);
 function navigate(view,parts=[]) { const hash=[view,...parts].map(encodeURIComponent).join('/'); if(location.hash.slice(1)===hash) renderRoute(); else location.hash=hash; }
 async function loadLedgerBalances(values,allDates=false,extraAccountIds=[]) {
@@ -434,6 +434,7 @@ function transactionFeed(entries) {
   return `<div class="tx-feed">${rows}</div>`;
 }
 function transactionTable(values,balanceEvents=[],accountFilter='') {
+  if(state.view==='transactions')return window.finwiseReference.transactions(values,balanceEvents,accountFilter);
   const ordered=state.view==='transactions';
   const entries=ordered?values.map(transaction=>({kind:'transaction',transaction})):activityView.timeline(values,balanceEvents,state.ledgerBalances,accountFilter);
   const mobile=window.matchMedia('(max-width:600px)').matches;
@@ -493,22 +494,26 @@ async function renderRoute({inPlace=false}={}) {
   syncMoneyManagerNavigation();
   if(view!=='transactions')closeTransactionDrawer();
   document.querySelector('#planner-dialog')?.close();
-  document.querySelector('.month-filter').hidden=view==='planner';
+  document.querySelector('.month-filter').hidden=false;
   shell.dataset.activeView=view;
   document.querySelector('#breadcrumb-current').textContent=labels[view];
   document.querySelectorAll('.sidebar [data-view], .bottom-nav [data-view]').forEach(el=>{
-    const active=el.dataset.view===view || (el.closest('.bottom-nav') && el.dataset.view==='more' && !['overview','transactions','budgets'].includes(view));
+    const active=el.dataset.view===view || (el.closest('.bottom-nav') && el.dataset.view==='more' && !['overview','transactions','planner','accounts'].includes(view));
     el.classList.toggle('active',active);
     if(active) { el.setAttribute('aria-current','page'); const group=el.closest('details'); if(group) group.open=true; } else el.removeAttribute('aria-current');
   });
+  if(!updateInPlace) window.finwiseReference.parkControls();
   if(!updateInPlace) root.querySelectorAll('canvas[data-chart]').forEach(canvas=>window.Chart?.getChart(canvas)?.destroy());
   root.setAttribute('aria-busy','true');
   if(!updateInPlace) root.innerHTML='<div class="route-loading"><p class="route-loading-copy" role="status">Loading '+h(labels[view])+'…</p><div class="route-loading-head" aria-hidden="true"></div><div class="route-loading-grid" aria-hidden="true"><div class="route-loading-card"></div><div class="route-loading-card"></div><div class="route-loading-card"></div></div></div>';
   try {
     if(!updateInPlace) {state.me=await api.request('me');await catalogs();}
-    const html=await views[view](parts.slice(1),generation);
+    const sourceHtml=await views[view](parts.slice(1),generation);
     if(generation!==state.generation || !state.me) return;
+    const html=window.finwiseReference.page(sourceHtml,view,parts.slice(1));
+    window.finwiseReference.parkControls();
     if(updateInPlace) window.finwiseLiveView.patch(root,html); else root.innerHTML=html;
+    window.finwiseReference.mountControls();
     analyticsView.hydrateCharts(root); subscriptionBrands.hydrate(root);
     if(!updateInPlace) root.focus({preventScroll:true});
     root.removeAttribute('aria-busy');
@@ -518,7 +523,7 @@ async function renderRoute({inPlace=false}={}) {
     if(routeChanged&&!updateInPlace) window.scrollTo({top:0,behavior:'instant'});
     if(view==='overview'&&parts[1]==='reports')document.querySelector('#dashboard-reports')?.scrollIntoView({block:'start'});
     if(view==='reconcile') updateMatchComparison();
-  } catch(e) { if(generation===state.generation && state.me) { root.removeAttribute('aria-busy'); if(!updateInPlace) root.innerHTML=heading(labels[view],'Could not load this view.',button('Retry','refresh')); failure(e); } }
+  } catch(e) { if(generation===state.generation && state.me) { root.removeAttribute('aria-busy'); if(!updateInPlace){window.finwiseReference.parkControls();root.innerHTML=window.finwiseReference.page(heading(labels[view],'Could not load this view.',button('Retry','refresh')),view);window.finwiseReference.mountControls();} failure(e); } }
 }
 async function loadBulkScopePanel(panel) {
   if(!panel.open || panel.dataset.loaded || panel.dataset.loading) return;
@@ -793,7 +798,7 @@ function investmentFunding(holdings,transactions,accounts,month,currency) {
   return {contributed:analyticsView.sumMoney(contributions,scale),withdrawn:analyticsView.sumMoney(withdrawals,scale),pending};
 }
 function investmentContent(holdings,taggedTransactions) {
-  const currency=state.me.household.base_currency;
+  const currency=state.overviewCurrency||state.me.household.base_currency;
   const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
   const today=householdDate();
   const cutoff=state.month<=today.slice(0,7)?(state.month===today.slice(0,7)?today:`${state.month}-${new Date(Date.UTC(Number(state.month.slice(0,4)),Number(state.month.slice(5,7)),0)).getUTCDate()}`):today;
@@ -875,7 +880,9 @@ function renderInvestmentTab() {
   const data=state.investmentViewData;
   if(!data || state.view!=='investments' || root.getAttribute('aria-busy')==='true')return;
   root.querySelectorAll('canvas[data-chart]').forEach(canvas=>window.Chart?.getChart(canvas)?.destroy());
-  root.innerHTML=investmentContent(data.holdings,data.taggedTransactions);
+  window.finwiseReference.parkControls();
+  root.innerHTML=window.finwiseReference.page(investmentContent(data.holdings,data.taggedTransactions),'investments');
+  window.finwiseReference.mountControls();
   analyticsView.hydrateCharts(root);
   subscriptionBrands.hydrate(root);
 }
@@ -908,6 +915,7 @@ const views = {
   async recurring() {
     const [{data},taggedTransactions]=await Promise.all([api.request('recurring-transactions'),state.categories.some(c=>c.tracking_type==='subscription')?api.collection('transactions'):Promise.resolve({data:[]})]);
     const categoryRows=unlinkedSubscriptionRows(taggedTransactions.data,data);
+    state.referenceRecurring={data,categoryRows};
     const review=data.filter(item=>!item.subscription&&!item.ignored);
     const tagged=data.filter(item=>item.subscription&&!item.ignored);
     const ignored=data.filter(item=>item.ignored);
@@ -1004,8 +1012,10 @@ const views = {
     const previousCategories=categoryView.rollup(history.at(-1)?.data||[],state.categories);
     const saving=roots.map(([key,r])=>({key,delta:analyticsView.difference(previousCategories.get(key)?.amount||'0',r.amount)})).filter(item=>Number(item.delta)>0).sort((a,b)=>Number(b.delta)-Number(a.delta))[0];
     const insights=list([...(saving?[row(`${name(saving.key)} is down`, `Compared with ${priorMonth}`,fmt(saving.delta),'analytics')]:[]),...(Number(reconciliation.reimbursement_credits)>0?[row('Reimbursed, separate from earnings','Received reimbursements this month',fmt(reconciliation.reimbursement_credits),'settlements')]:[]),row(unknown?'Your balance snapshot has a gap':'Account coverage',unknown?`${unknown} accounts need a dated balance anchor`:'All visible account balances are known',unknown?'◌':'✓','accounts')],'No comparisons available yet.');
-    return `<div class="dashboard-page">${heading('Your month',`${monthLabel} · Your money, in focus`)}<div class="dashboard-toolbar"><div>${scopeTabs()}<p>${h(scopeNote)}</p></div>${field('Report currency',`<select id="overview-currency">${[...new Set([state.me.household.base_currency,...state.accounts.map(a=>a.currency)])].map(c=>option(c,c,c===currency)).join('')}</select>`)}</div>${metricCards}${cashflow}${card('Account snapshot','Available money and reserves',snapshot,'accounts','All accounts ↗')}${people}<div class="dashboard-grid">${dailyPanel}${card('Other money movements','Money moved, separate from income and spending.',movements)}${card('Where your money went','Consumption spending, with refunds applied.',spending,'analytics')}${card('A closer look','The spending transactions with the biggest impact.',closer,'transactions','See all transactions ↗')}${card('Growing your tomorrow','Your investments, with the full picture.',investmentBody,'investments','Investment 360 ↗')}${card('Small charges. Clear picture.','Confirmed subscriptions and observed charges.',subscriptionBody,'recurring','All subscriptions ↗')}</div><div class="dashboard-bottom-grid">${state.scope==='family'?card('Budget pulse','Your shared family spending plan.',budgetBody,'budgets','Manage ↗'):''}${card('On the horizon',`Current commitments · ${nextMonth}`,horizon,'planner')}${card('Worth a moment','Little insights. Better decisions.',insights)}</div>${await views.dashboardReports()}${coverage()}</div>`;
+    state.referenceDashboard={summary,transactions:transactions.data,currency,nextMonth,previous,holdings};
+    return `<div class="dashboard-page">${heading('Your month',`${monthLabel} · A little clarity. A lot more confidence.`,navButton('imports','↥ Import')+'<button type="button" class="primary-button" data-action="transaction"><span aria-hidden="true">+</span> Add transaction</button>')}<div class="dashboard-toolbar"><div>${scopeTabs()}<p>${h(scopeNote)}</p></div>${field('Report currency',`<select id="overview-currency">${[...new Set([state.me.household.base_currency,...state.accounts.map(a=>a.currency)])].map(c=>option(c,c,c===currency)).join('')}</select>`)}</div>${metricCards}${cashflow}${card('Account snapshot','Available money and reserves',snapshot,'accounts','All accounts ↗')}${people}<div class="dashboard-grid">${dailyPanel}${card('Other money movements','Money moved, separate from income and spending.',movements)}${card('Where your money went','Consumption spending, with refunds applied.',spending,'analytics')}${card('A closer look','The spending transactions with the biggest impact.',closer,'transactions','See all transactions ↗')}${card('Growing your tomorrow','Your investments, with the full picture.',investmentBody,'investments','Investment 360 ↗')}${card('Small charges. Clear picture.','Confirmed subscriptions and observed charges.',subscriptionBody,'recurring','All subscriptions ↗')}</div><div class="dashboard-bottom-grid">${state.scope==='family'?card('Budget pulse','Your shared family spending plan.',budgetBody,'budgets','Manage ↗'):''}${card('On the horizon',`Current commitments · ${nextMonth}`,horizon,'planner')}${card('Worth a moment','Little insights. Better decisions.',insights)}</div>${await views.dashboardReports()}${coverage()}</div>`;
   },
+  async subscriptions() { const filter=state.recurringFilter;state.recurringFilter='subscriptions';try{return await views.recurring();}finally{state.recurringFilter=filter;} },
   async analytics() { return views.overview(); },
   async dashboardReports() {
     const currency=state.overviewCurrency||state.me.household.base_currency;
@@ -1223,6 +1233,7 @@ const views = {
     if(state.scope!=='family')return heading('Family budget','Manage one shared household plan in Family view.')+panel('Switch to Family',`<p>Family budgets cover shared spending by category.</p>${button('View family budget','budget-family-view')}`);
     const plans=await api.collection(`budgets?month=${state.month}&scope=family`);
     plans.data=plans.data.filter(plan=>plan.scope==='family');
+    state.referenceBudgets=plans.data;
     if(!plans.data.length) { const create=['owner','admin'].includes(state.me.membership.role)?button('Create family budget','budget'):'';return heading('Family budget',`${state.month} · Shared household plan`,create)+coverage()+panel('Plan this month',`<p>No family budget exists for this month. ${create?'Create a plan with shared category limits.':'A household owner or admin can create the family plan.'}</p>${create}`); }
     const [tracking,commitments,forecasts,histories]=await Promise.all([Promise.all(plans.data.map(b=>api.request(`budgets/${id(b.id)}/tracking`))),Promise.all(plans.data.map(b=>api.request(`budgets/${id(b.id)}/commitments`))),Promise.all(plans.data.map(b=>api.request(`budgets/${id(b.id)}/forecast`))),Promise.all(plans.data.map(b=>api.request(`budgets/${id(b.id)}/revisions`)))]);
     const previous=new Date(Date.UTC(Number(state.month.slice(0,4)),Number(state.month.slice(5,7))-2,1)).toISOString().slice(0,7);
@@ -1287,7 +1298,7 @@ const views = {
     return heading('Settle up','Track each person, payment, and shared purchase.',button('Paid on Behalf','paid-on-behalf')+button('Add loan or debt','settlement')+button('Split a purchase','split'))+overview+(people?`<section class="finance-section"><div class="finance-section-head"><h2>People with open balances</h2><small>Amounts stay in their original currency</small></div><div class="person-grid">${people}</div></section>`:'')+`<section class="finance-section"><div class="finance-section-head"><h2>Obligations</h2><small>${visible.length} shown</small></div>${tabs}<div class="finance-card-grid">${cards||`<div class="finance-empty">${empty('No obligations match this filter.')}${button('Add loan or debt','settlement')}</div>`}</div></section><p class="helper finance-footnote">Record a bank or cash transfer separately when a payment should change an account balance. Deleting a split removes its linked obligations but leaves the original expense.</p>`;
   },
   async investments() {
-    const [holdings,taggedTransactions,report,goals]=await Promise.all([allInvestments(),api.collection(`transactions?${new URLSearchParams(period())}`),api.request(`investments/report?${new URLSearchParams({month:state.month,currency:state.me.household.base_currency,scope:state.scope})}`),api.request(`investments/goals?month=${encodeURIComponent(state.month)}`)]);
+    const [holdings,taggedTransactions,report,goals]=await Promise.all([allInvestments(),api.collection(`transactions?${new URLSearchParams(period())}`),api.request(`investments/report?${new URLSearchParams({month:state.month,currency:state.overviewCurrency||state.me.household.base_currency,scope:state.scope})}`),api.request(`investments/goals?month=${encodeURIComponent(state.month)}`)]);
     state.investmentViewData={holdings,taggedTransactions:taggedTransactions.data,report,goals:goals.data};
     return investmentContent(holdings,taggedTransactions.data);
   },
@@ -1297,6 +1308,7 @@ const views = {
     const selected=sessions.data.find(s=>s.id===parts[0]); state.session=selected || null;
     const checks=checkLists.flatMap(({account,checks})=>checks.filter(c=>!c.voided).map(c=>({account,check:c}))).sort((a,b)=>b.check.as_of.localeCompare(a.check.as_of));
     const differences=checks.filter(({check})=>check.current_variance==null || Number(check.current_variance)!==0);
+    state.referenceReconcile={sessions:sessions.data,differences};
     const reviewAccounts=state.accounts.filter(a=>['bank','credit_card'].includes(a.subtype));
     const inboxItems=reviewAccounts.map(a=>{const s=sessions.data.find(v=>v.account_id===a.id);const owner=state.members.find(m=>m.user_id===a.owner_id);return `<li class="compact-item review-inbox-item"><div class="compact-item-main"><span class="account-glyph" aria-hidden="true">${a.subtype==='credit_card'?'▤':'⌂'}</span><div class="compact-item-copy"><strong>${h(a.name)}</strong><span>${h(a.subtype==='credit_card'?'Credit card':'Bank account')} · ${h(owner?.name||'Household member')}</span></div></div><div class="compact-item-end"><span class="quiet-tag ${s?.stale?'stale':s?.state==='closed'?'done':''}">${h(s?.stale?'Stale review':s?.state==='closed'?'Closed':s?'Open':'Not started')}</span>${s?.current?.unresolved_count==null?'':`<small>${h(s.current.unresolved_count)} unresolved</small>`}</div><div class="compact-item-actions">${s?button('Open review','open-session',`data-id="${h(s.id)}"`):button('Start review','review-account',`data-id="${h(a.id)}"`)}</div></li>`;}).join('');
     const inbox=panel('Shared review inbox',`<p class="helper">Everyone with account access can review it, including accounts another member shared. Each decision records who made it.</p>${inboxItems?`<ul class="compact-list" aria-label="Account reviews for ${h(state.month)}">${inboxItems}</ul>`:empty('No bank or card accounts available. Share an account in Settings to make it available here.')}`);
@@ -2117,7 +2129,9 @@ async function importView(parts,generation) {
   let file=await api.request(`imports/${id(batch.id)}/files/${id(fileId)}`);
   for(let attempt=0;['uploaded','parsing'].includes(file.state) && attempt<60;attempt++) {
     if(generation!==state.generation) return '';
-    root.innerHTML=heading('Parsing your file','Your upload is saved. You may return to Imports later.')+'<p role="status">Parsing…</p>';
+    window.finwiseReference.parkControls();
+    root.innerHTML=window.finwiseReference.page(heading('Parsing your file','Your upload is saved. You may return to Imports later.')+'<p role="status">Parsing…</p>','imports');
+    window.finwiseReference.mountControls();
     await new Promise(resolve=>setTimeout(resolve,500));
     file=await api.request(`imports/${id(batch.id)}/files/${id(fileId)}`);
   }
@@ -2351,6 +2365,7 @@ document.addEventListener('click',async event=>{
 async function changeReportMonth(event) {
   const control=event.target;
   if(control.id!=='report-month' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(control.value) || control.value===state.month)return;
+  if(state.view==='planner'){plannerSelectedMonth=control.value;sessionStorage.setItem('fw-planner-selected:'+state.me.household.id+':'+state.me.user.id,control.value);await renderRoute();return;}
   setMonth(control.value);
   if(state.view==='transactions' && location.hash.slice(1)==='transactions/all')navigate('transactions');
   else await renderRoute({inPlace:['transactions','overview'].includes(state.view)});

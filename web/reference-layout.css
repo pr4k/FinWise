@@ -1,0 +1,287 @@
+/* Live application shell for the supplied FinWise desktop + mobile layouts.
+   reference-components.css contains the scoped, original reference components. */
+:root {--bg:#f7f8f4;--surface:#fff;--panel:#fff;--card:#fff;--ink:#24392f;--muted:#748073;--line:#e8ece5;--purple:#30664e;--purple-soft:#e8efe4;--green:#30664e;--dark:#18382a;--shadow:none;--display:Manrope,'Avenir Next',system-ui,sans-serif;--font:'DM Sans','Avenir Next',system-ui,sans-serif}
+body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
+.app-shell,.main-area,.content {min-width:0}
+.sidebar {width:216px;background:#fcfdf9;color:var(--ink);border-right:1px solid var(--line);padding:30px 16px 15px;box-shadow:none;z-index:61}
+.main-area {margin-left:216px}
+.sidebar .brand {color:var(--ink);font-size:28px;letter-spacing:-1.4px;padding:0 12px 25px}
+.brand-mark {flex:none}
+.household-card {display:flex;align-items:center;gap:9px;padding:0 10px 24px;margin:0;background:transparent;border:0;border-radius:0}
+.household-icon,.header-avatar {flex:none;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;border:3px solid white;background:#eadfcb;color:#775d34;font-size:10px;font-weight:700}
+.household-card strong,.profile strong {color:var(--ink);font-size:11px}
+.household-card span,.profile span {color:#788575;font-size:9px}
+.workspace-label {margin:0 0 10px;padding:0 14px;color:#7f8b79;font-size:9px;letter-spacing:1.7px}
+.nav-list {display:block;overflow-y:auto;min-height:0;scrollbar-width:thin}
+.sidebar .nav-item {width:100%;min-height:38px;padding:9px 14px;margin:3px 0;border-radius:7px;color:#64766a;font-size:12px;font-weight:500;box-shadow:none}
+.sidebar .nav-item svg {width:17px;height:17px;color:inherit}
+.sidebar .nav-item:hover {background:#eef2eb;color:#30664e;transform:none}
+.sidebar .nav-item.active {background:#e8efe4;color:#376446;font-weight:650;box-shadow:none}
+.nav-divider {height:1px;background:var(--line);margin:15px 12px}
+.sidebar .nav-disclosure {margin-top:12px}
+.sidebar .nav-disclosure summary {color:#6b7d68;font-size:10px;padding:8px 14px}
+.sidebar .settings-link {border:0;margin:14px 0 0;padding:11px 14px;border-radius:7px}
+.profile {border-color:var(--line);margin:13px 6px 0;padding-top:17px;gap:7px}
+.profile button {color:#74816c}
+.workspace-note {margin:20px 7px 0;background:#edf2e8;padding:16px;border-radius:10px;color:var(--ink)}
+.workspace-note>span {font-size:26px;color:#668c65;display:block;margin-bottom:10px}
+.workspace-note strong {display:block;max-width:140px;font-size:12px;line-height:1.6;font-weight:650}
+.workspace-note p {font-size:10px;line-height:1.8;color:#78856d;margin:7px 0 0}
+.topbar {height:65px;min-height:65px;padding:0 34px;position:static;background:#fdfefa;border-bottom:1px solid var(--line);box-shadow:none;backdrop-filter:none;gap:14px}
+.topbar .breadcrumb {display:flex;margin-right:auto;font-size:11px;color:#82917d;gap:15px}
+.breadcrumb strong {font-weight:500;color:var(--ink)}
+.topbar .mobile-menu {display:grid;width:29px;height:29px;border:1px solid var(--line);border-radius:7px;background:none;box-shadow:none;color:#708276}
+.reference-header-right {display:flex;align-items:center;gap:20px;margin-left:auto}
+.workspace-status {display:flex;align-items:center;gap:6px;font-size:10px;color:#7b8b7f}
+.workspace-status i {width:5px;height:5px;border-radius:50%;background:#7a9f79}
+.header-avatar {width:28px;height:28px;cursor:pointer}
+.content {max-width:1580px;padding:32px 34px 0;margin:auto}
+.reference-page {--bg:#f7f8f4;--panel:#fff;--ink:#24392f;--muted:#849087;--line:#e8ece5;--green:#30664e;--mint:#e9f2e9;--sage:#95b49a;--gold:#c5a969;--orange:#c88763;--radius:14px;font:450 13px/1.55 var(--font);min-width:0}
+.reference-page .page-heading {margin:0;align-items:center;gap:18px}
+.reference-page .page-heading h1 {font:750 30px/1.3 var(--display);letter-spacing:-1.3px;margin:0}
+.reference-page .page-heading .eyebrow {margin:0 0 8px;font-size:9px;color:#87937e;letter-spacing:1.8px}
+.reference-page .page-heading p {margin-top:7px;font-size:11px}
+.reference-page .context-bar {display:flex;align-items:center;gap:9px;margin:25px 0 19px;padding:0 0 17px;border-bottom:1px solid var(--line)}
+.reference-context-slot,.reference-page .topbar-actions {display:contents}
+.reference-page .scope-segments {display:flex;flex:none;background:#eef1e9;padding:3px;border:1px solid #e2e7dd;border-radius:8px;gap:2px}
+.reference-page .scope-segments[hidden] {display:none}
+.reference-page .scope-segments button {min-height:29px;padding:7px 17px;font-size:11px;color:#738168;border-radius:5px;font-weight:500;background:transparent;border:0;box-shadow:none}
+.reference-page .scope-segments button.selected {background:#fff;color:#3e6346;font-weight:650;box-shadow:0 1px 4px #263b2412}
+.reference-page .month-filter {display:flex;align-items:center;gap:0;margin-left:auto;height:35px;min-height:0;padding:3px;background:white;border:1px solid var(--line);border-radius:6px;box-shadow:none}
+.reference-page .month-filter[hidden] {display:none}
+.reference-page .month-filter input {width:119px;max-width:119px;min-width:0;min-height:0;height:auto;border:0;background:transparent;outline:none;font-size:10px;color:#4b5c4a;padding:0}
+.reference-page .month-filter button {padding:0 8px;font-size:17px;color:#7d8c7b;background:none;border:0;min-width:24px}
+.reference-page .context-bar>select {max-width:110px;padding:9px;border:1px solid var(--line);border-radius:6px;background:white;font-size:10px;color:#4b5c4a;min-height:35px}
+.reference-page .reference-coverage {display:flex;justify-content:space-between;gap:12px;margin:-4px 0 17px;padding:0;border:0;font-size:10px;line-height:1.7}
+.reference-coverage::before {display:none}
+.reference-page .button,.reference-page .primary-button,.reference-page .outline-button {min-height:33px;padding:9px 13px;border:1px solid #dfe5da;border-radius:7px;background:#fff;color:var(--ink);font-size:10px;font-weight:550;box-shadow:none}
+.reference-page .button.primary,.reference-page .primary-button {background:#30664e;color:white;border-color:#30664e}
+.reference-page .button.primary:hover,.reference-page .primary-button:hover {background:#23523d;transform:none}
+.reference-page .panel,.reference-page .card {padding:20px;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:none}
+.reference-page .panel:hover {border-color:var(--line)}
+.reference-page .dashboard-page {max-width:none;margin:0}
+.reference-page .reference-overview .dc-equation-panel {margin-top:0}
+.reference-page .dc-equation strong,.reference-page .dc-net strong,.reference-page .kpi .value {font-family:var(--display)}
+.reference-page .dc-net strong {letter-spacing:-1.5px}
+.reference-page .dc-net,.reference-page .dc-hero-side button {border:0;background:none;text-align:left}
+.reference-page .dc-equation button {color:var(--ink)}
+.reference-page .dc-hero .eyebrow {font-size:9px}
+.reference-page .dc-kpis .dc-metric-compare {display:block;margin-top:8px}
+.reference-page .snapshot .balance-cell>small:last-child {display:block;font-size:8px;color:#84917c}
+.reference-page .dashboard-list {list-style:none;padding:0;margin:0}
+.reference-page .dashboard-row {display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:12px 0;background:transparent;border:0;border-radius:0;text-align:left}
+.reference-page .dashboard-row strong {font-size:10px;font-weight:550;display:block}
+.reference-page .dashboard-row small {font-size:8px;color:#84917c;margin-top:4px;display:block}
+.reference-page .dashboard-row b {font-size:11px;font-weight:600;max-width:45%;overflow-wrap:anywhere}
+.reference-page .dashboard-note {font-size:9px;color:#84917c;background:#f6f8f2;border-radius:7px;padding:10px;line-height:1.7;margin:9px 0 0}
+.reference-page .dashboard-value-pair {margin:19px 0;gap:12px}
+.reference-page .dashboard-value-pair strong {font-size:22px;margin:5px 0}
+.reference-page .dashboard-value-pair b {font-size:16px}
+.reference-page .dashboard-panel-head p,.reference-page .dashboard-compare {font-size:9px}
+.reference-page .section-label h2 {font-size:13px}
+.reference-page .section-label .outline-button {padding:0;min-height:24px;border:0;background:none;font-size:10px;color:#7b8f70}
+.reference-page .finwise-chart-canvas {height:192px}
+.reference-page .dashboard-category-split {gap:25px;margin-top:19px}
+.reference-page .dashboard-category-legend li,.reference-page .dashboard-category-legend b {font-size:9px}
+.reference-page .dashboard-ring {max-width:155px}
+.reference-page .dashboard-ring strong {font-size:17px}
+.reference-page .dashboard-subhead {font-size:9px;margin-top:20px}
+.reference-page .reference-reports,.reference-page .reference-investment-tools {margin-top:20px;padding:16px;border-top:1px solid var(--line);color:#6b845c;font-size:11px}
+.reference-page .reference-reports summary,.reference-page .reference-investment-tools summary {cursor:pointer}
+.reference-page .cm-head h2 {font-family:Georgia,serif;font-weight:500}
+.reference-page .cm-growth>.finwise-chart,.reference-page .cm-growth .finwise-chart-canvas {height:auto;min-height:235px}
+.reference-page .cm-card-grid {align-items:stretch}
+.reference-page .cm-account,.reference-page .cm-holding,.reference-page .cm-service {display:flex;flex-direction:column}
+.reference-page .cm-account .cm-actions,.reference-page .cm-holding .cm-actions,.reference-page .cm-service .cm-actions {margin-top:auto;padding-top:14px}
+.reference-page .reference-ledger {padding:20px}
+.reference-page .reference-ledger .ledger-filter-disclosure {border:0;padding:0;margin:16px 0;background:none;box-shadow:none}
+.reference-page .reference-ledger .ledger-filter-disclosure>summary {display:none}
+.reference-page .ledger-filters {display:flex;align-items:end;flex-wrap:wrap;gap:8px;padding:0;margin:0;background:transparent;border:0}
+.reference-page .ledger-filters .field {flex:1 1 125px;min-width:0;gap:4px;font-size:9px}
+.reference-page .ledger-filters input,.reference-page .ledger-filters select {width:100%;min-width:0;max-width:100%;min-height:36px;height:36px;padding:8px 10px;border:1px solid #dfe5da;border-radius:6px;background:white;font-size:10px;color:#4b5c4a}
+.reference-page .ledger-filters .field:has(#transaction-filter-search) {flex-basis:200px}
+.reference-page .transaction-sort-controls {padding-top:8px}
+.reference-page .tx-column-head,.reference-page .tx-summary {grid-template-columns:100px minmax(0,1fr) 150px 150px 18px}
+.reference-page summary.tx-summary {list-style:none;cursor:pointer}
+.reference-page summary.tx-summary::-webkit-details-marker {display:none}
+.reference-page .tx-record[open] .tx-chevron {transform:rotate(180deg)}
+.reference-page .tx-record[open] .tx-summary {background:#f6f9f1}
+.reference-page .tx-details {padding:18px;border-top:1px solid var(--line)}
+.reference-page .reference-ledger .tx-title b {white-space:normal;font-size:12px}
+.reference-page .reference-ledger .tx-amount {font-size:18px}
+.reference-page .tx-amount small {display:block;font-size:9px;color:var(--muted);margin-top:3px}
+.reference-page .reference-module-tools {display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:18px}
+.reference-page .recurring-tabs {display:flex;gap:15px;border:0;border-bottom:1px solid var(--line);background:none;padding:0;margin:14px 0}
+.reference-page .recurring-tabs button {background:none;border:0;border-bottom:2px solid transparent;padding:8px 0 10px;font-size:11px;color:#7d8e6e;border-radius:0}
+.reference-page .recurring-tabs button.active {border-color:#628951;color:#527342}
+.reference-page .recurring-tabs button span {font-size:9px;margin-left:6px}
+.reference-page .recurring-card {margin-top:12px;padding:16px;border:1px solid var(--line)}
+.reference-page .recurring-card-title h2 {font-size:14px}
+.reference-page .quiet-details {font-size:10px;color:#7a8a70;margin:12px 0}
+.reference-page .live-panel h2 {font-size:15px;margin-bottom:12px}
+.reference-page .live-table th,.reference-page .live-table td {font-size:11px}
+.reference-page .planner-toolbar {display:none}
+.reference-page .planner-module {font-family:var(--font);font-size:13px}
+.reference-page .planner-module #coverage {display:none}
+.reference-page .planner-module .plan-hero h2 {font-family:Georgia,serif;font-weight:500}
+.reference-page .planner-module .plan-hero {padding:30px;background:#eef3e7}
+.reference-page .planner-module .plan-metrics {gap:13px}
+.reference-page .planner-module .plan-metric strong {font-size:25px}
+.reference-page .category-tree-row {padding-block:14px;border-bottom:1px solid var(--line)}
+.reference-page .account-detail-hero {height:auto}
+.reference-page .finance-section {margin-top:20px}
+.reference-page .coverage-note:not(.reference-coverage) {font-size:10px}
+.workspace-footer {display:flex;justify-content:space-between;gap:16px;max-width:1512px;margin:18px 34px 0;padding:20px 0 28px;border-top:1px solid var(--line);color:#7e8d72;font-size:9px;line-height:1.7}
+.mobile-nav-scrim {display:none}
+@media(min-width:761px) and (max-height:900px) {.workspace-note {display:none}}
+@media(min-width:761px) {.app-shell.sidebar-collapsed .main-area {margin-left:0}}
+@media(min-width:761px) and (max-width:1100px) {.sidebar {width:190px;padding-inline:10px}.main-area {margin-left:190px}.sidebar .nav-item {padding-inline:10px}.content {padding-inline:24px}.workspace-footer {margin-inline:24px}}
+@media(max-width:1100px) {.reference-page .tx-column-head,.reference-page .tx-summary {grid-template-columns:80px minmax(0,1fr) 115px 125px 15px;gap:10px}.reference-page .ledger-filters .field {flex-basis:140px}}
+@media(max-width:760px) {
+  body {font-size:14px}
+  .main-area {margin-left:0;padding-bottom:calc(77px + env(safe-area-inset-bottom))}
+  .topbar {height:58px;min-height:58px;padding:0 16px;display:flex;gap:8px}
+  .topbar .mobile-menu {display:grid;width:44px;height:44px;border:0;margin:0}
+  .topbar .breadcrumb,.topbar .mobile-profile,.workspace-status,.reference-header-right>.icon-button {display:none}
+  .topbar .mobile-brand {display:flex;color:var(--ink);margin-right:auto;font-size:22px}
+  .reference-header-right {gap:10px}
+  .content {padding:22px 16px 0}
+  .reference-page .page-heading {display:flex;flex-wrap:wrap;flex-direction:row;gap:12px}
+  .reference-page .page-heading h1 {font-size:28px}
+  .reference-page .page-heading .eyebrow {font-size:10px}
+  .reference-page .page-heading p {font-size:12px;line-height:1.6}
+  .reference-page .heading-actions {width:100%;margin:8px 0 0;display:flex}
+  .reference-page .heading-actions .button {min-height:44px;padding:10px 15px;font-size:12px}
+  .reference-page .heading-actions .primary {flex:1}
+  .reference-page .context-bar {flex-wrap:wrap;gap:12px;margin:18px 0 19px;padding-bottom:14px}
+  .reference-page .scope-segments {width:100%;flex:1 1 100%}
+  .reference-page .scope-segments button {flex:1;min-height:42px;font-size:12px;padding:8px}
+  .reference-page .month-filter {flex:1;margin-left:0;height:44px;padding:0 4px;justify-content:space-between}
+  .reference-page .month-filter input {width:145px;max-width:145px;min-height:42px;height:42px;font-size:14px}
+  .reference-page .month-filter button {width:40px;min-height:42px;font-size:24px}
+  .reference-page .context-bar>select {max-width:none;min-height:44px;font-size:14px;padding:10px}
+  .reference-page .reference-coverage {font-size:11px;flex-wrap:wrap;line-height:1.7}
+  .reference-page .reference-coverage>span:last-child {display:none}
+  .reference-page .panel,.reference-page .snapshot {padding:18px}
+  .reference-page .dc-hero {padding:21px 18px}
+  .reference-page .dc-net strong {font-size:37px}
+  .reference-page .dc-equation strong {font-size:24px}
+  .reference-page .cm-summary strong {overflow-wrap:anywhere}
+  .reference-page .button,.reference-page .primary-button,.reference-page .outline-button {min-height:42px;font-size:12px}
+  .reference-page .dashboard-row strong,.reference-page .dashboard-row b {font-size:12px}
+  .reference-page .dashboard-row small,.reference-page .dashboard-note {font-size:11px}
+  .reference-page .dashboard-category-split {grid-template-columns:1fr}
+  .reference-page .ledger-filters .field {flex:1 1 calc(50% - 8px);font-size:11px}
+  .reference-page .ledger-filters input,.reference-page .ledger-filters select {font-size:16px;min-height:44px;height:44px}
+  .reference-page .tx-column-head {display:none}
+  .reference-page .tx-summary {grid-template-columns:60px minmax(0,1fr) auto 12px;gap:8px;padding:14px 10px}
+  .reference-page .tx-summary .tx-type-cell {grid-column:2;grid-row:2}
+  .reference-page .tx-summary .tx-date {grid-row:1/3;font-size:11px}
+  .reference-page .tx-summary .tx-title {grid-column:2}
+  .reference-page .tx-summary .tx-amount {grid-column:3;grid-row:1/3;font-size:17px;max-width:105px;overflow-wrap:anywhere;white-space:normal}
+  .reference-page .tx-summary .tx-chevron {grid-column:4;grid-row:1/3}
+  .reference-page .tx-record-key {flex-wrap:wrap}
+  .reference-page .tx-record-key em {width:100%;margin-left:0}
+  .reference-page .tx-workspace-head {gap:12px;flex-wrap:wrap}
+  .reference-page .tx-workspace-head .cm-actions {width:100%;flex-wrap:wrap}
+  .reference-page .tx-workspace-head h2 {font-size:17px}
+  .reference-page .tx-record-key,.reference-page .tx-record-key em {font-size:11px}
+  .reference-page .reference-ledger .tx-title b {font-size:13px}
+  .reference-page .reference-ledger .tx-title small {font-size:11px}
+  .reference-page .planner-module .plan-hero {padding:22px 18px}
+  .reference-page .planner-module .plan-hero h2 {font-size:25px}
+  .reference-page .planner-module .plan-metric strong {font-size:24px}
+  .reference-page .planner-module .plan-metric small {font-size:12px}
+  .workspace-footer {margin:18px 16px 0;padding:18px 0 24px;flex-wrap:wrap;font-size:10px;gap:4px}
+  .workspace-footer span {flex-basis:100%}
+  .bottom-nav {height:auto;min-height:76px;background:#18382a;border:0;display:flex;justify-content:space-around;gap:4px;padding:8px 5px max(10px,env(safe-area-inset-bottom));backdrop-filter:none;box-shadow:none}
+  .bottom-nav .bottom-item {display:flex;flex-direction:column;justify-content:center;flex:1;min-width:0;min-height:49px;padding:6px 2px;border-radius:9px;color:#bacabb;font-size:10px;gap:5px}
+  .bottom-nav .bottom-item svg {width:22px;height:22px}
+  .bottom-nav .bottom-item.active {color:#d9f4a6;background:#ffffff0c}
+  .sidebar {display:flex;position:fixed;width:min(310px,86vw);height:100dvh;max-height:100dvh;transform:translateX(-100%);transition:transform .18s ease;inset:0 auto 0 0;padding:22px 16px calc(28px + env(safe-area-inset-bottom));z-index:71}
+  .app-shell.mobile-nav-open .sidebar {transform:translateX(0)}
+  .app-shell.mobile-nav-open .sidebar .nav-item {min-height:46px;font-size:14px}
+  .mobile-nav-scrim:not([hidden]) {display:block;position:fixed;inset:0;background:#122c2366;z-index:70;border:0}
+  body:has(.mobile-nav-open) {overflow:hidden}
+  .workspace-note {display:none}
+}
+@media(max-width:360px) {.content {padding-inline:12px}.reference-page .month-filter input {width:125px;max-width:125px}.reference-page .month-filter button {width:30px}.reference-page .scope-segments button {padding-inline:4px}.reference-page .dc-equation strong {font-size:21px}.reference-page .tx-summary {grid-template-columns:48px minmax(0,1fr) 85px 10px;gap:6px}.reference-page .tx-summary .tx-amount {font-size:15px}}
+@media(prefers-reduced-motion:reduce) {html {scroll-behavior:auto}*,*::before,*::after {animation:none!important;transition:none!important}}
+/* The reference uses an icon rail between the desktop sidebar and phone drawer. */
+@media (min-width:761px) and (max-width:930px) {
+  .sidebar {width:72px;padding:25px 10px}
+  .main-area {margin-left:72px}
+  .sidebar .brand {padding:0 8px 25px;font-size:0}
+  .sidebar .brand>span:last-child,.sidebar .household-card,.sidebar .workspace-label,.sidebar .nav-item>span,.sidebar .nav-divider,.sidebar .workspace-note,.sidebar .profile {display:none}
+  .sidebar .nav-item {justify-content:center;padding:13px 10px;min-height:46px}
+  .sidebar .nav-item svg {width:20px;height:20px}
+  .sidebar .nav-disclosure summary {font-size:0;padding:8px;text-align:center}
+  .sidebar .nav-disclosure summary::after {content:'•••';font-size:14px}
+  .sidebar .nav-list {margin-top:10px}
+}
+@media (min-width:1500px) {
+  .sidebar {width:235px}
+  .main-area {margin-left:235px}
+  .content {padding:38px 45px 0}
+  .workspace-footer {margin-inline:45px}
+  .reference-page .panel {padding:24px}
+}
+.reference-page .reference-primary-filters {display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin:18px 0}
+.reference-page .reference-primary-filters>.field {flex:1 1 100px;min-width:0;font-size:9px;color:#7d8f6c}
+.reference-page .reference-primary-filters>.field:has(#transaction-filter-search) {flex-basis:190px}
+.reference-page .reference-primary-filters input,.reference-page .reference-primary-filters select {width:100%;min-width:0;max-width:100%;min-height:36px;height:36px;padding:8px 10px;border:1px solid #dfe5da;border-radius:6px;background:white;font-size:10px;color:#4b5c4a}
+.reference-page .reference-advanced-filters {margin:12px 0;color:#7d8f6c;font-size:10px}
+.reference-page .reference-advanced-filters .ledger-filters {padding:12px 0}
+.reference-page .tx-ledger-totals {margin:18px 0 24px}
+.reference-page .planner-module .build-jumps>button {display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 20px;border:0;background:none;color:#74866b;font-size:12px}
+.reference-page .planner-module .build-jumps>button span {font-size:10px;color:#98a58b}
+.reference-page .planner-module .build-main>.workflow-bank-basis {margin:0 0 20px}
+.reference-page .planner-module .build-balances>article>strong {display:block;margin:16px 0;font:650 27px var(--display)}
+.reference-page .planner-module .build-section {padding:26px}
+.reference-page .planner-module .build-section h2 {margin:0;font-size:19px}
+.reference-page .planner-module .build-main {margin:0;padding:0;max-width:none}
+.reference-page .planner-module .workflow-step>header {height:auto;min-height:0;padding:0;background:none;border:0}
+.reference-page .planner-module .build-review-footer {flex-wrap:wrap;gap:14px}
+.reference-page .planner-module .workflow-category-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
+.metric-dialog,.live-dialog {position:fixed;inset:0 0 0 auto;width:min(760px,95vw);height:100dvh;max-height:100dvh;max-width:95vw;margin:0;padding:29px;border:0;border-left:1px solid var(--line);border-radius:0;background:var(--bg);overflow-y:auto;overscroll-behavior:contain;box-shadow:-10px 0 60px #12331c22}
+.metric-dialog::backdrop,.live-dialog::backdrop {background:#122c2366;backdrop-filter:none}
+.brand,.mobile-brand {font-family:'Avenir Next',system-ui,sans-serif}
+@media (max-width:760px) {
+  .reference-page .reference-primary-filters>.field {flex:1 1 calc(50% - 8px)}
+  .reference-page .reference-primary-filters input,.reference-page .reference-primary-filters select {font-size:16px;min-height:44px;height:44px}
+  .reference-page .reference-primary-filters .field:has(#transaction-filter-search) {flex-basis:100%}
+  .reference-page .reference-advanced-filters {font-size:11px}
+  .reference-page .tx-ledger-totals {padding:14px 10px;font-size:11px}
+  .reference-page .tx-ledger-totals strong {font-size:18px;overflow-wrap:anywhere}
+  .reference-page .planner-module .build-section {padding:18px}
+  .reference-page .planner-module .build-section h2 {font-size:16px}
+  .reference-page .planner-module .build-balances {grid-template-columns:1fr}
+  .metric-dialog,.live-dialog {width:100%;max-width:100%;padding:24px 18px}
+}
+@media(max-width:760px) {
+  .reference-page .tx-ledger-totals {grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .reference-page .tx-ledger-totals>div {min-width:0}
+  .reference-page .tx-ledger-totals strong {font-size:15px;overflow-wrap:anywhere}
+  .reference-page .tx-ledger-totals>p {grid-column:1/-1}
+  .reference-page .tx-summary {grid-template-columns:minmax(0,1fr) auto 12px;gap:5px 10px}
+  .reference-page .tx-summary .tx-title {grid-column:1;grid-row:1}
+  .reference-page .tx-summary .tx-date {grid-column:1;grid-row:3;font-size:10px}
+  .reference-page .tx-summary .tx-date small {display:inline;font-size:10px;margin-left:7px}
+  .reference-page .tx-summary .tx-type-cell {grid-column:1;grid-row:2}
+  .reference-page .tx-summary .tx-type-cell>small {display:inline;font-size:9px;margin-left:7px}
+  .reference-page .tx-summary .tx-amount {grid-column:2;grid-row:1/4;font-size:19px;max-width:125px}
+  .reference-page .tx-summary .tx-chevron {grid-column:3;grid-row:1/4}
+}
+.reference-page .reference-primary-filters input:first-child {min-width:0}
+.reference-page .planner-module .build-sidebar,.reference-page .planner-module .build-summary>* {min-width:0}
+@media(max-width:760px) {
+  .reference-page .planner-module .build-summary {grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+  .reference-page .planner-module .build-summary strong,.reference-page .planner-module .build-summary b {overflow-wrap:anywhere}
+  .reference-page .planner-module .plan-tabs {min-width:0;max-width:100%;overflow-x:auto}
+}
+.reference-page .planner-module .workflow-category-grid {display:block}
+.reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr))}
+.reference-page .planner-module .build-category input {min-width:0;width:100%;font-size:13px;padding:10px;border:1px solid #dfe5da;border-radius:7px;background:white}
+.reference-page .planner-module .build-category>b {overflow-wrap:anywhere;font-size:12px;font-weight:500}
+.reference-account-detail .account-detail-hero {display:flex;flex-wrap:wrap;height:auto;gap:15px;padding:20px;margin-bottom:18px}
+@media(max-width:760px) {.reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {font-size:10px;gap:8px}.reference-page .planner-module .build-category input {font-size:16px}.reference-page .planner-module .build-category>b {font-size:10px}}

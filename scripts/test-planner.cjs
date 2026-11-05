@@ -19,7 +19,7 @@ try{
  await run(`(async()=>{const value=await window.finwiseAPI.request('auth/bootstrap',{method:'POST',body:{owner:{name:'Planner Tester',email:'planner@example.test',password:'planner-test-password-123'},household:{name:'Planner QA',timezone:'Asia/Kolkata',base_currency:'INR'}}});window.finwiseAPI.setCsrf(value.csrf_token);await signedIn();})()`);
  await until('!!document.querySelector(".dashboard-page")');
  await run(`(async()=>{await window.finwiseAPI.request('accounts',{method:'POST',body:{name:'Savings',subtype:'bank',currency:'INR',visibility:'private',opening_balance:{amount:'100000.00',as_of:'2026-10-01T00:00:00+05:30'}}});await window.finwiseAPI.request('accounts',{method:'POST',body:{name:'Travel Card',subtype:'credit_card',currency:'INR',visibility:'private'}});setMonth('2026-11');location.hash='planner';})()`);
- await until('!!document.querySelector(".plan-hero")&&!document.querySelector("#view-root").hasAttribute("aria-busy")');
+ await until('!!document.querySelector(".plan-hero,.build-hero")&&!document.querySelector("#view-root").hasAttribute("aria-busy")');
  const click=async selector=>run(`document.querySelector(${JSON.stringify(selector)}).click()`);
  for(const tab of ['calendar','scenarios','funds','actual','canvas']){await click(`[data-plan-tab="${tab}"]`);assert.equal(await run(`document.querySelector('[data-plan-tab="${tab}"]').getAttribute('aria-selected')`),'true');}
  await click('[data-plan-add="extras"]');await until('!!document.querySelector("#planner-item-form")');
@@ -33,7 +33,7 @@ try{
   if(process.env.FINWISE_SCREENSHOT_DIR&&(width===1440||width===390)){const screenshot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile(path.join(process.env.FINWISE_SCREENSHOT_DIR,`planner-${width}.png`),Buffer.from(screenshot.data,'base64'));}
  }
  await click('[data-plan-tab="canvas"]');for(const width of [1440,390,320]){await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<760});await pause(100);assert.equal(await run('document.documentElement.scrollWidth>innerWidth'),false,'Canvas overflow at '+width);}
- await cdp('Page.reload');await until('!!document.querySelector(".plan-hero")');assert.equal(await run('plannerInstance.snapshot().totals.spend'),1500);
+ await cdp('Page.reload');await until('!!document.querySelector(".plan-hero,.build-hero")');assert.equal(await run('plannerInstance.snapshot().totals.spend'),1500);
  await click('[data-plan-tab="scenarios"]');await run('renderRoute()');await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&!!document.querySelector("#scenario-room")');
  assert.notEqual(await run('document.querySelector("#scenario-room").textContent'),'');
  await click('[data-plan-tab="funds"]');await click('[data-plan-action="add-fund"]');
@@ -93,7 +93,7 @@ try{
  await click('[data-workflow="activate-budget"]');await until('plannerInstance.snapshot().plan.serverBudget.state==="active"');
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
  for(const width of [1440,768,390,320]){await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<760});await pause(100);assert.equal(await run('document.documentElement.scrollWidth>innerWidth'),false,'Guided workflow overflow at '+width);if(process.env.FINWISE_SCREENSHOT_DIR&&(width===1440||width===390)){const screenshot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile(path.join(process.env.FINWISE_SCREENSHOT_DIR,`workflow-${width}.png`),Buffer.from(screenshot.data,'base64'));}}
- await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().workflow.remainingIncome'),3500);
+ await cdp('Page.reload');await until('!!document.querySelector(".build-summary")');assert.equal(await run('plannerInstance.snapshot().workflow.remainingIncome'),3500);
 
  // The recorded due stays read-only while a monthly hypothetical due can be higher or lower.
  await click('[data-workflow-bill]');
@@ -101,7 +101,7 @@ try{
  await run(`(()=>{const form=document.querySelector('#workflow-payment-form');form.elements.dueAmount.value='3500';form.elements.mode.value='full';form.requestSubmit();})()`);
  assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('accounts')).data.find(a=>a.name==='Travel Card').card_due.amount)()`),'2000.00');
- await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
+ await cdp('Page.reload');await until('!!document.querySelector(".build-summary")');assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
  await run(`(async()=>{const card=(await finwiseAPI.collection('accounts')).data.find(a=>a.name==='Travel Card');await finwiseAPI.request('accounts/'+card.id,{method:'PATCH',revision:card.revision,body:{card_due:{amount:'2400.00',due_date:'2026-11-05'}}});await renderRoute();})()`);
  assert.equal(await run('plannerInstance.snapshot().totals.card'),3500);
  assert.equal(await run('plannerInstance.snapshot().plan.items.find(x=>x.statementId).statementSnapshot.recordedDue'),2400);
@@ -117,7 +117,7 @@ try{
   const shared=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Shared balance card',subtype:'credit_card',currency:'INR',visibility:'shared'}});
   return {kiwi:kiwi.id,unknown:unknown.id,shared:shared.id};
  })()`);
- await run(`location.hash='planner'`);await until('!!document.querySelector(".workflow-summary")&&!document.querySelector("#view-root").hasAttribute("aria-busy")');
+ await run(`location.hash='planner'`);await until('!!document.querySelector(".build-summary")&&!document.querySelector("#view-root").hasAttribute("aria-busy")');
  assert.ok(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.kiwi}"]')`));
  assert.ok(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.unknown}"]')`));
  assert.equal(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.shared}"]')`),false);
@@ -126,13 +126,13 @@ try{
  await run(`(()=>{const form=document.querySelector('#workflow-account-card-form');form.elements.dueAmount.value='15000';form.requestSubmit();})()`);
  assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('accounts')).data.find(a=>a.id==='${balanceCards.kiwi}').card_due??null)()`),null);
- await cdp('Page.reload');await until('!!document.querySelector(".workflow-summary")');assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
+ await cdp('Page.reload');await until('!!document.querySelector(".build-summary")');assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
  assert.equal(await run('Array.from(document.querySelectorAll(".workflow-bill h4")).filter(el=>el.textContent==="Balance-only Kiwi").length'),1);
  await run(`(async()=>{const card=(await finwiseAPI.collection('accounts')).data.find(a=>a.id==='${balanceCards.kiwi}');await finwiseAPI.request('accounts/'+card.id,{method:'PATCH',revision:card.revision,body:{card_due:{amount:'5000.00',due_date:'2026-11-09'}}});await renderRoute();})()`);
  assert.equal(await run('plannerInstance.snapshot().totals.card'),cardBefore+15000);
  assert.equal(await run('plannerInstance.snapshot().plan.items.filter(x=>x.destination==="Balance-only Kiwi").length'),1);
  const kiwiSnapshot=await run('plannerInstance.snapshot().plan.items.find(x=>x.destination==="Balance-only Kiwi").statementSnapshot');assert.equal(kiwiSnapshot.recordedDue,5000);assert.equal(kiwiSnapshot.planningOnly,false);
- await run(`document.querySelector('.scope-segments [data-scope="family"]').click()`);await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&!!document.querySelector(".workflow-summary")');
+ await run(`document.querySelector('.scope-segments [data-scope="family"]').click()`);await until('!document.querySelector("#view-root").hasAttribute("aria-busy")&&!!document.querySelector(".build-summary")');
  assert.ok(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.shared}"]')`));assert.equal(await run(`!!document.querySelector('[data-workflow-account-card="${balanceCards.unknown}"]')`),false);
  assert.equal(await run(`(async()=> (await finwiseAPI.collection('transactions')).data.length)()`),2);
  assert.deepEqual(errors,[]);console.log('PASS: planner tabs, edits, dialogs, calendar modes, scenario refresh, funds, activation, linked allowances, close/reopen, scope/currency isolation, persistence, unchanged ledger, guided income import without double counting, subscription/SIP suggestions, partial card payments, server budget creation/activation, independent months, current card due refresh, monthly planning overrides/reset without account writes, balance-only/unknown card visibility, explicit estimates without account writes, real-due adoption without duplication, and 320–1440px layouts.');

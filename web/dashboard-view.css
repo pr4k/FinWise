@@ -5,8 +5,9 @@
 .dashboard-toolbar p {margin:0;color:var(--muted);font-size:12px}
 .dashboard-toolbar .field {margin:0;flex:none;font-size:10px;gap:4px}
 .dashboard-toolbar select {min-height:36px;padding:6px 30px 6px 12px}
-.dashboard-page .overview-summary {grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;border:0;background:none;overflow:visible}
-.dashboard-page .overview-summary .overview-metric {border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface);min-height:167px}
+.dashboard-page .overview-summary {grid-template-columns:repeat(6,minmax(0,1fr));gap:20px;border:0;background:none;overflow:visible}
+.dashboard-page .overview-summary .overview-metric {grid-column:span 2;text-align:left;border:1px solid var(--line);border-radius:16px;padding:22px;background:var(--surface);min-height:167px}
+.dashboard-page .overview-summary .overview-metric:nth-child(n+4) {grid-column:span 3}
 .dashboard-page .overview-summary .position-card {background:#eaf1e5;border-color:#dce7d3;overflow:hidden}
 .dashboard-page .overview-summary .metric-number {font-size:clamp(20px,2.1vw,33px);color:var(--ink);margin:18px 0 12px;letter-spacing:-.045em}
 .dashboard-page .overview-summary .metric-icon {display:grid;place-items:center;background:#f0f5ec;color:#7b9d6a;width:29px;height:29px;border-radius:9px}
@@ -83,6 +84,14 @@ button.dashboard-row:focus-visible {outline:2px solid #63845b;outline-offset:4px
 @media(min-width:1100px) {.dashboard-page>.dashboard-panel .dashboard-list {display:grid;grid-template-columns:1fr 1fr;column-gap:30px}}
 @media(max-width:1150px) {.dashboard-page .overview-summary {grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-bottom-grid {grid-template-columns:1fr 1fr}.dashboard-bottom-grid>:last-child {grid-column:1/-1}.dashboard-category-split {grid-template-columns:1fr}.dashboard-ring {max-width:160px}}
 @media(max-width:800px) {.dashboard-grid,.dashboard-bottom-grid {grid-template-columns:1fr}.dashboard-bottom-grid>:last-child {grid-column:auto}.dashboard-snapshot {grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-snapshot>div:nth-child(3) {padding-left:0;border:0}.dashboard-category-split {grid-template-columns:minmax(100px,.8fr) minmax(0,1.4fr)}}
+@media(max-width:1150px) {
+  .dashboard-page .overview-summary .overview-metric:nth-child(n) {grid-column:auto}
+  .dashboard-page .overview-summary .overview-metric:last-child {grid-column:1/-1}
+}
+@media(max-width:600px) {
+  .dashboard-page .overview-summary {grid-template-columns:minmax(0,1fr)}
+  .dashboard-page .overview-summary .overview-metric:nth-child(n) {grid-column:auto}
+}
 @media(max-width:480px) {.dashboard-panel {padding:20px 17px}.dashboard-page .overview-summary {gap:10px}.dashboard-page .overview-summary .overview-metric {padding:15px;min-height:155px}.dashboard-page .overview-summary .metric-number {font-size:19px}.dashboard-page .metric-caption {font-size:10px}.dashboard-page .overview-metric small {font-size:9px}.dashboard-panel-head {gap:8px}.dashboard-panel-head h2 {font-size:16px}.dashboard-panel-head .outline-button {font-size:10px}.dashboard-toolbar {gap:10px}.dashboard-toolbar p {font-size:10px}.dashboard-cashflow {padding:16px}.dashboard-cashflow strong {font-size:12px}.dashboard-cashflow small {font-size:10px}.dashboard-snapshot {gap:18px 10px}.dashboard-snapshot strong {font-size:17px}.dashboard-category-split {grid-template-columns:1fr}.dashboard-category-legend {gap:12px}.dashboard-value-pair {flex-wrap:wrap}.dashboard-row {gap:10px}.dashboard-row b {font-size:12px}.dashboard-subhead {flex-wrap:wrap}}
 @media(prefers-reduced-motion:reduce) {.dashboard-page * {scroll-behavior:auto}}
 
