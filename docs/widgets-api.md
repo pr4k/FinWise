@@ -1,10 +1,12 @@
-# FinWise Widgets v1: spending and accounts
+# FinWise Widgets v1: spending, cash surplus and accounts
 
 `GET /api/v1/widgets/spending` is a read-only JSON endpoint for devices on your trusted LAN or private VPN. It needs **no API token, session cookie, or Authorization header**. Anyone who can reach it while enabled can read the configured member's spending. Do not expose it through a public reverse proxy, tunnel, or internet port forward.
 
 `GET /api/v1/widgets/accounts` uses the same selected member and an additional **Expose accessible account balances and last transaction dates** switch. It is also unauthenticated and read-only. Anyone who can reach it while enabled can read the selected member's accessible account names, types, balances, and latest transaction dates. The accounts switch starts off, including on installations where the spending widget was already enabled.
 
 `GET /api/v1/widgets/expense-calendar` uses the spending widget's enable switch and Family scope switch. It returns one numeric net expense for every household-local date in a selected month, including marked zero placeholders for future dates.
+
+`GET /api/v1/widgets/cash-surplus` provides the dashboard’s payment-based monthly cash surplus, spending totals, payment counts, and remaining card debt planned for next month. It uses the same selected member and requires **both** the main widget switch and the account-data switch. It exposes summary values, not individual transaction descriptions.
 
 ## Enable on the NAS
 
@@ -71,6 +73,80 @@ HTTP 200 returns this shape (amounts shown are illustrative):
 ```
 
 `Cache-Control: private, max-age=300` permits a five-minute client cache for successful responses. A client may keep showing its cached response for up to five minutes after the setting is disabled. Errors use the normal FinWise `{"error":{"code":"...","message":"...","fields":[]},"request_id":"..."}` body with `Cache-Control: no-store`.
+
+## Cash-surplus widget
+
+```sh
+curl -H 'Accept: application/json' \
+  'http://YOUR_NAS_IP:3000/api/v1/widgets/cash-surplus?scope=family'
+```
+
+Enable the main widget switch and **Expose accessible account balances, cash-surplus totals and last transaction dates** in Settings. Family/Combined also require **Allow Family and Combined spending scopes**. No token, cookie, or authorization header is needed for this GET. Deploy the updated backend before using this endpoint. Disabled endpoints return 404; invalid member configuration returns 503.
+
+| Parameter | Meaning | Default |
+| --- | --- | --- |
+| `scope` | `personal`, `family`, or `combined`; Family/Combined require the scope switch. | `personal` |
+| `month` | Household-local calendar month as `YYYY-MM`, e.g. `2026-11`. Omit it for a widget that rolls over automatically. | Current household month |
+| `currency` | One supported currency code, e.g. `INR`. No exchange-rate conversion. | Household base currency |
+
+Unknown parameters, invalid months/currencies/scopes return 400; disallowed Family/Combined access returns 403. Query parameters cannot select another household or member. Successful responses use `Cache-Control: private, max-age=300`; errors use `no-store`.
+
+Illustrative response:
+
+```json
+{
+  "success": true,
+  "generated_at": "2026-11-06T12:00:00+05:30",
+  "timezone": "Asia/Kolkata",
+  "currency": "INR",
+  "scope": "family",
+  "month": "2026-11",
+  "period": {
+    "start_date": "2026-11-01",
+    "end_date": "2026-11-30",
+    "cutoff": "2026-11-06T12:00:00+05:30"
+  },
+  "summary": {
+    "cash_received": "10200.00",
+    "bank_cash_paid": "2000.00",
+    "cc_bills_paid": "1500.00",
+    "investments_paid": "1200.00",
+    "cash_surplus": "5500.00",
+    "expenses_this_month": "4500.00",
+    "credit_card_expenses_this_month": "2500.00",
+    "cc_to_pay_next_month": "6000.00"
+  },
+  "transaction_counts": {
+    "cash_movements": 5,
+    "cc_payments": 1,
+    "investment_payments": 1
+  },
+  "repayment_plan": {
+    "month": "2026-12",
+    "amount": "6000.00",
+    "basis": "latest_remaining_card_debt",
+    "account_scope": "all_accessible_active_cards",
+    "known_card_count": 1,
+    "unknown_card_count": 0,
+    "complete": true
+  },
+  "coverage": "unknown"
+}
+```
+
+Use `summary.cash_surplus` as the main widget value. The exact formula is:
+
+`cash_received - bank_cash_paid - cc_bills_paid - investments_paid = cash_surplus`.
+
+All money fields are **decimal strings**; `cc_to_pay_next_month` and `repayment_plan.amount` can be null when every active card balance is unknown. No cards produces `"0.00"`. A mixture of known/unknown balances returns the known positive debt total and an explicit unknown-card count; display it as partial. Credit balances on one card never offset another card’s debt.
+
+`bank_cash_paid` includes other bank/cash outflows, excluding the card and investment payments already shown separately. `cash_received` includes income, cash refunds, reimbursements and investment withdrawals. An internal transfer within the included bank/cash pool cancels; a card-payment transfer counts once in its payment month. Card purchases remain consumption spending without an immediate bank-cash deduction. Scheduled SIPs, starting balances and balance observations do not count as payments. The cash pool includes accessible bank, cash and investment-cash accounts, including historical references to archived accounts.
+
+Transactions use the same authorization and scope selection as Dashboard reports. As on the dashboard, a scoped transaction contributes its actual cash movement, not a prorated allocation amount. The repayment plan separately includes **all accessible active cards** in the requested currency, regardless of allocation scope. It uses their **latest** balances, including repayments already posted; this also applies when requesting an older month. Its month is the month following the requested report month. It is a planning assumption, not a statement due date.
+
+The response excludes voided and future-dated transactions beyond `period.cutoff`, following the existing widgets’ household-timezone cutoff rules. A future month returns zero monthly cash activity, while its separate repayment plan still reports latest accessible card debt. `coverage: "unknown"` means recorded activity does not establish complete imports; `repayment_plan.complete` describes balance availability only. No individual descriptions, payers or transaction IDs are returned.
+
+Refresh at most every five minutes, retain the last successful response if your widget cannot reach the NAS, and show its `generated_at` so stale data is visible.
 
 ## Accounts response
 

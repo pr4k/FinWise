@@ -2027,7 +2027,7 @@ impl Client {
         } else {
             serde_json::from_slice(&bytes).unwrap()
         };
-        assert_eq!(headers["cache-control"], if (path.starts_with("widgets/spending") || path.starts_with("widgets/accounts") || path.starts_with("widgets/expense-calendar")) && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
+        assert_eq!(headers["cache-control"], if (path.starts_with("widgets/spending") || path.starts_with("widgets/accounts") || path.starts_with("widgets/expense-calendar") || path.starts_with("widgets/cash-surplus")) && status == StatusCode::OK { "private, max-age=300" } else { "no-store" });
         assert_eq!(headers["x-request-id"], "integration-test");
         (status, value, headers)
     }
@@ -7979,4 +7979,84 @@ async fn income_member_attribution_validates_household_membership_and_personal_s
     let mut body=transaction("income","100.00",&bank,&salary,"family");body["allocations"][0]["member_id"]=member_id;
     let result=owner.call("POST","transactions",body,Some("inactive-income-member"),None).await;
     assert_eq!(result.0,StatusCode::BAD_REQUEST,"{}",result.1);
+}
+
+#[tokio::test]
+async fn cash_surplus_widget_uses_payment_dates_investments_remaining_debt_and_access() {
+    let (owner, _) = setup().await;
+    let (other, _) = partner(&owner).await;
+    let anonymous=Client{app:owner.app.clone(),cookie:String::new(),csrf:String::new()};
+    let path="widgets/cash-surplus?month=2020-01";
+    assert_eq!(anonymous.call("GET",path,json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+    let me=owner.call("GET","me",json!({}),None,None).await.1;
+    owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"]}),None,Some(0)).await;
+    assert_eq!(anonymous.call("GET",path,json!({}),None,None).await.0,StatusCode::NOT_FOUND,"Account exposure must also be enabled");
+    let enabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"],"accounts_enabled":true}),None,Some(1)).await;
+    assert_eq!(enabled.0,StatusCode::OK);
+    assert_eq!(anonymous.call("GET","widgets/cash-surplus?scope=family",json!({}),None,None).await.0,StatusCode::FORBIDDEN);
+    let bank=owner.create("accounts",json!({"name":"Widget bank","subtype":"bank","currency":"INR","visibility":"private"})).await;
+    let second=owner.account("Other bank","bank").await;
+    let card=owner.create("accounts",json!({"name":"Card with old debt","subtype":"credit_card","currency":"INR","opening_balance":{"amount":"5000.00","as_of":"2020-01-01T00:00:00+05:30"}})).await;
+    owner.create("accounts",json!({"name":"Credit balance","subtype":"credit_card","currency":"INR","opening_balance":{"amount":"-400.00","as_of":"2020-01-01T00:00:00+05:30"}})).await;
+    owner.account("Missing anchor","credit_card").await;
+    other.create("accounts",json!({"name":"Other member private card","subtype":"credit_card","currency":"INR","visibility":"private","opening_balance":{"amount":"9000.00","as_of":"2020-01-01T00:00:00+05:30"}})).await;
+    let food=owner.category("Consumption","expense").await;
+    let salary=owner.category("Income","income").await;
+    let investment=owner.create("categories",json!({"name":"Investments","kind":"expense","tracking_type":"investment"})).await;
+    for (kind,amount,account,category) in [("income","10000.00",&bank,&salary),("expense","2000.00",&bank,&food),("expense","3000.00",&card,&food),("refund","500.00",&card,&food),("expense","1200.00",&bank,&investment),("refund","200.00",&bank,&investment)] {
+        let mut tx=transaction(kind,amount,account,category,"personal");tx["effective_date"]=json!("2020-01-05");owner.create("transactions",tx).await;
+    }
+    for (destination,amount,date) in [(&card,"1500.00","2020-01-05"),(&second,"100.00","2020-01-05"),(&card,"1000.00","2020-02-05")] {
+        owner.create("transactions",json!({"event_type":"transfer","amount":amount,"currency":"INR","effective_date":date,"movements":[{"account_id":bank["id"],"amount":format!("-{amount}")},{"account_id":destination["id"],"amount":amount}],"allocations":[]})).await;
+    }
+    let voided=owner.create("transactions",{let mut v=transaction("expense","999.00",&bank,&food,"personal");v["effective_date"]=json!("2020-01-05");v}).await;
+    owner.call("DELETE",&format!("transactions/{}",voided["id"].as_str().unwrap()),json!({"reason":"Widget exclusion"}),None,voided["revision"].as_i64()).await;
+    let mut future_tx=transaction("income","9999.00",&bank,&salary,"personal");future_tx["effective_date"]=json!("2050-01-05");owner.create("transactions",future_tx).await;
+    let response=anonymous.call("GET",path,json!({}),None,None).await;
+    assert_eq!(response.0,StatusCode::OK,"{}",response.1);
+    assert_eq!(response.1["summary"],json!({"cash_received":"10200.00","bank_cash_paid":"2000.00","cc_bills_paid":"1500.00","investments_paid":"1200.00","cash_surplus":"5500.00","expenses_this_month":"4500.00","credit_card_expenses_this_month":"2500.00","cc_to_pay_next_month":"5000.00"}));
+    assert_eq!(response.1["transaction_counts"]["cash_movements"],5);
+    assert_eq!(response.1["transaction_counts"]["cc_payments"],1);
+    assert_eq!(response.1["repayment_plan"]["month"],"2020-02");
+    assert_eq!(response.1["repayment_plan"]["unknown_card_count"],1);
+    assert_eq!(response.1["repayment_plan"]["complete"],false);
+    assert!(!response.1.to_string().contains("Other member private card"));
+    let next=anonymous.call("GET","widgets/cash-surplus?month=2020-02",json!({}),None,None).await;
+    assert_eq!(next.1["summary"]["cash_surplus"],"-1000.00");
+    assert_eq!(next.1["summary"]["cc_bills_paid"],"1000.00");
+    let future=anonymous.call("GET","widgets/cash-surplus?month=2050-01",json!({}),None,None).await;
+    assert_eq!(future.1["summary"]["cash_surplus"],"0.00");
+    for query in ["month=bad","month=2020-13","scope=nope","currency=BAD","account_id=hidden","user_id=other"] {
+        assert_eq!(anonymous.call("GET",&format!("widgets/cash-surplus?{query}"),json!({}),None,None).await.0,StatusCode::BAD_REQUEST,"{query}");
+    }
+    owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"],"accounts_enabled":true,"family_enabled":true}),None,Some(2)).await;
+    let family=anonymous.call("GET","widgets/cash-surplus?month=2020-01&scope=family",json!({}),None,None).await;
+    assert_eq!(family.0,StatusCode::OK);
+    assert_eq!(family.1["summary"]["cash_surplus"],"0.00");
+    assert_eq!(family.1["summary"]["cc_to_pay_next_month"],"5000.00","Repayment plan follows accessible accounts independently of report scope");
+    owner.call("PATCH","settings/widgets",json!({"enabled":false}),None,Some(3)).await;
+    assert_eq!(anonymous.call("GET",path,json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn cash_surplus_widget_requires_live_selected_member_and_explicit_exposure() {
+    let (owner,pool)=setup().await;
+    let (other,_)=partner(&owner).await;
+    let me=other.call("GET","me",json!({}),None,None).await.1;
+    let anonymous=Client{app:owner.app.clone(),cookie:String::new(),csrf:String::new()};
+    let enabled=owner.call("PATCH","settings/widgets",json!({"enabled":true,"user_id":me["user"]["id"],"accounts_enabled":true}),None,Some(0)).await;
+    assert_eq!(enabled.0,StatusCode::OK);
+    let empty=anonymous.call("GET","widgets/cash-surplus",json!({}),None,None).await;
+    assert_eq!(empty.0,StatusCode::OK);
+    assert_eq!(empty.1["summary"]["cc_to_pay_next_month"],"0.00");
+    assert_eq!(empty.1["repayment_plan"]["complete"],true);
+    other.account("Unanchored card","credit_card").await;
+    let unknown=anonymous.call("GET","widgets/cash-surplus",json!({}),None,None).await;
+    assert!(unknown.1["summary"]["cc_to_pay_next_month"].is_null());
+    assert_eq!(unknown.1["repayment_plan"]["unknown_card_count"],1);
+    assert_eq!(anonymous.call("POST","widgets/cash-surplus",json!({}),None,None).await.0,StatusCode::NOT_FOUND);
+    sqlx::query("UPDATE memberships SET active=0 WHERE household_id=? AND user_id=?").bind(me["household"]["id"].as_str().unwrap()).bind(me["user"]["id"].as_str().unwrap()).execute(&pool).await.unwrap();
+    let revoked=anonymous.call("GET","widgets/cash-surplus",json!({}),None,None).await;
+    assert_eq!(revoked.0,StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(revoked.1["error"]["code"],"widget_unavailable");
 }

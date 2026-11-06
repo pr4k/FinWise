@@ -285,6 +285,200 @@ fn calendar_days(start: NaiveDate, today: NaiveDate, amounts: &[i64], currency: 
     }).collect()
 }
 
+/// Payment-based monthly cash surplus for the configured widget member.
+/// Account exposure is required because the repayment plan reveals card debt.
+pub async fn cash_surplus(state: &AppState, query: &Query) -> Result<Reply> {
+    api::allowed_query(query, &["scope", "month", "currency"])?;
+    let mut db = state.pool.begin().await?;
+    let row = sqlx::query("SELECT household_id,user_id,family_enabled FROM widget_settings WHERE enabled=1 AND accounts_enabled=1")
+        .fetch_optional(&mut *db).await?.ok_or_else(ApiError::missing)?;
+    let p = member(&mut db, row.get::<&str, _>(0), row.get::<&str, _>(1))
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "widget_unavailable",
+                "Widget configuration is no longer valid.",
+            )
+        })?;
+    let scope = query.get("scope").map(String::as_str).unwrap_or("personal");
+    if !["personal", "family", "combined"].contains(&scope) {
+        return Err(ApiError::invalid(
+            "scope must be personal, family, or combined.",
+        ));
+    }
+    if scope != "personal" && !row.get::<bool, _>(2) {
+        return Err(ApiError::forbidden());
+    }
+    let household: String = sqlx::query_scalar("SELECT document FROM households WHERE id=?")
+        .bind(&p.household_id)
+        .fetch_one(&mut *db)
+        .await?;
+    let household: Value = serde_json::from_str(&household)
+        .map_err(|_| ApiError::invalid("Invalid household settings."))?;
+    let timezone = text(&household, "timezone")?;
+    let tz: Tz = timezone
+        .parse()
+        .map_err(|_| ApiError::invalid("Invalid household timezone."))?;
+    let now = Utc::now();
+    let month = query
+        .get("month")
+        .cloned()
+        .unwrap_or_else(|| now.with_timezone(&tz).format("%Y-%m").to_string());
+    if month.len() != 7 || month.as_bytes()[4] != b'-' {
+        return Err(ApiError::invalid("month must be YYYY-MM."));
+    }
+    let start = crate::domain::date(&format!("{month}-01"))
+        .map_err(|_| ApiError::invalid("month must be YYYY-MM."))?;
+    let (_, _, _, end) = period_bounds(start)?;
+    let next = end
+        .succ_opt()
+        .ok_or_else(|| ApiError::invalid("Invalid month."))?;
+    let mut report_query = Query::new();
+    report_query.insert("from".into(), start.to_string());
+    report_query.insert("to".into(), next.to_string());
+    report_query.insert("scope".into(), scope.into());
+    if let Some(currency) = query.get("currency") {
+        report_query.insert("currency".into(), currency.clone());
+    }
+    // Share analytics authorization, report scope and category decoration.
+    let (mut values, currency, _) = api::report_inputs(&mut db, &p, &report_query, false).await?;
+    let mut elapsed = Vec::with_capacity(values.len());
+    for value in values.drain(..) {
+        if value["voided"] != true && balances::effective_at(&value, tz)? <= now {
+            elapsed.push(value);
+        }
+    }
+    let values = elapsed;
+    let accounts = storage::list(&mut db, &p, "accounts").await?;
+    let cash_ids: HashSet<&str> = accounts
+        .iter()
+        .filter(|a| {
+            a["currency"] == currency
+                && matches!(
+                    a["subtype"].as_str(),
+                    Some("bank" | "cash" | "investment_cash")
+                )
+        })
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    let card_ids: HashSet<&str> = accounts
+        .iter()
+        .filter(|a| a["currency"] == currency && a["subtype"] == "credit_card")
+        .filter_map(|a| a["id"].as_str())
+        .collect();
+    let categories = storage::list(&mut db, &p, "categories").await?;
+    let investment_categories: HashSet<&str> = categories
+        .iter()
+        .filter(|c| c["tracking_type"] == "investment")
+        .filter_map(|c| c["id"].as_str())
+        .collect();
+    let mut received = 0;
+    let mut paid = 0;
+    let mut card_paid = 0;
+    let mut investments_paid = 0;
+    let mut cash_count = 0_u64;
+    let mut card_count = 0_u64;
+    let mut investment_count = 0_u64;
+    let mut card_transactions = HashSet::new();
+    for tx in &values {
+        let mut net = 0;
+        let mut card_credit = false;
+        for movement in tx["movements"].as_array().into_iter().flatten() {
+            let id = text(movement, "account_id")?;
+            let amount = money(text(movement, "amount")?, &currency)?;
+            if cash_ids.contains(id) {
+                net = add(net, amount)?;
+            }
+            if card_ids.contains(id) {
+                card_transactions.insert(text(tx, "id")?);
+                if amount > 0 {
+                    card_credit = true;
+                }
+            }
+        }
+        if net == 0 {
+            continue;
+        }
+        cash_count += 1;
+        if net > 0 {
+            received = add(received, net)?;
+            continue;
+        }
+        let out = net
+            .checked_neg()
+            .ok_or_else(|| ApiError::invalid("Cash amount out of range."))?;
+        paid = add(paid, out)?;
+        if tx["event_type"] == "transfer" && card_credit {
+            card_paid = add(card_paid, out)?;
+            card_count += 1;
+        } else if tx["event_type"] != "transfer"
+            && (tx["event_type"] == "investment"
+                || tx["allocations"].as_array().is_some_and(|a| {
+                    !a.is_empty()
+                        && a.iter().all(|line| {
+                            line["category_id"]
+                                .as_str()
+                                .is_some_and(|id| investment_categories.contains(id))
+                        })
+                }))
+        {
+            investments_paid = add(investments_paid, out)?;
+            investment_count += 1;
+        }
+    }
+    let summary = crate::classification::summary(&values, &currency)?;
+    let mut card_expenses = 0;
+    for line in summary["breakdown"].as_array().into_iter().flatten() {
+        if line["transaction_id"]
+            .as_str()
+            .is_some_and(|id| card_transactions.contains(id))
+        {
+            card_expenses = add(
+                card_expenses,
+                money(line["spending"].as_str().unwrap_or("0"), &currency)?,
+            )?;
+        }
+    }
+    let mut cards: Vec<Value> = accounts
+        .iter()
+        .filter(|a| {
+            a["currency"] == currency
+                && a["subtype"] == "credit_card"
+                && a["active"] != false
+                && a["archived"] != true
+        })
+        .cloned()
+        .collect();
+    // No goals or account funds are needed for credit-card projections.
+    balances::decorate_many(&mut db, &p, &mut cards).await?;
+    let mut remaining = 0;
+    let mut unknown = 0;
+    for card in &cards {
+        if let Some(amount) = card["balance"]["amount"].as_str() {
+            remaining = add(remaining, money(amount, &currency)?.max(0))?;
+        } else {
+            unknown += 1;
+        }
+    }
+    let remaining = if !cards.is_empty() && unknown == cards.len() {
+        Value::Null
+    } else {
+        json!(format_money(remaining, &currency)?)
+    };
+    let bank_paid = add(add(paid, -card_paid)?, -investments_paid)?;
+    let result = json!({
+        "success":true,"generated_at":now.with_timezone(&tz).to_rfc3339(),"timezone":timezone,"currency":currency,"scope":scope,"month":month,
+        "period":{"start_date":start.to_string(),"end_date":end.to_string(),"cutoff":now.with_timezone(&tz).to_rfc3339()},
+        "summary":{"cash_received":format_money(received,&currency)?,"bank_cash_paid":format_money(bank_paid,&currency)?,"cc_bills_paid":format_money(card_paid,&currency)?,"investments_paid":format_money(investments_paid,&currency)?,"cash_surplus":format_money(add(received,-paid)?,&currency)?,"expenses_this_month":summary["actual_spending"],"credit_card_expenses_this_month":format_money(card_expenses,&currency)?,"cc_to_pay_next_month":remaining},
+        "transaction_counts":{"cash_movements":cash_count,"cc_payments":card_count,"investment_payments":investment_count},
+        "repayment_plan":{"month":next.format("%Y-%m").to_string(),"amount":remaining,"basis":"latest_remaining_card_debt","account_scope":"all_accessible_active_cards","known_card_count":cards.len()-unknown,"unknown_card_count":unknown,"complete":unknown==0},
+        "coverage":"unknown"
+    });
+    db.commit().await?;
+    Ok((StatusCode::OK, result))
+}
+
 pub async fn accounts(state: &AppState, query: &Query) -> Result<Reply> {
     api::allowed_query(query, &[])?;
     let mut db = state.pool.acquire().await?;

@@ -161,10 +161,14 @@ The Accounts workspace lists all accounts accessible to the signed-in user regar
 
 ### Dashboard
 
+The primary **Cash surplus** equation uses recorded bank/cash movements: cash received minus other bank/cash payments minus credit-card payments minus investments paid. Investment cash outflows are shown separately and deducted once; withdrawals received into bank/cash increase cash received. A transfer from bank/cash to a credit card counts as paid in its transfer month, including partial payments of older debt. It reduces cash surplus once and does not create a second expense. New card purchases remain expenses in the purchase month without reducing bank cash until repayment. Unpaid statement dues are commitments, not posted cash movements.
+
+**Expenses this month**, **Credit card expenses this month**, **CC bills paid this month**, and **CC to pay next month** remain distinct. The next-month repayment plan uses each accessible card’s latest positive amount owed, after posted purchases, refunds and repayments; no entered statement or due date is required. Credit balances on one card do not offset debt on another. Unknown card balances remain explicit, and partial totals are identified. This is a planning assumption, not a verified statement due date, and does not post payments or deduct future bills from current cash surplus. Spending/investment reports keep their allocation-based formulas separately from the payment-based cash surplus.
+
 Answers what happened in the selected month and where available money sits. Overview and Analytics share one Dashboard destination; existing Analytics links open the integrated reports section.
 
 - Income, net spending, recorded surplus, net investment contributions, and after-investment cash flow, with a report-currency selector.
-- Each of the four hero cards opens an accessible detail overlay with the authoritative total, formula, positive effects, signed offsets, top five contributors ordered by absolute effect, all contributors, and excluded transactions with reasons. Contributions are grouped by transaction; split allocations retain their signed effects.
+- Each spending/investment metric opens an accessible detail overlay with the authoritative total, formula, positive effects, signed offsets, top five contributors ordered by absolute effect, all contributors, and excluded transactions with reasons. Contributions are grouped by transaction; split allocations retain their signed effects.
 - Personal, Family, and Combined scope controls are available on the dashboard and in the detail overlay and remain synchronized. Family-only households retain their existing scope restriction.
 - Detail rows open transaction details. Close and Escape restore focus to the originating card, and contributor tabs support arrow-key navigation. Zero totals suppress undefined percentage shares; incomplete contribution detail is explicitly identified.
 - Analytics-only dashboard with cumulative daily income/spending, optional previous-month spending, category mix, and six-month category history. The shared navigation retains transaction entry.
@@ -375,7 +379,7 @@ Owners/admins switch the household mode with revision checking and audit history
 
 **Apple Shortcuts quick expenses:** The owner explicitly enables unauthenticated expense entry, chooses the member whose permissions apply, allowed accounts, and a default account. Settings provides endpoint URLs; disabling removes public access. This is intended for a trusted LAN/private VPN.
 
-**Widget API:** Independently opt-in, unauthenticated, read-only summaries use a selected member's visible data. Personal spending is the default; owner switches permit Family/Combined spending and accessible account balances. Includes daily/calendar spending and account data. The expense calendar returns a full month grid, with zero placeholders explicitly marked for future dates and household-local cutoff metadata. Includes copyable calendar URLs and responses that may be cached for five minutes. URL selection does not override configured permissions.
+**Widget API:** Independently opt-in, unauthenticated, read-only summaries use a selected member's visible data. Personal spending is the default; owner switches permit Family/Combined spending and accessible account balances. Includes daily/calendar spending, account data, and the payment-based cash-surplus summary at `GET /api/v1/widgets/cash-surplus`. Cash surplus additionally requires the account-data exposure switch; it includes investment/card payment deductions and the latest remaining card-debt plan. The expense calendar returns a full month grid, with zero placeholders explicitly marked for future dates and household-local cutoff metadata. Includes copyable calendar URLs and responses that may be cached for five minutes. URL selection does not override configured permissions.
 
 **PWA installation:** Supports iOS Home Screen and Android installation with a manifest, icons, and standalone display. The service worker supplies an offline information page when navigation fails; offline ledger editing and synchronization are not implemented.
 
@@ -417,7 +421,8 @@ These examples describe the feature contract; they are not a claim that tests we
 | --- | --- |
 | Import the same Money Manager file twice | Reuse matching source occurrences without duplicating transactions; preserve genuinely repeated purchases. |
 | Import a bank statement | Create statement observations; spending changes only after explicit ledger creation/correction. |
-| Pay a credit card from a bank account | Reduce bank funds and card amount owed; create no additional consumption spending. |
+| Pay a credit card from a bank account | Reduce bank funds, card amount owed, and cash surplus in the transfer month; create no additional consumption spending. |
+| Make a new credit-card purchase | Count consumption in the purchase month and increase card debt; cash surplus changes on repayment. |
 | View an account with no anchor | Show Unknown rather than a fabricated zero balance. |
 | Reserve 20,000 from a known 100,000 account balance | Show 80,000 available and 20,000 earmarked; retain the 100,000 ledger balance. |
 | Link an existing investment payment | Attach funding without duplicating the original account debit. |

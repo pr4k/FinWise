@@ -67,6 +67,29 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .reference-page .dc-equation button {color:var(--ink)}
 .reference-page .dc-hero .eyebrow {font-size:9px}
 .reference-page .dc-kpis .dc-metric-compare {display:block;margin-top:8px}
+.reference-page .dc-kpis+.dc-payment-grid {margin-top:24px}
+@media(max-width:760px) {.reference-page .dc-kpis+.dc-payment-grid {margin-top:16px}}
+/* Cash-movement details live outside the page's reference-style wrapper. */
+.live-dialog[open]:has(.detail-dialog-body>.contributor) {display:flex;flex-direction:column;overflow:hidden;gap:0;border-radius:0}
+.live-dialog:has(.detail-dialog-body>.contributor)>.dialog-head {flex:none;padding-bottom:16px;align-items:center}
+.live-dialog:has(.detail-dialog-body>.contributor)>.dialog-head .icon-button {min-width:44px;min-height:44px;font-size:24px}
+.live-dialog:has(.detail-dialog-body>.contributor)>.detail-dialog-body {flex:1;min-height:0;max-height:none;overflow:auto;padding:4px 1px 20px}
+.live-dialog:has(.detail-dialog-body>.contributor)>.dialog-actions {position:static;flex:none;margin:0;padding:16px 0 0}
+.live-dialog .detail-dialog-body>.contributor {display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:14px;width:100%;margin:10px 0 0;padding:16px;border:1px solid #dfe8e2;border-radius:12px;background:#fff;color:#24392f;text-align:left;font:inherit;cursor:pointer}
+.live-dialog .detail-dialog-body>.contributor:hover {background:#f3f7f4;border-color:#acc8b8}
+.live-dialog .contributor>.merchant {display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#eaf2e7;color:#527047;font-size:16px}
+.live-dialog .contributor>span {min-width:0}
+.live-dialog .contributor b {display:block;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.live-dialog .contributor small {display:block;margin-top:5px;color:#64756d;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.live-dialog .contributor>.amount {text-align:right}
+.live-dialog .contributor>.amount b {font-size:16px;font-variant-numeric:tabular-nums}
+.live-dialog .contributor .tag {display:inline-block;padding:2px 8px;border-radius:6px;background:#eef3ef;color:#526b5b;font-size:11px}
+@media(max-width:600px) {
+  .live-dialog .detail-dialog-body>.contributor {grid-template-columns:34px minmax(0,1fr);align-items:start;gap:8px 12px;padding:14px}
+  .live-dialog .contributor>.merchant {width:34px;height:34px;border-radius:10px}
+  .live-dialog .contributor>.amount {grid-column:2;text-align:left;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .live-dialog .contributor>.amount small {margin:0}
+}
 .reference-page .snapshot .balance-cell>small:last-child {display:block;font-size:8px;color:#84917c}
 .reference-page .dashboard-list {list-style:none;padding:0;margin:0}
 .reference-page .dashboard-row {display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:12px 0;background:transparent;border:0;border-radius:0;text-align:left}
@@ -93,6 +116,13 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .reference-page .cm-card-grid {align-items:stretch}
 .reference-page .cm-account,.reference-page .cm-holding,.reference-page .cm-service {display:flex;flex-direction:column}
 .reference-page .cm-account .cm-actions,.reference-page .cm-holding .cm-actions,.reference-page .cm-service .cm-actions {margin-top:auto;padding-top:14px}
+.reference-page .cm-card-grid:has(>.cm-service) {align-items:start}
+.reference-page .cm-service h3 {overflow-wrap:anywhere}
+.reference-page .cm-service .recurring-history {min-width:0;width:100%;margin-top:12px}
+.reference-page .cm-service .recurring-history li {grid-template-columns:minmax(0,1fr) auto;gap:4px 10px}
+.reference-page .cm-service .recurring-history li>* {min-width:0;overflow-wrap:anywhere}
+.reference-page .cm-service .recurring-history li>span {grid-column:1/-1}
+.reference-page .cm-service .recurring-history li>strong {text-align:right}
 .reference-page .reference-ledger {padding:20px}
 .reference-page .reference-ledger .ledger-filter-disclosure {border:0;padding:0;margin:16px 0;background:none;box-shadow:none}
 .reference-page .reference-ledger .ledger-filter-disclosure>summary {display:none}
@@ -422,3 +452,9 @@ body {background:var(--bg);-webkit-font-smoothing:antialiased}
   .reference-page .heading-actions>select {min-height:44px;font-size:14px}
   .reference-page .heading-actions>.button {flex:1 1 auto}
 }
+
+.reference-page .dashboard-spending-timing {margin-bottom:18px}
+.reference-page .dashboard-spending-timing .credit-card-summary {border:0;padding-bottom:0}
+
+.credit-card-summary--two {grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:930px) {.credit-card-summary--two {grid-template-columns:minmax(0,1fr)}}

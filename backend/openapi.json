@@ -504,6 +504,58 @@
         }
       }
     },
+    "/widgets/cash-surplus": {
+      "get": {
+        "operationId": "get_widgets_cash_surplus",
+        "security": [],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetCashSurplus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "get_health_live",
@@ -13988,6 +14040,197 @@
           "generated_at",
           "currency",
           "accounts"
+        ]
+      },
+      "WidgetCashSurplus": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "family",
+              "combined"
+            ]
+          },
+          "month": {
+            "type": "string"
+          },
+          "period": {
+            "type": "object",
+            "properties": {
+              "start_date": {
+                "type": "string",
+                "format": "date"
+              },
+              "end_date": {
+                "type": "string",
+                "format": "date"
+              },
+              "cutoff": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start_date",
+              "end_date",
+              "cutoff"
+            ]
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "cash_received": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "bank_cash_paid": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "cc_bills_paid": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "investments_paid": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "cash_surplus": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "expenses_this_month": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "credit_card_expenses_this_month": {
+                "type": "string",
+                "pattern": "^-?\\d+(\\.\\d+)?$",
+                "description": "Exact decimal money; never a JSON number."
+              },
+              "cc_to_pay_next_month": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              }
+            },
+            "required": [
+              "cash_received",
+              "bank_cash_paid",
+              "cc_bills_paid",
+              "investments_paid",
+              "cash_surplus",
+              "expenses_this_month",
+              "credit_card_expenses_this_month",
+              "cc_to_pay_next_month"
+            ]
+          },
+          "transaction_counts": {
+            "type": "object",
+            "properties": {
+              "cash_movements": {
+                "type": "integer"
+              },
+              "cc_payments": {
+                "type": "integer"
+              },
+              "investment_payments": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cash_movements",
+              "cc_payments",
+              "investment_payments"
+            ]
+          },
+          "repayment_plan": {
+            "type": "object",
+            "properties": {
+              "month": {
+                "type": "string"
+              },
+              "amount": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^-?\\d+(\\.\\d+)?$"
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "latest_remaining_card_debt"
+                ]
+              },
+              "account_scope": {
+                "type": "string",
+                "enum": [
+                  "all_accessible_active_cards"
+                ]
+              },
+              "known_card_count": {
+                "type": "integer"
+              },
+              "unknown_card_count": {
+                "type": "integer"
+              },
+              "complete": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "month",
+              "amount",
+              "basis",
+              "account_scope",
+              "known_card_count",
+              "unknown_card_count",
+              "complete"
+            ]
+          },
+          "coverage": {
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "success",
+          "generated_at",
+          "timezone",
+          "currency",
+          "scope",
+          "month",
+          "period",
+          "summary",
+          "transaction_counts",
+          "repayment_plan",
+          "coverage"
         ]
       },
       "WidgetSettings": {

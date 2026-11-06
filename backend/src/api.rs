@@ -43,7 +43,7 @@ fn unsupported() -> ApiError {
 
 pub async fn dispatch(State(state): State<AppState>, request: Request) -> Response {
     let widget_request = request.method() == axum::http::Method::GET
-        && ["/api/v1/widgets/spending", "/api/v1/widgets/accounts", "/api/v1/widgets/expense-calendar"]
+        && ["/api/v1/widgets/spending", "/api/v1/widgets/accounts", "/api/v1/widgets/expense-calendar", "/api/v1/widgets/cash-surplus"]
             .contains(&request.uri().path().trim_end_matches('/'));
     let request_id = request
         .headers()
@@ -130,6 +130,9 @@ async fn process(state: &AppState, request: Request, cookie: &mut Option<String>
     }
     if method == "GET" && path == "widgets/expense-calendar" {
         return widgets::expense_calendar(state, &query).await;
+    }
+    if method == "GET" && path == "widgets/cash-surplus" {
+        return widgets::cash_surplus(state, &query).await;
     }
     if method == "GET" && path == "widgets/accounts" {
         return widgets::accounts(state, &query).await;
@@ -2244,7 +2247,7 @@ fn budget_line_for_category<'a>(category: &str, lines: &'a [Value], parents: &Ha
         .and_then(|line| line["category_id"].as_str())
 }
 
-async fn report_inputs(
+pub(crate) async fn report_inputs(
     db: &mut SqliteConnection,
     p: &Principal,
     q: &Query,

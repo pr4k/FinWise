@@ -55,7 +55,7 @@ try{
  assert.equal(await run('state.referenceDashboard.summary.after_investment_cash_flow'),'151500.00');
  await run(`document.querySelector('[data-reference-cash="cardPayments"]').click()`);
  await until('dialog.open');assert.ok(await run(`document.querySelector('#editor').textContent.includes('Card payment')`));await run('dialog.close()');
- await run(`document.querySelector('[data-reference-equation]').click()`);await until('dialog.open');assert.ok(await run(`document.querySelector('#editor').textContent.includes('Surplus after investments')`));await run('dialog.close()');
+ await run(`document.querySelector('[data-reference-equation]').click()`);await until('dialog.open');assert.ok(await run(`document.querySelector('#editor').textContent.includes('Cash surplus')`));await run('dialog.close()');
  await run(`document.querySelector('[data-reference-month="-1"]').click()`);await until(`state.month==='2026-09'&&!root.hasAttribute('aria-busy')`);
  await run(`document.querySelector('[data-reference-month="1"]').click()`);await until(`state.month==='2026-10'&&!root.hasAttribute('aria-busy')`);
  await run(`navigate('accounts')`);await until(`state.view==='accounts'&&!root.hasAttribute('aria-busy')`);
