@@ -283,26 +283,27 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr))}
 .reference-page .planner-module .build-category input {min-width:0;width:100%;font-size:13px;padding:10px;border:1px solid #dfe5da;border-radius:7px;background:white}
 .reference-page .planner-module .build-category>b {overflow-wrap:anywhere;font-size:12px;font-weight:500}
-.reference-page .account-detail-hero {height:auto;min-height:0;align-items:flex-end;padding:24px;background:linear-gradient(115deg,#1d3327,#294c36 65%,#3a6542);border:0;color:#f8fbf5}
+.reference-page .account-detail-hero {height:auto;min-height:0;align-items:flex-end;padding:24px;background:#eaf3ed;border:0;color:#1d3f2e;box-shadow:none;gap:24px}
 .reference-page .account-detail-hero>div {min-width:0}
-.reference-page .account-detail-hero .eyebrow {color:#d5e7c6;font-size:11px;letter-spacing:.08em}
+.reference-page .account-detail-hero .eyebrow {font-size:11px;letter-spacing:.08em}
 .reference-page .account-detail-position {flex:0 1 auto;overflow-wrap:anywhere}
-.reference-page .account-detail-position .money-figure {color:#fff}
-.reference-page .account-detail-position .money-figure.debt {color:#ffe0b7}
-.live-dialog[open]:has(.reference-account-detail) {display:flex;flex-direction:column;overflow:hidden;border-radius:0}
-.live-dialog:has(.reference-account-detail)>.dialog-head {flex:none;padding-bottom:16px}
-.live-dialog:has(.reference-account-detail)>.dialog-head .icon-button {min-width:44px;min-height:44px;font-size:24px}
-.live-dialog:has(.reference-account-detail)>.detail-dialog-body {flex:1;min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;padding:0 1px 16px}
-.live-dialog:has(.reference-account-detail)>.dialog-actions {position:static;flex:none;margin:0;padding:14px 0 0}
-.reference-account-detail {padding:0;background:transparent}
-.reference-account-detail .account-detail-metrics {grid-template-columns:repeat(2,minmax(0,1fr))}
-.reference-account-detail .account-detail-grid,.reference-account-detail .account-subscription-list {grid-template-columns:minmax(0,1fr)}
-.reference-account-detail .account-ledger-row {grid-template-columns:90px minmax(0,1fr) minmax(120px,auto);gap:10px}
-.reference-account-detail .account-ledger-row>.outline-button {grid-column:2/-1;justify-self:end}
+/* Account details use the full workspace and normal document scrolling. */
+.content:has(.account-detail-page) {padding-top:22px}
+.reference-page:has(.account-detail-page) .page-heading {margin-bottom:12px}
+.reference-page:has(.account-detail-page) .context-bar {margin:12px 0;padding-bottom:12px}
+.reference-page .account-detail-hero .eyebrow,.reference-page .account-detail-hero p,
+.reference-page .account-detail-position>span,.reference-page .account-detail-position small {color:#405e4c}
+.reference-page .account-detail-position .money-figure,
+.reference-page .account-detail-position .money-figure.debt {color:#1d3f2e}
+.reference-page .account-detail-position .money-figure {font-size:clamp(28px,3vw,42px)}
+.reference-page .account-detail-position .money-figure :is(.money-full,.money-compact) {color:inherit}
+.reference-page .account-detail-metric strong {font-size:clamp(20px,2vw,28px)}
+.reference-page .account-card-due {border-top:1px solid #c6d9cb;margin-top:12px;padding-top:10px;line-height:1.6}
+.reference-page .account-card-due strong {color:#24392f}
+.reference-page .account-card-due small {display:block;margin-top:3px}
 @media(max-width:650px) {
   .reference-page .account-detail-hero {padding:20px;align-items:flex-start}
-  .reference-account-detail .account-ledger-row {grid-template-columns:minmax(0,1fr) auto}
-  .reference-account-detail .account-ledger-row>.outline-button {grid-column:1/-1;justify-self:start}
+  .reference-page .account-detail-position {width:100%}
 }
 @media(max-width:760px) {.reference-page .planner-module .build-category-head,.reference-page .planner-module .build-category {font-size:10px;gap:8px}.reference-page .planner-module .build-category input {font-size:16px}.reference-page .planner-module .build-category>b {font-size:10px}}
 /* Keep the first dashboard section compact, including Family-only households. */
@@ -405,4 +406,19 @@ body {background:var(--bg);-webkit-font-smoothing:antialiased}
 @media (prefers-reduced-motion:reduce) {
   html {scroll-behavior:auto}
   *,*::before,*::after {transition:none!important;animation:none!important}
+}
+
+/* Keep reporting controls beside the page actions. */
+.reference-page .heading-actions {display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;min-width:0}
+.heading-month-slot {display:contents}
+.reference-page .heading-actions .month-filter {margin-left:0;flex:none}
+.reference-page .heading-actions>select {max-width:100px;min-height:35px;padding:8px;border:1px solid var(--line);border-radius:9px;background:#fff;color:#405d4e;font:inherit;font-size:11px}
+.reference-page .context-bar {margin:12px 0;padding:0 0 12px}
+.reference-page .context-bar:has(.scope-segments[hidden]) {display:none}
+.reference-page .reference-coverage {margin-top:12px}
+@media(max-width:760px) {
+  .reference-page .heading-actions {justify-content:flex-start;margin-top:0}
+  .reference-page .heading-actions .month-filter {flex:1 1 200px}
+  .reference-page .heading-actions>select {min-height:44px;font-size:14px}
+  .reference-page .heading-actions>.button {flex:1 1 auto}
 }

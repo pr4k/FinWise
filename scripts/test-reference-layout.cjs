@@ -59,7 +59,7 @@ try{
  await run(`document.querySelector('[data-reference-month="-1"]').click()`);await until(`state.month==='2026-09'&&!root.hasAttribute('aria-busy')`);
  await run(`document.querySelector('[data-reference-month="1"]').click()`);await until(`state.month==='2026-10'&&!root.hasAttribute('aria-busy')`);
  await run(`navigate('accounts')`);await until(`state.view==='accounts'&&!root.hasAttribute('aria-busy')`);
- await run(`document.querySelector('[data-reference-account]').click()`);await until('dialog.open');assert.ok(await run(`!!document.querySelector('#editor .account-detail-page')`));await run('dialog.close()');
+ await run(`document.querySelector('[data-reference-account]').click()`);await until(`!!root.querySelector('.account-detail-page')&&!root.hasAttribute('aria-busy')`);assert.equal(await run('dialog.open'),false);
  await run(`navigate('transactions',['all'])`);await until(`state.view==='transactions'&&!root.hasAttribute('aria-busy')`);
  await run(`document.querySelector('.reference-records .tx-record:not(.tx-evidence) summary').click()`);
  assert.ok(await run(`!!document.querySelector('.reference-records .tx-record[open]')`));

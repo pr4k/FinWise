@@ -22,7 +22,7 @@ try{
 
  await run(`(async()=>{
   const bank=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Salary account',subtype:'bank',currency:'INR',opening_balance:{amount:'100000.00',as_of:'2026-10-01T00:00:00+05:30'}}});
-  const card=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Everyday card',subtype:'credit_card',currency:'INR'}});
+  const card=await finwiseAPI.request('accounts',{method:'POST',body:{name:'Everyday card',subtype:'credit_card',currency:'INR',opening_balance:{amount:'5000.00',as_of:'2026-10-01T00:00:00+05:30'},card_due:{amount:'1150.00',due_date:'2026-11-15'}}});
   for(const [kind,value,desc] of [['income','180000.00','Monthly salary'],['expense','24000.00','Monthly rent'],['expense','4500.00','Groceries']])await finwiseAPI.request('transactions',{method:'POST',body:{event_type:kind,amount:value,currency:'INR',effective_date:'2026-10-02',description:desc,movements:[{account_id:bank.id,amount:kind==='income'?value:'-'+value}],allocations:[{category_id:null,amount:value,scope:'personal'}]}});
   await finwiseAPI.request('transactions',{method:'POST',body:{event_type:'transfer',amount:'1500.00',currency:'INR',effective_date:'2026-10-04',description:'Card payment',movements:[{account_id:bank.id,amount:'-1500.00'},{account_id:card.id,amount:'1500.00'}],allocations:[]}});
   await catalogs();setMonth('2026-10');await renderRoute();
@@ -32,25 +32,35 @@ try{
   for(const subtype of ['bank','credit_card']) {
    await run(`navigate('accounts')`);await until(`state.view==='accounts'&&!root.hasAttribute('aria-busy')&&!root.querySelector('.account-detail-page')`);
    const accountId=await run(`state.accounts.find(a=>a.subtype==='${subtype}').id`);
-   await run(`document.querySelector('[data-reference-account="${accountId}"]').click()`);await until('dialog.open');
-   assert.equal(await run(`dialog.scrollWidth>dialog.clientWidth`),false,`${subtype} drawer overflow at ${width}`);
-   const layout=await run(`(()=>{const body=dialog.querySelector('.detail-dialog-body'),hero=body.querySelector('.account-detail-hero');return {bodyHeight:body.clientHeight,heroBackground:getComputedStyle(hero).backgroundImage,heroHeight:hero.clientHeight,contentHeight:hero.scrollHeight,footerBottom:dialog.querySelector('.dialog-actions').getBoundingClientRect().bottom,dialogBottom:dialog.getBoundingClientRect().bottom};})()`);
-   assert.ok(layout.heroBackground.includes('linear-gradient'),'Account hero must retain its contrasting background');
-   assert.ok(layout.heroHeight>=layout.contentHeight,'Account hero must contain its content');
-   assert.ok(layout.bodyHeight>700,'Account content should use the available drawer height');
-   assert.ok(layout.dialogBottom-layout.footerBottom<45,'Close action should sit at the bottom of the drawer');
-   await run(`dialog.querySelector('.detail-dialog-body').scrollTop=100000`);
-   assert.ok(await run(`(()=>{const b=dialog.querySelector('.detail-dialog-body'),history=b.querySelector('.account-ledger-panel');return history.getBoundingClientRect().bottom<=b.getBoundingClientRect().bottom+1;})()`),'History must be reachable by scrolling');
-   await run(`dialog.querySelector('.detail-dialog-body').scrollTop=0`);
-   if([390,1500].includes(width)){const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile('/tmp/finwise-account-'+subtype+'-'+width+'.png',Buffer.from(shot.data,'base64'));}
-   if(subtype==='credit_card')assert.ok(await run(`!!dialog.querySelector('[data-action="card-payment"]')`));
-   await run(`dialog.querySelector('[data-action="account-period"]').click()`);
-   await until(`!dialog.open&&!root.hasAttribute('aria-busy')&&!!root.querySelector('.account-detail-page')`);
+   await run(`document.querySelector('[data-reference-account="${accountId}"]').click()`);
+   await until(`!root.hasAttribute('aria-busy')&&!!root.querySelector('.account-detail-page')`);
+   assert.equal(await run('dialog.open'),false,'Accounts must open as a page');
+   assert.equal(await run('location.hash'),`#accounts/${accountId}`);
+   assert.equal(await run('document.documentElement.scrollWidth>innerWidth'),false,`${subtype} detail overflow at ${width}`);
+   const layout=await run(`(()=>{const page=root.querySelector('.account-detail-page'),hero=page.querySelector('.account-detail-hero');return {width:page.clientWidth,available:root.querySelector('.reference-page').clientWidth,background:getComputedStyle(hero).backgroundColor,color:getComputedStyle(hero.querySelector('.money-figure')).color,height:hero.clientHeight,scroll:hero.scrollHeight};})()`);
+   assert.ok(layout.width>=layout.available-2,'Account details should use the workspace width');
+   assert.equal(layout.color,'rgb(29, 63, 46)','Balance must have dark readable text');
+   assert.equal(layout.background,'rgb(234, 243, 237)');
+   assert.ok(layout.height>=layout.scroll,'Balance header must contain its content');
+   await run(`root.querySelector('.account-ledger-panel').scrollIntoView({block:'end',behavior:'instant'})`);
+   assert.ok(await run(`root.querySelector('.account-ledger-panel').getBoundingClientRect().bottom<=innerHeight+1`),'History is reachable by normal page scrolling');
+   await run(`window.scrollTo({top:0,behavior:"instant"})`);
+   if([390,1500].includes(width)){const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});await fs.writeFile('/tmp/finwise-account-screen-'+subtype+'-'+width+'.png',Buffer.from(shot.data,'base64'));}
+   if(subtype==='credit_card'){
+    assert.ok(await run(`!!root.querySelector('[data-action="card-payment"]')`));
+    assert.ok(await run(`root.querySelector('.account-card-due').textContent.includes('2026-11-15')`));
+   }
+   await run(`root.querySelector('[data-action="account-period"]').click()`);
+   await until(`!root.hasAttribute('aria-busy')&&location.hash.endsWith('/all')`);
    assert.ok(await run(`root.querySelector('.account-detail-period').textContent.includes('All recorded dates')`));
-   assert.equal(await run('document.documentElement.scrollWidth>innerWidth'),false,`${subtype} detail route overflow at ${width}`);
-   assert.ok(await run(`getComputedStyle(root.querySelector('.account-detail-hero')).backgroundImage.includes('linear-gradient')`));
+   await cdp('Page.reload');await until(`typeof root!=='undefined'&&!root.hasAttribute('aria-busy')&&!!root.querySelector('.account-detail-page')`);
+   assert.equal(await run('dialog.open'),false,'Direct links reload as full account pages');
+   assert.ok(await run(`root.querySelector('.account-detail-period').textContent.includes('All recorded dates')`));
+   await run(`root.querySelector('.account-detail-back [data-view="accounts"]').click()`);
+   await until(`location.hash==='#accounts'&&!root.hasAttribute('aria-busy')`);
+
   }
-  console.log('PASS: bank and card details, drawer height, readable balance, reachable history, all-date navigation at '+width+'px');
+  console.log('PASS: full-page bank and card details, readable balance, history scrolling, all-date links, reload and back navigation at '+width+'px');
  }
  assert.deepEqual(errors,[]);
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
