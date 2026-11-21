@@ -157,6 +157,10 @@ The Accounts workspace lists all accounts accessible to the signed-in user regar
 
 **Current reporting boundary:** The separate classification editor, Smart Review queue, confidence scores, classification filters, and automatic classification rules are absent from the current UI. Descriptions do not automatically override reporting types. Compatibility classification fields/endpoints and existing explicit corrections remain for historical records and reimbursement workflows. Investment funding must be unlinked before editing its protected source transaction.
 
+Add transaction and Edit details use the same side-panel form styling, field order, category dropdown, and footer actions. Add transaction retains optional category search, quick creation, and Save & add another. A normal save opens the saved transaction in the same editor; Save & add another starts a fresh form with the chosen date and account.
+
+Transaction row expansion offers a single **Edit details** action for editable ledger transactions. It opens a right-side editor with the list kept visible in the remaining width. Saving updates the list and keeps the editor open with the new revision. On phones the editor appears below the list in normal page flow. Resizing preserves the draft; Close, Cancel, or Escape dismisses the panel. The side editor includes a Delete transaction action with confirmation; deletion closes the editor and refreshes the list. View-only and investment-managed records retain their existing detail actions.
+
 ## 8. Dashboard and Household 360
 
 ### Dashboard
@@ -171,7 +175,8 @@ Answers what happened in the selected month and where available money sits. Over
 - Each spending/investment metric opens an accessible detail overlay with the authoritative total, formula, positive effects, signed offsets, top five contributors ordered by absolute effect, all contributors, and excluded transactions with reasons. Contributions are grouped by transaction; split allocations retain their signed effects.
 - Personal, Family, and Combined scope controls are available on the dashboard and in the detail overlay and remain synchronized. Family-only households retain their existing scope restriction.
 - Detail rows open transaction details. Close and Escape restore focus to the originating card, and contributor tabs support arrow-key navigation. Zero totals suppress undefined percentage shares; incomplete contribution detail is explicitly identified.
-- Analytics-only dashboard with cumulative daily income/spending, optional previous-month spending, category mix, and six-month category history. The shared navigation retains transaction entry.
+- Analytics-only dashboard with cumulative daily income/spending, optional previous-month spending, category mix, and six-month category history.
+- Daily activity calendar heatmap shares an equal-width row with Account snapshot on desktop and stacks on smaller screens. Shows the selected month, scope, and currency, with All expenses, Credit card expenses, Cash expenses (bank and cash accounts), and Investments filters. Uses authoritative scoped spending or net-investment effects; refunds and withdrawals offset their respective totals. Transfers and card repayments are excluded. Monday-first weeks, future dates, a relative amount legend, accessible daily values, and selectable days with transaction detail links are supported on desktop and phone. The shared navigation retains transaction entry.
 - Account snapshot separates recorded bank/cash balances, available funds, reserves, and card liabilities; unknown balances are excluded from known totals.
 - Visible payer contribution cards, largest spending transactions with detail drill-downs, and separate transfer, reimbursement, and card-payment totals.
 - Confirmed subscription charges, active budget progress, next-month planned expenses, card dues, SIPs, estimated monthly renewals, and data-backed month comparisons.

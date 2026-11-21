@@ -38,6 +38,15 @@ try{
   window.qaReportCalls=0;window.qaReportsOriginal=views.dashboardReports;views.dashboardReports=async()=>{qaReportCalls++;await new Promise(resolve=>{window.qaReleaseReports=resolve;setTimeout(resolve,2000)});return qaReportsOriginal();};
   const started=performance.now();await renderRoute();window.qaDashboardElapsed=performance.now()-started;
  })()`);
+ assert.ok(await run('!!root.querySelector("#daily-activity")'));
+ assert.equal(await run('root.querySelectorAll(".daily-activity-day").length'),30);
+ for(const [filter,total] of [['credit_card','2,500'],['cash','2,000'],['investments','1,000'],['all','4,500']]) {
+  await run(`(()=>{const select=root.querySelector('#daily-activity-filter');select.value='${filter}';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  assert.ok(await run(`root.querySelector('.daily-activity-head p').textContent.includes('${total}')`),'Daily activity filter '+filter);
+  assert.equal(await run('document.activeElement.id'),'daily-activity-filter');
+ }
+ await run(`root.querySelector('.daily-activity-day[data-date="2026-11-05"]').click()`);
+ assert.ok(await run('root.querySelector(".daily-activity-detail").textContent.includes("New card expense")'));
  assert.equal(await run('qaReportCalls'),0,'Collapsed detailed reports must not delay the dashboard');
  assert.ok(await run('!!root.querySelector(".dashboard-credit-cards")'));
  assert.ok(await run('root.querySelector("[data-live-key=metric-card-payments] .metric-number").textContent.includes("1,500")'));
@@ -58,6 +67,11 @@ try{
  await run(`root.querySelector('.dc-equation [data-reference-cash=investments]').click()`);await until('dialog.open');
  assert.ok(await run(`dialog.textContent.includes('Investment contribution paid')&&!dialog.textContent.includes('Investment withdrawal received')`));await run('dialog.close()');
  assert.equal(await run('state.referenceDashboard.summary.actual_spending'),'4500.00');
+ assert.ok(await run(`root.querySelector('.dc-kpis [data-metric=after_investment_cash_flow]').textContent.includes('4,500')`),'Purchase-month surplus deducts net investments');
+ await run(`root.querySelector('.dc-kpis [data-metric=after_investment_cash_flow]').click()`);await until(`metricDialog.open&&!metricDialog.textContent.includes('Loading breakdown')`);
+ assert.equal(await run(`state.metricDetail.data.total`),'4500.00');
+ assert.equal(await run(`state.metricDetail.data.explained`),'4500.00');
+ await run('closeMetricDetail()');
  assert.ok(await run(`root.querySelector('[data-reference-equation] strong').textContent.includes('5,500')`));
  await run(`root.querySelector('[data-reference-cash="cardExpenses"]').click()`);await until('dialog.open');
  assert.ok(await run(`dialog.textContent.includes('New card expense')&&dialog.textContent.includes('Card refund')&&!dialog.textContent.includes('November card payment')`));await run('dialog.close()');
@@ -70,6 +84,7 @@ try{
  console.log('Dashboard render: '+Math.round(await run('qaDashboardElapsed'))+'ms; no detailed-report requests on initial load.');
  for(const width of [1500,1100,768,390,320]){
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:false});await pause(80);
+  assert.ok(await run('(()=>{const node=root.querySelector("#daily-activity");return node.scrollWidth<=node.clientWidth})()'),'Daily activity overflow at '+width);
   assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'),'Page overflow at '+width);
   const inset=await run('(()=>{const panel=root.querySelector(".dc-equation-panel"),heading=panel.querySelector(".dc-section-label");return heading.getBoundingClientRect().top-panel.getBoundingClientRect().top;})()');
   assert.ok(inset<=24,'Unexpected equation top gap: '+inset);

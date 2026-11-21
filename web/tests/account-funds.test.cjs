@@ -62,6 +62,8 @@ test('dashboard separates recorded balances, available funds, reserves, currenci
     views:{dashboardReports:async()=>''},scopeTabs:()=>'',allInvestments:async()=>[],categoryView:{rollup:()=>new Map()},moneyTone:()=>'',
     responsiveAmount:(value,currency)=>value==null?'Unknown':`${currency} ${value}`,field:(_label,control)=>control,option:(value,label)=>`<option value="${value}">${label}</option>`,heading:()=>'',button:()=>'',navButton:()=>'',empty:()=>'',coverage:()=>''
   });
+  context.window={finwiseDailyActivity:{render:()=>''}};
+  context.dailyActivityOptions=()=>({});
   context.analyticsView.difference=(a,b)=>(Number(a)-Number(b)).toFixed(2);
   context.analyticsView.categoryRing=()=>'';
   context.analyticsView.categoryHistory=()=>'';

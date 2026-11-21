@@ -176,7 +176,7 @@ test('dashboard category history stacks exact amounts and fills quiet months wit
 
 test('hero breakdown uses authoritative signed effects, excludes transfers and retains exact offsets',()=>{
   const view=analytics();
-  const summary={earned_income:'100.01',actual_spending:'39.99',economic_surplus:'60.02',net_invested:'15.00',breakdown:[
+  const summary={earned_income:'100.01',actual_spending:'39.99',economic_surplus:'60.02',net_invested:'15.00',after_investment_cash_flow:'45.02',breakdown:[
     {transaction_id:'salary',transaction_type:'income',income:'100.01',spending:'0',net_invested:'0'},
     {transaction_id:'shop',transaction_type:'expense',income:'0',spending:'50.00',net_invested:'0'},
     {transaction_id:'refund',transaction_type:'refund',income:'0',spending:'-10.01',net_invested:'0'},
@@ -199,6 +199,11 @@ test('hero breakdown uses authoritative signed effects, excludes transfers and r
   assert.equal(surplus.positive,'110.02');assert.equal(surplus.offsets,'50.00');assert.equal(surplus.explained,'60.02');
   assert.equal(surplus.contributors[1].effect,'-50.00');
   assert.equal(surplus.contributors[2].effect,'10.01');
+  const after=view.metricBreakdown(summary,transactions,'after_investment_cash_flow','INR');
+  assert.equal(after.total,'45.02');assert.equal(after.explained,'45.02');
+  assert.equal(after.contributors.find(row=>row.transaction.id==='fund').effect,'-20.00');
+  assert.equal(after.contributors.find(row=>row.transaction.id==='withdraw').effect,'5.00');
+  assert.equal(after.excluded.find(row=>row.transaction.id==='transfer').effect,'0.00');
 });
 
 test('hero breakdown groups split allocations, preserves missing source effects and zero-net offsets',()=>{

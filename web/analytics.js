@@ -167,6 +167,7 @@
       earned_income:{title:'Earned income',formula:'Eligible ordinary income',description:'Ordinary income allocations only. Transfers and linked reimbursement credits do not contribute.',field:'income',fallback:'income'},
       actual_spending:{title:'Net consumption spending',formula:'Consumption allocations − eligible refunds',description:'Eligible consumption spending, including your retained paid-on-behalf share, less eligible refunds. Transfers, card repayments and investment funding are excluded.',field:'spending',fallback:'net_spending'},
       net_invested:{title:'Net invested',formula:'Investment contributions − withdrawals',description:'Recorded investment contributions less capital withdrawals. Linked funding is counted once; security purchases do not create a second contribution.',field:'net_invested'},
+      after_investment_cash_flow:{title:'Surplus after investments',formula:'Earned income − net consumption spending − net invested',description:'Purchase-month income less consumption and net investment contributions. Card purchases count when incurred; repayments are excluded. Payment-based cash surplus is shown separately on the dashboard.'},
       economic_surplus:{title:'Recorded surplus',formula:'Earned income − net consumption spending',description:'What you earned less what you consumed. This is a flow for the selected period, separate from account balances.',fallback:'recorded_surplus'}
     };
     const definition=definitions[key];
@@ -174,7 +175,7 @@
     const scale=new Intl.NumberFormat('en',{style:'currency',currency}).resolvedOptions().maximumFractionDigits;
     const sum=values=>sumMoney(values,scale),byId=new Map();
     for(const line of summary.breakdown||[]) {
-      const effects=key==='economic_surplus'?[line.income||'0',negate(line.spending||'0')]:[line[definition.field]||'0'];
+      const effects=key==='after_investment_cash_flow'?[line.income||'0',negate(line.spending||'0'),negate(line.net_invested||'0')]:key==='economic_surplus'?[line.income||'0',negate(line.spending||'0')]:[line[definition.field]||'0'];
       const group=byId.get(line.transaction_id)||{effects:[],types:new Set(),categories:new Set()};
       group.effects.push(...effects);group.types.add(line.transaction_type);
       if(line.category_id)group.categories.add(line.category_id);

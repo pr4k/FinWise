@@ -51,7 +51,7 @@ test('opening the edit modal clears the details drawer and its layout state',()=
   const classes=new Set(['transaction-drawer-open']);
   const drawer={hidden:false,innerHTML:'Transaction details',replaceChildren(){this.innerHTML='';}};
   const dialog={open:false,showModal(){this.open=true;}};
-  const context=vm.createContext({transactionDrawer:drawer,dialog,
+  const context=vm.createContext({transactionDrawer:drawer,dialog,state:{},
     document:{body:{classList:{remove:name=>classes.delete(name),add:name=>classes.add(name)}}},
     h:String,button:()=>'',addModalChips:()=>{}
   });

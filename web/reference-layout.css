@@ -137,6 +137,61 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .reference-page .tx-record[open] .tx-chevron {transform:rotate(180deg)}
 .reference-page .tx-record[open] .tx-summary {background:#f6f9f1}
 .reference-page .tx-details {padding:18px;border-top:1px solid var(--line)}
+.reference-page .tx-details .tx-impact-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.reference-page .tx-impact-grid>section {min-width:0;padding:14px 16px;border:1px solid var(--line);border-radius:9px;background:#fafcf9}
+.reference-page .tx-impact-grid h4 {margin:0 0 12px;font-size:10px;font-weight:650;letter-spacing:.04em;color:var(--muted)}
+.reference-page .tx-effect-row {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:14px;padding:10px 0;border-top:1px solid var(--line)}
+.reference-page .tx-effect-row:first-of-type {border-top:0;padding-top:0}
+.reference-page .tx-effect-row:last-child {padding-bottom:0}
+.reference-page .tx-effect-copy {min-width:0}
+.reference-page .tx-effect-copy strong {display:block;font-size:12px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.reference-page .tx-effect-row small {display:block;margin-top:4px;font-size:10px;line-height:1.5;color:var(--muted)}
+.reference-page .tx-effect-value {text-align:right;font-variant-numeric:tabular-nums}
+.reference-page .tx-effect-value b {font-size:14px;font-weight:650;line-height:1.5;color:var(--ink);white-space:nowrap}
+.reference-page .tx-effect-value small span {display:block;color:var(--ink)}
+.reference-page .tx-allocation-note {font-size:11px;line-height:1.6;color:var(--muted)}
+.reference-page .tx-detail-actions {display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:14px}
+.reference-page .tx-detail-actions .button {min-height:34px;padding:8px 12px;font-size:11px}
+body.transaction-drawer-open {--transaction-panel-width:clamp(340px,34vw,460px)}
+body.transaction-drawer-open .main-area {margin-right:var(--transaction-panel-width)}
+body .transaction-drawer {width:var(--transaction-panel-width,440px);box-shadow:none;background:var(--panel,#fff);font-family:var(--font);border-left:1px solid var(--line)}
+.transaction-drawer .dialog-head {gap:12px}
+.transaction-drawer .dialog-head h2 {font-size:18px}
+.transaction-drawer .transaction-editor-form>.form-grid,
+.transaction-drawer .transaction-editor-form [data-edit-allocation] {grid-template-columns:minmax(0,1fr)}
+.transaction-drawer .transaction-editor-form [data-edit-kind]:not([hidden]) {display:grid;gap:14px}
+.transaction-drawer .transaction-editor-form .field {min-width:0;font-size:11px}
+.transaction-drawer .transaction-editor-form input,
+.transaction-drawer .transaction-editor-form select {width:100%;min-width:0;max-width:100%;font-size:12px}
+.transaction-drawer .transaction-editor-form>p {font-size:11px;line-height:1.6;color:var(--muted)}
+.transaction-drawer .transaction-editor-form [data-edit-allocation],
+.transaction-drawer .transaction-editor-form #allocation-fields:not([hidden]) {display:grid;gap:14px;padding:12px;background:#f7f9f5;border:1px solid var(--line);border-radius:8px}
+.transaction-drawer .transaction-editor-form .transaction-category-picker {font-size:11px;color:var(--muted)}
+.transaction-drawer .transaction-editor-form .transaction-category-picker>summary {cursor:pointer;padding:4px 0}
+.transaction-drawer .transaction-editor-form .transaction-category-picker[open]>summary {margin-bottom:12px}
+.transaction-drawer .transaction-editor-form .transaction-category-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
+.transaction-drawer .transaction-editor-form .dialog-actions>[value="another"] {grid-column:1/-1;min-height:32px;font-size:11px}
+.transaction-drawer .transaction-editor-form .dialog-actions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}
+.transaction-drawer .transaction-editor-form .transaction-delete-button {grid-column:1/-1;min-height:32px;border:0;background:none;color:#a53e39;font-size:11px;font-weight:600}
+.transaction-drawer .transaction-editor-form .transaction-delete-button:hover {background:#fdf0ee}
+.transaction-drawer .transaction-editor-form .transaction-delete-button:focus-visible {outline:2px solid #a53e39;outline-offset:2px}
+@media(max-width:760px) {
+  body.transaction-drawer-open .main-area {margin-right:0}
+  .transaction-drawer:has(.transaction-editor-form) {display:block;position:relative;inset:auto;width:auto;max-width:none;margin:0 16px 90px;padding:18px;border:1px solid var(--line);border-radius:12px;overflow:visible}
+  .transaction-drawer:has(.transaction-editor-form) .dialog-head {position:static;margin:0;padding:0 0 14px}
+  .transaction-drawer .transaction-editor-form .dialog-actions {position:static;margin:0;padding:14px 0 0}
+}
+@media(max-width:900px) {
+  .reference-page .tx-details .tx-impact-grid {grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:480px) {
+  .reference-page .tx-record .tx-details {padding:12px}
+  .reference-page .tx-impact-grid>section {padding:12px}
+  .reference-page .tx-effect-row {grid-template-columns:minmax(0,1fr);gap:6px}
+  .reference-page .tx-effect-value {text-align:left}
+  .reference-page .tx-effect-value small span {display:inline;margin-left:4px}
+  .reference-page .tx-detail-actions .button {flex:1;min-height:40px}
+}
 .reference-page .reference-ledger .tx-title b {white-space:normal;font-size:12px}
 .reference-page .reference-ledger .tx-amount {font-size:18px}
 .reference-page .tx-amount small {display:block;font-size:9px;color:var(--muted);margin-top:3px}
@@ -164,7 +219,7 @@ body {background:var(--bg);font:13px/1.55 var(--font);color:var(--ink)}
 .workspace-footer {display:flex;justify-content:space-between;gap:16px;max-width:1512px;margin:18px 34px 0;padding:20px 0 28px;border-top:1px solid var(--line);color:#7e8d72;font-size:9px;line-height:1.7}
 .mobile-nav-scrim {display:none}
 @media(min-width:761px) and (max-height:900px) {.workspace-note {display:none}}
-@media(min-width:761px) {.app-shell.sidebar-collapsed .main-area {margin-left:0}}
+@media(min-width:761px) {.app-shell.sidebar-collapsed .main-area {margin-left:78px}}
 @media(min-width:761px) and (max-width:1100px) {.sidebar {width:190px;padding-inline:10px}.main-area {margin-left:190px}.sidebar .nav-item {padding-inline:10px}.content {padding-inline:24px}.workspace-footer {margin-inline:24px}}
 @media(max-width:1100px) {.reference-page .tx-column-head,.reference-page .tx-summary {grid-template-columns:80px minmax(0,1fr) 115px 125px 15px;gap:10px}.reference-page .ledger-filters .field {flex-basis:140px}}
 @media(max-width:760px) {
@@ -458,3 +513,37 @@ body {background:var(--bg);-webkit-font-smoothing:antialiased}
 
 .credit-card-summary--two {grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:930px) {.credit-card-summary--two {grid-template-columns:minmax(0,1fr)}}
+
+/* Use the available ledger width when navigation or a drawer changes the workspace. */
+.reference-page .reference-ledger {container-type:inline-size;min-width:0}
+.reference-page .tx-summary>* {min-width:0;overflow-wrap:anywhere}
+.reference-page .tx-summary .tx-amount {white-space:normal}
+.reference-page .tx-day-heading {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:14px 0 8px;border-top:1px solid var(--line);margin-top:14px}
+.reference-page .tx-day-heading h3 {margin:0;font-size:13px;font-weight:650}
+.reference-page .tx-day-heading .button {min-height:36px}
+.reference-page .tx-amount .tx-variance {margin-top:6px}
+.reference-page .tx-variance.different {color:#9b4c23}
+.reference-page .tx-variance.matched {color:#24664e}
+.reference-page .tx-amount small b {font-weight:650}
+@container (max-width:800px) {
+  .reference-page .tx-column-head {display:none}
+  .reference-page .tx-summary {grid-template-columns:minmax(0,1fr) minmax(100px,160px) 12px;gap:6px 12px;padding:16px 12px}
+  .reference-page .tx-summary .tx-title {grid-column:1;grid-row:1}
+  .reference-page .tx-summary .tx-type-cell {grid-column:1;grid-row:2}
+  .reference-page .tx-summary .tx-date {grid-column:1;grid-row:3}
+  .reference-page .tx-summary .tx-date small {display:block;margin:3px 0 0}
+  .reference-page .tx-summary .tx-amount {grid-column:2;grid-row:1/4;max-width:none;font-size:18px;align-self:start}
+  .reference-page .tx-summary .tx-chevron {grid-column:3;grid-row:1/4}
+  .reference-page .tx-ledger-totals {grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .reference-page .tx-ledger-totals>div {min-width:0;overflow-wrap:anywhere}
+  .reference-page .tx-ledger-totals>p {grid-column:1/-1}
+  .reference-page .tx-workspace-head {flex-wrap:wrap;gap:12px}
+  .reference-page .tx-workspace-head .cm-actions {flex-wrap:wrap}
+  .reference-page .tx-record-key {flex-wrap:wrap}
+  .reference-page .tx-record-key em {width:100%;margin-left:0}
+}
+@container (max-width:380px) {
+  .reference-page .tx-summary {grid-template-columns:minmax(0,1fr) 12px}
+  .reference-page .tx-summary .tx-chevron {grid-column:2;grid-row:1/5}
+  .reference-page .tx-summary .tx-amount {grid-column:1;grid-row:4;text-align:left}
+}
