@@ -100,7 +100,7 @@ async function reimbursementEditor(key) {
   editor('Match reimbursements',`<p>${h(obligation.person)} · Outstanding ${amount(obligation.remaining,obligation.currency)}</p><p class="helper">Credits from all dates are shown. Name matches are suggestions; select any credit manually and adjust its applied amount. Unused credit stays available for another receivable and is excluded from earned income.</p>${candidates.data.length?table(['Select','Credit','Available','Apply amount'],candidates.data.map(t=>[`<input type="checkbox" name="credit" value="${h(t.id)}" aria-label="Select ${h(t.description)}">`,`${h(t.effective_date)} · ${h(t.description)}${t.suggested?' · Suggested':''}`,amount(t.available,obligation.currency),`<input data-credit-amount="${h(t.id)}" inputmode="decimal" value="${h(t.suggested_amount)}" aria-label="Apply amount for ${h(t.description)}">`])):empty('No available incoming credits. Record or import the incoming transaction first.')}`,'reimbursement-match-form','Apply selected reimbursements');
 }
 
-const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', subscriptions:'Subscriptions', recurring:'Recurring', planner:'Planner', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Family budget', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
+const labels = { overview:'Overview', household:'Household', analytics:'Analytics', transactions:'Transactions', sheet:'Data explorer', subscriptions:'Subscriptions', recurring:'Recurring', planner:'Planner', accounts:'Accounts', categories:'Categories', statements:'Statements', budgets:'Family budget', settlements:'Settle up', investments:'Investments', reconcile:'Reconcile', imports:'Imports', settings:'Settings', changes:'Money Manager changes', more:'More' };
 const previousMonth=new Date(`${savedView.month}-01T00:00:00Z`); previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
 const compareParam=new URLSearchParams(location.search).get('compare');
 const state = { me:null, accounts:[], categories:[], members:[], plannedItems:[], ledgerBalances:new Map(), transactionFilters:viewState.readFilters(location.search), recurringFilter:'review', settlementFilter:'open', investmentFilter:'all', investmentTab:'overview', analyticsTab:'trends', budgetTab:['top','categories','ahead'].includes(savedBudgetTab)?savedBudgetTab:'top', compareMonth:/^\d{4}-(0[1-9]|1[0-2])$/.test(compareParam||'')?compareParam:previousMonth.toISOString().slice(0,7), inviteLink:null, view:'overview', month:savedView.month, scope:savedView.scope, overviewCurrency:new URLSearchParams(location.search).get('report_currency')||'', batch:null, file:null, preview:[], cleanupPreview:null, metadata:null, fileInfo:null, importResult:null, session:null, generation:0 };
@@ -559,6 +559,7 @@ async function renderRoute({inPlace=false,catalogsReady=false}={}) {
     document.title=`${account?account.name+' · ':''}${labels[view]} · FinWise`;
     if(routeChanged&&!updateInPlace) window.scrollTo({top:0,behavior:'instant'});
     if(view==='overview'&&parts[1]==='reports')document.querySelector('#dashboard-reports')?.scrollIntoView({block:'start'});
+    if(view==='sheet') window.finwiseSheet.mount(root.querySelector('#sheet-workspace'),state.sheetTransactions,state.accounts,state.categories);
     if(view==='reconcile') updateMatchComparison();
   } catch(e) { if(generation===state.generation && state.me) { root.removeAttribute('aria-busy'); if(!updateInPlace){window.finwiseReference.parkControls();root.innerHTML=window.finwiseReference.page(heading(labels[view],'Could not load this view.',button('Retry','refresh')),view);window.finwiseReference.mountControls();} failure(e); } }
 }
@@ -1150,6 +1151,10 @@ const views = {
       panel('Account activity',table(['Account','Movement / debt change','Available / amount owed'],accounts.data.map(a=>[h(a.name),moneyFigure(state.accounts.find(v=>v.id===a.id)?.subtype==='credit_card'?analyticsView.negate(a.signed_movements):a.signed_movements,a.currency),`${moneyFigure(accountAvailable(a),a.currency,state.accounts.find(v=>v.id===a.id)?.subtype==='credit_card'?'debt':'asset')}<small>${state.accounts.find(v=>v.id===a.id)?.subtype==='credit_card'?'Amount owed':'Available balance'}</small>`])))+
       panel('Transfers',`<p>${h(transfers.data.length)} recorded transfers in this period.</p>`))}</section>`;
   },
+  async sheet() {
+    state.sheetTransactions=(await api.collection('transactions')).data.filter(t=>!t.voided);
+    return heading('Data explorer','Explore your accessible transactions across all dates.')+'<section id="sheet-workspace" class="sheet-workspace" aria-label="Transaction data explorer"></section>';
+  },
   async transactions(parts) {
     const allDates=parts[0]==='all';
     if(state.transactionFilters.account && !state.accounts.some(a=>a.id===state.transactionFilters.account)) {
@@ -1417,7 +1422,7 @@ const views = {
   async more() {
     const groups=[
       ['Insights',['overview','household']],
-      ['Your money',['transactions','recurring','planner','accounts',...(state.scope==='family'?['budgets']:[]),'settlements','investments']],
+      ['Your money',['transactions','sheet','recurring','planner','accounts',...(state.scope==='family'?['budgets']:[]),'settlements','investments']],
       ['Workspace',['categories','statements','reconcile',...(moneyManagerMode()?['changes']:[]),'imports','settings']]
     ];
     return heading('More','All your household finance views.')+`<div class="mobile-more-index">${groups.map(([title,items])=>`<section class="panel more-section"><h2>${title}</h2><div class="mobile-more">${items.map(view=>navButton(view,labels[view])).join('')}</div></section>`).join('')}<div class="more-session">${button('Sign out','logout')}</div></div>`;

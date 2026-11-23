@@ -273,6 +273,7 @@
     return `<div class="ledger-header"><span>${filtered.length} money movements · ${balanceEvents.length} balance records</span><span>Filters applied before sorting</span></div>${totals}<div class="tx-column-head"><span>DATE / ACCOUNT</span><span>RECORD / DETAILS</span><span>TYPE</span><span>AMOUNT / BALANCE</span><span></span></div><div class="reference-records">${rows||'<p class="note">No records match this context.</p>'}</div>`;
   }
   function page(html,view,parts=[]) {
+    if(view==='sheet') return `<div class="reference-page" data-reference-page="sheet">${html}</div>`;
     let fragment=template(html);
     const oldActions=removeHeading(fragment);
     fragment.querySelectorAll('.analytics-scope-tabs,.analytics-scope-note,.dashboard-toolbar').forEach(node=>node.remove());

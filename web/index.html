@@ -27,6 +27,7 @@
     <link rel="stylesheet" href="/analytics-view.css?v=20261012b" />
     <link rel="stylesheet" href="/accounts-view.css?v=20261021b" />
     <link rel="stylesheet" href="/ui-refresh.css?v=20261024c" />
+    <link rel="stylesheet" href="/sheet-view.css?v=1" />
     <link rel="stylesheet" href="/transactions-view.css?v=20261123saved-transaction" />
     <link rel="stylesheet" href="/dashboard-view.css?v=20261120daily-activity-compact" />
     <link rel="stylesheet" href="/investments-view.css?v=20261030a" />
@@ -46,10 +47,11 @@
     <link rel="stylesheet" href="/reference-fonts.css?v=20261105layouts" />
     <link rel="stylesheet" href="/reference-components.css?v=20261105layouts" />
     <link rel="stylesheet" href="/reference-layout.css?v=20261123compact-dashboard" />
-    <script src="/reference-ui.js?v=20261123compact-dashboard" defer></script>
+    <script src="/reference-ui.js?v=20261123data-explorer" defer></script>
     <script src="/planner-data.js?v=20261102income-owner" defer></script>
     <script src="/planner.js?v=20261105layouts" defer></script>
-    <script src="/app.js?v=20261123compact-dashboard" defer></script>
+    <script src="/sheet-view.js?v=1" defer></script>
+    <script src="/app.js?v=20261123data-explorer" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -105,6 +107,7 @@
           <button class="nav-item" data-view="overview"><svg><use href="#i-grid"/></svg><span>Overview</span></button>
           <button class="nav-item" data-view="planner"><svg><use href="#i-bell"/></svg><span>Planner</span></button>
           <button class="nav-item" data-view="transactions"><svg><use href="#i-receipt"/></svg><span>Transactions</span></button>
+          <button class="nav-item" data-view="sheet"><svg><use href="#i-grid"/></svg><span>Data explorer</span></button>
           <button class="nav-item" data-view="subscriptions"><svg><use href="#i-receipt"/></svg><span>Subscriptions</span></button>
           <button class="nav-item" data-view="recurring"><svg><use href="#i-receipt"/></svg><span>Recurring</span></button>
           <button class="nav-item" data-view="accounts"><svg><use href="#i-wallet"/></svg><span>Accounts</span></button>
