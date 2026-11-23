@@ -36,8 +36,8 @@ try{
  assert.ok(checks.some(text=>text.includes('Matched')&&text.includes('₹0.00')));
  assert.ok(checks.some(text=>text.includes('No starting balance')&&text.includes('Unknown')));
  assert.equal(await run(`document.querySelectorAll('.tx-day-heading').length`),5);
- for(const width of [1500,1100,900,768,390,320]){
-  await cdp('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:false});
+ for(const width of [1500,1100,900,768,430,390,375,320]){
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:width<=760});
   await pause(400);
   await until('document.querySelectorAll(".tx-check").length===4&&!root.hasAttribute("aria-busy")');
   for(const collapsed of [false,true,false]){
@@ -60,7 +60,11 @@ try{
   assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'),'Side editor page overflow at '+width);
   assert.ok(await run('transactionDrawer.scrollWidth<=transactionDrawer.clientWidth'),'Side editor overflow at '+width);
   if(width>760)assert.ok(await run(`document.querySelector('.main-area').getBoundingClientRect().right<=transactionDrawer.getBoundingClientRect().left+1`),'Editor overlaps list at '+width);
-  else assert.ok(await run(`transactionDrawer.getBoundingClientRect().top>=document.querySelector('.app-shell').getBoundingClientRect().bottom-1`),'Phone editor should be in page flow');
+  else {
+   assert.ok(await run(`transactionDrawer.parentElement===document.querySelector('.main-area')&&transactionDrawer.getBoundingClientRect().bottom<=root.getBoundingClientRect().top+1`),'Phone editor must be above the list in page flow');
+   assert.equal(await run(`getComputedStyle(transactionDrawer.querySelector('input[name="description"]')).fontSize`),'16px');
+   await until(`(()=>{const rect=transactionDrawer.querySelector('.dialog-head h2').getBoundingClientRect();return rect.top>=0&&rect.bottom<=innerHeight})()`);
+  }
   if([1500,900,320].includes(width)) {
    const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
    await fs.writeFile('/tmp/finwise-transaction-side-editor-'+width+'.png',Buffer.from(shot.data,'base64'));
@@ -78,9 +82,9 @@ try{
   assert.ok(await run('transactionDrawer.scrollWidth<=transactionDrawer.clientWidth'),'Add panel overflow at '+width);
   if(width>760)assert.ok(await run(`document.querySelector('.main-area').getBoundingClientRect().right<=transactionDrawer.getBoundingClientRect().left+1`),'Add editor overlaps list at '+width);
   await run(`transactionDrawer.querySelector('form').elements.description.value='New transaction draft'`);
-  await cdp('Emulation.setDeviceMetricsOverride',{width:width===1500?1100:width+1,height:1100,deviceScaleFactor:1,mobile:false});await pause(100);
+  await cdp('Emulation.setDeviceMetricsOverride',{width:width===1500?1100:width+1,height:1100,deviceScaleFactor:1,mobile:width<=760});await pause(100);
   assert.equal(await run(`transactionDrawer.querySelector('form').elements.description.value`),'New transaction draft');
-  await cdp('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:false});await pause(100);
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height:1100,deviceScaleFactor:1,mobile:width<=760});await pause(100);
   assert.equal(await run(`document.querySelector('#transaction-form').elements.effective_date.value`),'2026-11-03');
   await run('dialog.close();closeTransactionDrawer()');
   console.log('PASS: transaction layout and dated quick add at '+width+'px');
@@ -110,7 +114,7 @@ try{
  assert.equal(await run(`(async()=>{const ledger=await finwiseAPI.collection('accounts/'+qaBank+'/ledger?from=2026-11-01&to=2026-12-01');return ledger.data.some(row=>row.description==='Edited in the side panel');})()`),false,'Deleted expense is removed from the account ledger');
  await run('window.confirm=qaConfirm');
  console.log('PASS: delete confirmation cancellation preserves the transaction; confirmed deletion closes the panel, removes the row and ledger movement, and preserves observed balance anchors.');
- console.log('PASS: one Edit details action, docked editor without list overlap, inline phone editor, saving and fresh revisions, draft retention on resize, and panel close.');
+ console.log('PASS: one Edit details action, docked editor without list overlap, inline phone editor above the list, saving and fresh revisions, draft retention on resize, and panel close.');
  await run(`(()=>{transactionEditor({accountId:qaBank,date:'2026-11-03'});const form=transactionDrawer.querySelector('form');form.elements.description.value='Created in the shared editor';form.elements.amount.value='25.00';form.requestSubmit();})()`);
  await until(`!!transactionDrawer.querySelector('#transaction-full-edit-form')&&root.textContent.includes('Created in the shared editor')`);
  assert.equal(await run(`transactionDrawer.querySelector('form').elements.amount.value`),'25.00');
@@ -122,6 +126,25 @@ try{
  assert.equal(await run(`transactionDrawer.querySelector('form').elements.account_id.value`),await run('qaBank'));
  assert.equal(await run(`transactionDrawer.querySelector('form').elements.effective_date.value`),'2026-11-03');
  console.log('PASS: Add and Edit share the side-panel form layout, keep drafts on resize, preserve date/account context, and support Save and Save & add another.');
+ // Confirm each save reveals its own row, including hidden dates/scopes/filters.
+ await until(`!!root.querySelector('.tx-just-added')`);
+ assert.ok(await run(`root.querySelector('.tx-just-added').textContent.includes('Save and add another from shared editor')`));
+ for(const width of [1100,390]) {
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width<=760});
+  await run(`(async()=>{
+   closeTransactionDrawer();setMonth('2026-11');state.scope='personal';state.transactionFilters.search='will hide new transaction';saveView();await renderRoute({inPlace:true});
+   transactionEditor({accountId:qaBank,date:'2026-10-15'});const form=transactionDrawer.querySelector('form');form.elements.description.value='Reveal saved transaction at ${width}';form.elements.amount.value='12.00';form.elements.scope.value='family';form.requestSubmit();
+  })()`);
+  await until(`!!root.querySelector('.tx-just-added')&&root.querySelector('.tx-just-added').textContent.includes('Reveal saved transaction at ${width}')`);
+  await until(`(()=>{const rect=root.querySelector('.tx-just-added').getBoundingClientRect();return rect.top>=0&&rect.bottom<=innerHeight})()`);
+  assert.equal(await run('state.month'),'2026-10');
+  assert.equal(await run('state.scope'),'family');
+  assert.equal(await run("state.transactionFilters.search||''"),'');
+  assert.ok(await run(`getComputedStyle(root.querySelector('.tx-just-added > summary')).backgroundColor==='rgb(230, 244, 206)'`));
+  assert.equal(await run(`root.querySelectorAll('.tx-just-added').length`),1);
+  await until(`!root.querySelector('.tx-just-added')`);
+ }
+ console.log('PASS: each new transaction scrolls into view and is temporarily highlighted on desktop and mobile, including a different month, scope, and an excluding search filter.');
  assert.deepEqual(errors,[]);
  console.log('PASS: entered/calculated balances, positive/negative/zero/unknown differences, date headers including evidence-only dates, and account context preserved; no browser exceptions.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

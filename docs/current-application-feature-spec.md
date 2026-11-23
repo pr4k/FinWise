@@ -159,7 +159,7 @@ The Accounts workspace lists all accounts accessible to the signed-in user regar
 
 Add transaction and Edit details use the same side-panel form styling, field order, category dropdown, and footer actions. Add transaction retains optional category search, quick creation, and Save & add another. A normal save opens the saved transaction in the same editor; Save & add another starts a fresh form with the chosen date and account.
 
-Transaction row expansion offers a single **Edit details** action for editable ledger transactions. It opens a right-side editor with the list kept visible in the remaining width. Saving updates the list and keeps the editor open with the new revision. On phones the editor appears below the list in normal page flow. Resizing preserves the draft; Close, Cancel, or Escape dismisses the panel. The side editor includes a Delete transaction action with confirmation; deletion closes the editor and refreshes the list. View-only and investment-managed records retain their existing detail actions.
+Transaction row expansion offers a single **Edit details** action for editable ledger transactions. It opens a right-side editor with the list kept visible in the remaining width. Saving updates the list and keeps the editor open with the new revision. On phones the editor appears above the list within the page, with 16 px input text and touch-sized controls. Closing it returns focus to its opener. Resizing preserves the draft; Close, Cancel, or Escape dismisses the panel. The side editor includes a Delete transaction action with confirmation; deletion closes the editor and refreshes the list. View-only and investment-managed records retain their existing detail actions.
 
 ## 8. Dashboard and Household 360
 

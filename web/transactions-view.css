@@ -66,3 +66,12 @@
   .activity-ledger-table td:nth-child(n),
   .ledger-workspace .activity-ledger-table td:nth-child(n) { grid-column: 1; grid-row: auto; text-align: left; }
 }
+
+/* Confirm a successful addition without moving focus out of the editor. */
+.reference-page .tx-record.tx-just-added > .tx-summary {
+  background: #e6f4ce;
+  box-shadow: inset 4px 0 0 #587c2c;
+}
+.reference-page .tx-record.tx-just-added {
+  scroll-margin-block: 90px;
+}

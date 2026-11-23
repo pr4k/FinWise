@@ -27,7 +27,7 @@
     <link rel="stylesheet" href="/analytics-view.css?v=20261012b" />
     <link rel="stylesheet" href="/accounts-view.css?v=20261021b" />
     <link rel="stylesheet" href="/ui-refresh.css?v=20261024c" />
-    <link rel="stylesheet" href="/transactions-view.css?v=20261030a" />
+    <link rel="stylesheet" href="/transactions-view.css?v=20261123saved-transaction" />
     <link rel="stylesheet" href="/dashboard-view.css?v=20261120daily-activity-compact" />
     <link rel="stylesheet" href="/investments-view.css?v=20261030a" />
     <script src="/vendor/chart.umd.min.js?v=4.4.8" defer></script>
@@ -45,11 +45,11 @@
     <link rel="stylesheet" href="/planner.css?v=20261102workflow" />
     <link rel="stylesheet" href="/reference-fonts.css?v=20261105layouts" />
     <link rel="stylesheet" href="/reference-components.css?v=20261105layouts" />
-    <link rel="stylesheet" href="/reference-layout.css?v=20261121shared-transaction-editor" />
-    <script src="/reference-ui.js?v=20261121shared-transaction-editor" defer></script>
+    <link rel="stylesheet" href="/reference-layout.css?v=20261122mobile-transaction-editor" />
+    <script src="/reference-ui.js?v=20261122mobile-transaction-editor" defer></script>
     <script src="/planner-data.js?v=20261102income-owner" defer></script>
     <script src="/planner.js?v=20261105layouts" defer></script>
-    <script src="/app.js?v=20261121shared-transaction-editor" defer></script>
+    <script src="/app.js?v=20261123saved-transaction" defer></script>
     <script>
       function startupProblem(message) {
         const auth = document.querySelector('#auth-root');
@@ -136,6 +136,7 @@
           </div></div>
           <div class="reference-header-right"><span class="workspace-status"><i></i> Private workspace</span><button class="icon-button" type="button" data-view="planner" aria-label="Open planner"><svg><use href="#i-bell"/></svg></button><button class="header-avatar" type="button" data-view="settings" aria-label="Open your profile">FW</button></div>
         </header>
+        <aside id="transaction-drawer" class="transaction-drawer" aria-labelledby="transaction-drawer-title" hidden></aside>
         <div class="content" id="view-root" tabindex="-1"></div>
         <footer class="workspace-footer"><span>A clearer relationship with your money.</span><span>Your private household workspace</span></footer>
         <nav class="bottom-nav" aria-label="Mobile navigation">
@@ -148,7 +149,6 @@
       </main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <aside id="transaction-drawer" class="transaction-drawer" aria-labelledby="transaction-drawer-title" hidden></aside>
     <dialog id="metric-dialog" class="metric-dialog" aria-labelledby="metric-detail-title"></dialog>
     <dialog class="balance-dialog live-dialog" id="editor" aria-labelledby="editor-title"></dialog>
   </body>

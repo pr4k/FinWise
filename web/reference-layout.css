@@ -177,9 +177,21 @@ body .transaction-drawer {width:var(--transaction-panel-width,440px);box-shadow:
 .transaction-drawer .transaction-editor-form .transaction-delete-button:focus-visible {outline:2px solid #a53e39;outline-offset:2px}
 @media(max-width:760px) {
   body.transaction-drawer-open .main-area {margin-right:0}
-  .transaction-drawer:has(.transaction-editor-form) {display:block;position:relative;inset:auto;width:auto;max-width:none;margin:0 16px 90px;padding:18px;border:1px solid var(--line);border-radius:12px;overflow:visible}
+  .transaction-drawer:has(.transaction-editor-form) {display:block;position:relative;inset:auto;width:auto;max-width:none;margin:16px 16px 0;padding:18px;border:1px solid var(--line);border-radius:12px;overflow:visible}
   .transaction-drawer:has(.transaction-editor-form) .dialog-head {position:static;margin:0;padding:0 0 14px}
   .transaction-drawer .transaction-editor-form .dialog-actions {position:static;margin:0;padding:14px 0 0}
+  .transaction-drawer .transaction-editor-form input,
+  .transaction-drawer .transaction-editor-form select {font-size:16px;min-height:44px;box-sizing:border-box}
+  .transaction-drawer .transaction-editor-form button,
+  .transaction-drawer .dialog-head .icon-button {min-height:44px}
+  .transaction-drawer .dialog-head .icon-button {min-width:44px;font-size:24px}
+  .transaction-drawer .transaction-editor-form .transaction-category-picker>summary {min-height:44px;display:flex;align-items:center}
+  .transaction-drawer .transaction-editor-form .transaction-category-picker>summary::before {content:'▸';margin-right:6px}
+  .transaction-drawer .transaction-editor-form .transaction-category-picker[open]>summary::before {content:'▾'}
+  .transaction-drawer .transaction-editor-form .transaction-delete-button,
+  .transaction-drawer .transaction-editor-form .dialog-actions>[value="another"] {min-height:44px;font-size:12px}
+  .transaction-drawer .transaction-editor-form input::-webkit-date-and-time-value {text-align:left}
+
 }
 @media(max-width:900px) {
   .reference-page .tx-details .tx-impact-grid {grid-template-columns:minmax(0,1fr)}

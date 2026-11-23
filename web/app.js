@@ -18,10 +18,13 @@ const shell = document.querySelector('.app-shell');
 const dialog = document.querySelector('#editor');
 const transactionDrawer = document.querySelector('#transaction-drawer');
 function closeTransactionDrawer() {
+  const returnFocus=transactionDrawer.returnFocusElement;
+  delete transactionDrawer.returnFocusElement;
   state.transactionEditRequest=null;
   transactionDrawer.hidden=true;
   transactionDrawer.replaceChildren();
   document.body.classList.remove('transaction-drawer-open');
+  if(returnFocus?.isConnected)returnFocus.focus();
 }
 const menuButton = document.querySelector('#menu-button');
 function syncMenuButton() {
@@ -37,6 +40,39 @@ function syncScopeControl() {
     const active=el.dataset.scope===state.scope;
     el.classList.toggle('selected',active);
     el.setAttribute('aria-pressed',String(active));
+  });
+}
+
+function savedTransactionRow(transactionId) {
+  return root.querySelector(`[data-reference-transaction="${CSS.escape(transactionId)}"]`);
+}
+async function refreshAfterTransactionCreated(transaction) {
+  if(state.view==='transactions') {
+    const allDates=location.hash.split('/')[1]==='all';
+    if(!allDates && state.month!==transaction.effective_date.slice(0,7))setMonth(transaction.effective_date.slice(0,7));
+    const scope=transaction.allocations?.[0]?.scope;
+    if(scope && state.scope!=='combined' && state.scope!==scope) {
+      state.scope=scope;syncScopeControl();saveView();
+    }
+  }
+  await renderRoute({inPlace:state.view==='transactions'});
+  if(state.view==='transactions' && !savedTransactionRow(transaction.id)) {
+    // Filters can hide a successful save. Keep the sort order when revealing it.
+    const {sort,secondarySort}=state.transactionFilters;
+    state.transactionFilters={account:'',accountType:'',eventType:'',sort,secondarySort};
+    saveView();
+    await renderRoute({inPlace:true});
+  }
+}
+function highlightCreatedTransaction(transactionId) {
+  // Run after the view patch restores scrolling and the editor positions itself.
+  requestAnimationFrame(()=>{
+    const row=savedTransactionRow(transactionId);
+    if(!row)return;
+    root.querySelectorAll('.tx-just-added').forEach(node=>node.classList.remove('tx-just-added'));
+    row.classList.add('tx-just-added');
+    row.scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+    setTimeout(()=>row.classList.remove('tx-just-added'),4500);
   });
 }
 
@@ -1390,10 +1426,18 @@ const views = {
 
 function editor(title,fields,formId,submit='Save',host=dialog) {
   const drawer=host===transactionDrawer;
+  if(drawer && !host.contains(document.activeElement))host.returnFocusElement=document.activeElement;
   if(!drawer)closeTransactionDrawer();
   host.innerHTML=`<div class="dialog-head"><h2 id="${drawer?'transaction-drawer-title':'editor-title'}">${h(title)}</h2><button type="button" class="icon-button" data-action="${drawer?'close-transaction-drawer':'close-editor'}" aria-label="Close">×</button></div><form id="${formId}"${['transaction-form','transaction-full-edit-form'].includes(formId)?' class="transaction-editor-form"':''}>${fields}<div class="dialog-actions">${button('Cancel',drawer?'close-transaction-drawer':'close-editor')}<button class="primary-button" type="submit">${h(submit)}</button></div></form>`;
   addModalChips(host);
-  if(drawer) {if(dialog.open)dialog.close();host.hidden=false;document.body.classList.add('transaction-drawer-open');}
+  if(drawer) {
+    if(dialog.open)dialog.close();
+    host.hidden=false;document.body.classList.add('transaction-drawer-open');
+    const form=host.querySelector('.transaction-editor-form');
+    if(form && window.matchMedia('(max-width:760px)').matches)requestAnimationFrame(()=>{
+      if(form.isConnected && !host.hidden)host.scrollIntoView({block:'start'});
+    });
+  }
   else if(!dialog.open) dialog.showModal();
 }
 function detailDialog(title,body) {
@@ -2857,19 +2901,19 @@ document.addEventListener('submit',async event=>{
       recentTransactions.unshift(created);
       localStorage.setItem(`finwise-last-account:${state.me.user.id}`,data.account_id);
       if(form.closest('#transaction-drawer')) {
-        await renderRoute({inPlace:state.view==='transactions'});
+        await refreshAfterTransactionCreated(created);
         if(addAnother)transactionEditor({accountId:data.account_id,date:data.effective_date});
         else await transactionEditEditor(created.id);
+        highlightCreatedTransaction(created.id);
         notify(addAnother?'Transaction saved. Add the next one.':'Transaction saved. The list is up to date.');
         return;
       }
-      if(addAnother) {
-        dialog.close();
-        await renderRoute();
-        transactionEditor({accountId:data.account_id,date:data.effective_date});
-        notify('Transaction saved. Add the next one.');
-        return;
-      }
+      dialog.close();
+      await refreshAfterTransactionCreated(created);
+      if(addAnother)transactionEditor({accountId:data.account_id,date:data.effective_date});
+      highlightCreatedTransaction(created.id);
+      notify(addAnother?'Transaction saved. Add the next one.':'Transaction saved.');
+      return;
     } else if(form.id==='transaction-full-edit-form') {
       const transfer=data.event_type==='transfer';
       const signed=transfer || data.event_type==='expense'?`-${data.amount}`:data.amount;
