@@ -559,3 +559,26 @@ body {background:var(--bg);-webkit-font-smoothing:antialiased}
   .reference-page .tx-summary .tx-chevron {grid-column:2;grid-row:1/5}
   .reference-page .tx-summary .tx-amount {grid-column:1;grid-row:4;text-align:left}
 }
+
+/* Long lists must not stretch unrelated dashboard panels. */
+.reference-page .reference-overview .sub-grid {align-items:start}
+.reference-page .analytics-lead > .live-panel {height:auto;margin-bottom:0;min-width:0}
+.reference-page .reference-overview .dashboard-category-split {align-items:start;grid-template-columns:minmax(110px,.7fr) minmax(0,1.4fr);gap:20px}
+.reference-page .reference-overview .dashboard-ring {margin:12px auto 0}
+.reference-page .reference-overview .dashboard-category-legend {max-height:300px;overflow-y:auto;overscroll-behavior-y:contain;padding:2px 10px 2px 0;gap:12px;scrollbar-gutter:stable}
+.reference-page .report-category-list {max-height:380px;overflow-y:auto;overscroll-behavior-y:contain;padding-right:10px;scrollbar-gutter:stable}
+.reference-page .overview-holdings {display:grid;gap:12px;max-height:420px;overflow-y:auto;overscroll-behavior-y:contain;padding:2px 10px 2px 0;scrollbar-gutter:stable}
+.reference-page .overview-holdings .cm-holding {padding:16px;box-shadow:none;border-radius:10px;gap:6px}
+.reference-page .overview-holdings .cm-holding .eyebrow {margin:0}
+.reference-page .overview-holdings .cm-holding h3 {font-size:16px;margin:0}
+.reference-page .overview-holdings .cm-holding > strong {font-size:22px!important;margin:2px 0}
+.reference-page .overview-holdings .cm-account-breakdown {margin:4px 0;gap:12px}
+.reference-page .overview-holdings .cm-account-breakdown b {font-size:14px;margin-top:4px}
+.reference-page .overview-holdings .cm-holding p {font-size:12px;line-height:1.5;margin:0}
+.reference-page .overview-holdings .cm-holding .cm-actions {margin:0;padding-top:6px;gap:6px;flex-wrap:wrap}
+.reference-page .overview-holdings .button {padding:7px 9px;font-size:11px}
+@media(max-width:600px) {
+  .reference-page .reference-overview .dashboard-category-split {grid-template-columns:minmax(0,1fr)}
+  .reference-page .reference-overview .dashboard-ring {margin:0 auto 12px}
+  .reference-page .reference-overview .dashboard-category-legend {max-height:260px}
+}

@@ -111,6 +111,40 @@ try{
  assert.equal(await run('state.referenceCash.net'),'-1000.00');
  assert.ok(await run('root.querySelector(".credit-card-rows").textContent.includes("Current bill card")'),'Cards with existing dues remain visible even without next-month metadata');
  assert.ok(await run('root.querySelector("[data-live-key=metric-card-payments] .metric-number").textContent.includes("1,000.00")'));
+ // Reproduce the long category and holding lists from the reported layout.
+ await run(`(async()=>{
+  const bank=state.accounts.find(a=>a.name==='Household bank');
+  for(let i=0;i<16;i++){
+   const category=await finwiseAPI.request('categories',{method:'POST',body:{name:'Layout category '+i,kind:'expense'}});
+   await finwiseAPI.request('transactions',{method:'POST',body:{event_type:'expense',amount:'10.00',currency:'INR',effective_date:'2026-11-06',description:'Category layout fixture '+i,movements:[{account_id:bank.id,amount:'-10.00'}],allocations:[{category_id:category.id,amount:'10.00',scope:'family'}]}});
+  }
+  for(let i=0;i<5;i++)await finwiseAPI.request('investments',{method:'POST',body:{name:'Layout holding '+i,type:'investment',currency:'INR'}});
+  setMonth('2026-11');await catalogs();await renderRoute();
+ })()`);
+ for(const width of [1500,1100,768,390,320]) {
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<=760});await pause(150);
+  assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'),'Crowded dashboard overflow at '+width);
+  assert.ok(await run(`(()=>{const list=root.querySelector('.dashboard-category-legend');return list.children.length>=16&&list.clientHeight<=304&&list.scrollHeight>list.clientHeight})()`),'Long category legend is bounded at '+width);
+  assert.ok(await run(`(()=>{const list=root.querySelector('.overview-holdings');list.scrollTop=list.scrollHeight;return list.children.length===5&&list.clientHeight<=424&&list.lastElementChild.getBoundingClientRect().bottom<=list.getBoundingClientRect().bottom+2})()`),'Holdings remain reachable at '+width);
+  const heights=await run(`(()=>{const grid=root.querySelector('.sub-grid');return [...grid.children].map(el=>Math.round(el.getBoundingClientRect().height))})()`);
+  assert.ok(heights[1]<heights[0]-50,'Empty subscriptions should not stretch with holdings at '+width+': '+heights);
+  if([1500,390].includes(width)){
+   await run(`root.querySelector('.dashboard-category-split').scrollIntoView({block:'start',behavior:'instant'})`);
+   const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile('/tmp/finwise-dashboard-spacing-'+width+'.png',Buffer.from(shot.data,'base64'));
+   await run(`root.querySelector('.sub-grid').scrollIntoView({block:'start',behavior:'instant'})`);
+   const holdingsShot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile('/tmp/finwise-holdings-spacing-'+width+'.png',Buffer.from(holdingsShot.data,'base64'));
+  }
+ }
+ await run(`root.querySelector('.reference-reports').open=true`);await until(`!!root.querySelector('.report-category-list')`);
+ for(const width of [1500,390]) {
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<=760});await pause(150);
+  assert.ok(await run(`(()=>{const list=root.querySelector('.report-category-list');list.scrollTop=list.scrollHeight;return list.clientHeight<=380&&list.scrollHeight>list.clientHeight&&list.lastElementChild.getBoundingClientRect().bottom<=list.getBoundingClientRect().bottom+2})()`),'Report categories stay bounded and reachable at '+width);
+  if(width===1500)assert.ok(await run(`(()=>{const panel=root.querySelector('.analytics-lead > .live-panel');return panel.getBoundingClientRect().height<400})()`),'Chart panel should fit its own chart');
+  assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'),'Report overflow at '+width);
+  await run(`root.querySelector('.analytics-lead').scrollIntoView({block:'start',behavior:'instant'})`);
+  const reportShot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile('/tmp/finwise-report-spacing-'+width+'.png',Buffer.from(reportShot.data,'base64'));
+ }
+ console.log('PASS: long category and holdings lists stay compact and scrollable, empty subscriptions do not stretch, report charts fit their content, and layouts remain contained at 320–1500px.');
  assert.deepEqual(errors,[]);
  console.log('PASS: cash surplus deducts bank purchases and card repayments once; card purchases/refunds remain consumption; partial prior-debt payments and next-month transfers use payment months; internal bank transfers cancel; due dates, 320–1500px layouts and lazy reports remain correct.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
