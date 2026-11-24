@@ -19,3 +19,19 @@
 .sheet-table .sheet-amount { text-align:right; font-variant-numeric:tabular-nums; } .sheet-table .sheet-empty { padding:30px; text-align:center; color:#64746b; }
 .sheet-pagination { justify-content:flex-end; } .sheet-pagination button:disabled { opacity:.45; cursor:default; }
 @media(max-width:760px) { .sheet-toolbar { gap:10px; } .sheet-toolbar label { flex:1 1 130px; } .sheet-toolbar input:not([type=checkbox]), .sheet-toolbar select { max-width:none; width:100%; } .sheet-status { align-items:start; flex-direction:column; } }
+.sheet-filter { position:relative; min-width:120px; }
+.sheet-filter summary { display:grid; gap:5px; cursor:pointer; list-style:none; font-size:12px; font-weight:600; color:#56645d; }
+.sheet-filter summary::-webkit-details-marker { display:none; }
+.sheet-filter summary strong { display:block; border:1px solid #d7dfda; border-radius:6px; padding:8px; min-height:35px; background:#fff; color:#20352a; font-weight:400; }
+.sheet-filter summary strong::after { content:'▾'; float:right; margin-left:12px; }
+.sheet-filter-options { position:absolute; top:100%; left:0; z-index:5; min-width:190px; max-height:240px; overflow:auto; background:white; border:1px solid #d7dfda; border-radius:8px; padding:8px; box-shadow:0 8px 25px #1b30221c; }
+.sheet-filter-options label { display:flex; align-items:center; gap:7px; padding:5px; font-weight:400; }
+.sheet-table { table-layout:fixed; min-width:0; }
+.sheet-table th, .sheet-table td { box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; }
+.sheet-table thead th { overflow:visible; }
+.sheet-table .sheet-frozen { position:sticky; z-index:2; background:#fff; }
+.sheet-table .sheet-row-number.sheet-frozen { background:#f8faf8; }
+.sheet-table thead .sheet-frozen { z-index:3; background:#f4f7f5; }
+.sheet-frozen-edge { box-shadow:2px 0 3px #1b30221f; }
+.sheet-resize { position:absolute; right:-5px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:4; }
+.sheet-resize:focus-visible { outline:2px solid #287454; outline-offset:-2px; }
