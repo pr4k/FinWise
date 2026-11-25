@@ -177,8 +177,9 @@ body .transaction-drawer {width:var(--transaction-panel-width,440px);box-shadow:
 .transaction-drawer .transaction-editor-form .transaction-delete-button:focus-visible {outline:2px solid #a53e39;outline-offset:2px}
 @media(max-width:760px) {
   body.transaction-drawer-open .main-area {margin-right:0}
-  .transaction-drawer:has(.transaction-editor-form) {display:block;position:relative;inset:auto;width:auto;max-width:none;margin:16px 16px 0;padding:18px;border:1px solid var(--line);border-radius:12px;overflow:visible}
-  .transaction-drawer:has(.transaction-editor-form) .dialog-head {position:static;margin:0;padding:0 0 14px}
+  body.transaction-drawer-open:has(.transaction-editor-form) {overflow:hidden}
+  .transaction-drawer:has(.transaction-editor-form) {display:block;position:fixed;inset:0;z-index:100;width:100%;max-width:none;height:100dvh;box-sizing:border-box;margin:0;padding:0 18px calc(18px + env(safe-area-inset-bottom));border:0;border-radius:0;overflow-y:auto;overscroll-behavior:contain}
+  .transaction-drawer:has(.transaction-editor-form) .dialog-head {position:sticky;top:0;margin:0 -18px;padding:12px 18px;background:var(--panel,#fff)}
   .transaction-drawer .transaction-editor-form .dialog-actions {position:static;margin:0;padding:14px 0 0}
   .transaction-drawer .transaction-editor-form input,
   .transaction-drawer .transaction-editor-form select {font-size:16px;min-height:44px;box-sizing:border-box}

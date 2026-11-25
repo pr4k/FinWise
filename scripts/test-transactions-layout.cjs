@@ -61,7 +61,8 @@ try{
   assert.ok(await run('transactionDrawer.scrollWidth<=transactionDrawer.clientWidth'),'Side editor overflow at '+width);
   if(width>760)assert.ok(await run(`document.querySelector('.main-area').getBoundingClientRect().right<=transactionDrawer.getBoundingClientRect().left+1`),'Editor overlaps list at '+width);
   else {
-   assert.ok(await run(`transactionDrawer.parentElement===document.querySelector('.main-area')&&transactionDrawer.getBoundingClientRect().bottom<=root.getBoundingClientRect().top+1`),'Phone editor must be above the list in page flow');
+   assert.ok(await run(`(()=>{const r=transactionDrawer.getBoundingClientRect();return getComputedStyle(transactionDrawer).position==='fixed'&&r.top===0&&r.left===0&&r.width===innerWidth&&r.height===innerHeight})()`),'Phone editor fills the viewport');
+   assert.equal(await run(`getComputedStyle(document.body).overflow`),'hidden','Background does not scroll while editing');
    assert.equal(await run(`getComputedStyle(transactionDrawer.querySelector('input[name="description"]')).fontSize`),'16px');
    await until(`(()=>{const rect=transactionDrawer.querySelector('.dialog-head h2').getBoundingClientRect();return rect.top>=0&&rect.bottom<=innerHeight})()`);
   }
@@ -114,7 +115,7 @@ try{
  assert.equal(await run(`(async()=>{const ledger=await finwiseAPI.collection('accounts/'+qaBank+'/ledger?from=2026-11-01&to=2026-12-01');return ledger.data.some(row=>row.description==='Edited in the side panel');})()`),false,'Deleted expense is removed from the account ledger');
  await run('window.confirm=qaConfirm');
  console.log('PASS: delete confirmation cancellation preserves the transaction; confirmed deletion closes the panel, removes the row and ledger movement, and preserves observed balance anchors.');
- console.log('PASS: one Edit details action, docked editor without list overlap, inline phone editor above the list, saving and fresh revisions, draft retention on resize, and panel close.');
+ console.log('PASS: one Edit details action, docked desktop editor, full-screen phone editor, saving and fresh revisions, draft retention on resize, and panel close.');
  await run(`(()=>{transactionEditor({accountId:qaBank,date:'2026-11-03'});const form=transactionDrawer.querySelector('form');form.elements.description.value='Created in the shared editor';form.elements.amount.value='25.00';form.requestSubmit();})()`);
  await until(`!!transactionDrawer.querySelector('#transaction-full-edit-form')&&root.textContent.includes('Created in the shared editor')`);
  assert.equal(await run(`transactionDrawer.querySelector('form').elements.amount.value`),'25.00');

@@ -1439,9 +1439,7 @@ function editor(title,fields,formId,submit='Save',host=dialog) {
     if(dialog.open)dialog.close();
     host.hidden=false;document.body.classList.add('transaction-drawer-open');
     const form=host.querySelector('.transaction-editor-form');
-    if(form && window.matchMedia('(max-width:760px)').matches)requestAnimationFrame(()=>{
-      if(form.isConnected && !host.hidden)host.scrollIntoView({block:'start'});
-    });
+    if(form && window.matchMedia('(max-width:760px)').matches)host.scrollTop=0;
   }
   else if(!dialog.open) dialog.showModal();
 }
@@ -2908,8 +2906,9 @@ document.addEventListener('submit',async event=>{
       if(form.closest('#transaction-drawer')) {
         await refreshAfterTransactionCreated(created);
         if(addAnother)transactionEditor({accountId:data.account_id,date:data.effective_date});
+        else if(window.matchMedia('(max-width:760px)').matches)closeTransactionDrawer();
         else await transactionEditEditor(created.id);
-        highlightCreatedTransaction(created.id);
+        if(!addAnother || !window.matchMedia('(max-width:760px)').matches)highlightCreatedTransaction(created.id);
         notify(addAnother?'Transaction saved. Add the next one.':'Transaction saved. The list is up to date.');
         return;
       }
