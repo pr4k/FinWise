@@ -27,13 +27,13 @@
       cell.style.width=widths[key]+'px';
     });
     table.querySelectorAll('.sheet-row-number').forEach(cell=>{
-      cell.classList.toggle('sheet-frozen',freezeIndex>=0);cell.style.left='0px';
+      cell.classList.toggle('sheet-frozen',freezeIndex>=0);cell.style.left=freezeIndex>=0?'0px':'';
     });
     active.forEach(([key],index)=>{
       table.querySelectorAll(`[data-sheet-cell="${key}"]`).forEach(cell=>{
         cell.classList.toggle('sheet-frozen',index<=freezeIndex);
         cell.classList.toggle('sheet-frozen-edge',index===freezeIndex && freezeIndex>=0);
-        cell.style.left=left+'px';
+        cell.style.left=index<=freezeIndex?left+'px':'';
       });
       left+=widths[key];
     });

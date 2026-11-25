@@ -13,7 +13,7 @@
 .sheet-table th, .sheet-table td { padding:10px 12px; border-right:1px solid #e7ece9; border-bottom:1px solid #e7ece9; text-align:left; white-space:nowrap; }
 .sheet-table thead th { position:sticky; top:0; z-index:1; background:#f4f7f5; color:#46594d; }
 .sheet-table th button, .sheet-table td button { border:0; background:none; color:inherit; cursor:pointer; font:inherit; padding:0; }
-.sheet-table th button { font-weight:700; } .sheet-table th button span { color:#819087; }
+.sheet-table th button { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; } .sheet-table th button span { color:#819087; }
 .sheet-table td button { color:#287454; text-decoration:underline; }
 .sheet-table .sheet-row-number { color:#8c9991; background:#f8faf8; font-weight:400; text-align:right; }
 .sheet-table .sheet-amount { text-align:right; font-variant-numeric:tabular-nums; } .sheet-table .sheet-empty { padding:30px; text-align:center; color:#64746b; }
