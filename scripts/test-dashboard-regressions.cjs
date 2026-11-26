@@ -156,6 +156,16 @@ try{
  await run(`root.querySelector('[data-reference-cash="behalf"]').click()`);await until('dialog.open');
  assert.ok(await run(`dialog.textContent.includes('Shared meal test')&&dialog.textContent.includes('900.00')`));await run('dialog.close()');
  console.log('PASS: a partially shared purchase updates dashboard spending, category totals, and both cash breakdown shares.');
+ await run(`(async()=>{const card=state.accounts.find(a=>a.name==='No statement card');const purchase=await finwiseAPI.request('transactions',{method:'POST',body:{event_type:'expense',amount:'1800.00',currency:'INR',effective_date:'2026-11-09',description:'Shared card purchase',movements:[{account_id:card.id,amount:'-1800.00'}],allocations:[{category_id:qaSharedCategory,amount:'1800.00',scope:'family'}]}});window.qaCardPurchase=purchase.id;await finwiseAPI.request('transactions/'+purchase.id+'/classification',{method:'POST',revision:purchase.revision,body:{transaction_type:'paid_on_behalf',person:'Alex',paid_on_behalf_amount:'900.00'}});await renderRoute();})()`);
+ assert.equal(await run('state.referenceCash.cardBehalfTotal'),'900.00');
+ assert.equal(await run('state.referenceCash.totals.behalf'),'900.00','Card purchase does not add to bank-paid amount');
+ assert.equal(await run(`state.referenceDashboard.summary.breakdown.filter(r=>r.transaction_id===qaCardPurchase).reduce((n,r)=>n+Number(r.spending),0)`),900);
+ await run(`root.querySelector('[data-reference-cash="cardBehalf"]').click()`);await until('dialog.open');
+ assert.ok(await run(`dialog.textContent.includes('Shared card purchase')&&dialog.textContent.includes('900.00')`));await run('dialog.close()');
+ await run('transactionDetail(qaCardPurchase)');await until(`!!document.querySelector('#transaction-detail-form')`);
+ assert.ok(await run(`document.querySelector('#transaction-detail-form').textContent.includes('Your share')&&document.querySelector('#transaction-detail-form').textContent.includes('Paid on behalf · Alex')`));
+ await run('dialog.close();closeTransactionDrawer()');
+ console.log('PASS: card-funded shared purchase appears separately from cash paid and labels both transaction shares.');
  assert.deepEqual(errors,[]);
  console.log('PASS: cash surplus deducts bank purchases and card repayments once; card purchases/refunds remain consumption; partial prior-debt payments and next-month transfers use payment months; internal bank transfers cancel; due dates, 320–1500px layouts and lazy reports remain correct.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
