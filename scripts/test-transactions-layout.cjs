@@ -146,6 +146,12 @@ try{
   await until(`!root.querySelector('.tx-just-added')`);
  }
  console.log('PASS: each new transaction scrolls into view and is temporarily highlighted on desktop and mobile, including a different month, scope, and an excluding search filter.');
+ await run(`(()=>{closeTransactionDrawer();transactionEditor({accountId:qaBank,date:'2026-10-15'});const form=transactionDrawer.querySelector('form');form.elements.description.value='Calculated mobile amount';const amount=form.elements.amount;amount.value='100.10';amount.setSelectionRange(amount.value.length,amount.value.length);form.querySelector('[data-amount-operator="+"]').click();amount.setRangeText('25.20',amount.selectionStart,amount.selectionEnd,'end');form.querySelector('[data-amount-operator="-"]').click();amount.setRangeText('5.05',amount.selectionStart,amount.selectionEnd,'end');form.requestSubmit();})()`);
+ await until(`transactionDrawer.hidden&&root.textContent.includes('Calculated mobile amount')`);
+ assert.equal(await run(`(async()=>{const items=await finwiseAPI.collection('transactions?limit=200');return items.data.find(t=>t.description==='Calculated mobile amount').amount})()`),'120.25');
+ assert.equal(await run(`calculateTransactionAmount('1-2')`),null);
+ assert.equal(await run(`calculateTransactionAmount('1+')`),null);
+ console.log('PASS: mobile amount buttons add and subtract precisely, and invalid or nonpositive totals are rejected.');
  assert.deepEqual(errors,[]);
  console.log('PASS: entered/calculated balances, positive/negative/zero/unknown differences, date headers including evidence-only dates, and account context preserved; no browser exceptions.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

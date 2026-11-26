@@ -145,6 +145,17 @@ try{
   const reportShot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await fs.writeFile('/tmp/finwise-report-spacing-'+width+'.png',Buffer.from(reportShot.data,'base64'));
  }
  console.log('PASS: long category and holdings lists stay compact and scrollable, empty subscriptions do not stretch, report charts fit their content, and layouts remain contained at 320–1500px.');
+ await run(`(async()=>{const bank=state.accounts.find(a=>a.name==='Household bank');const category=await finwiseAPI.request('categories',{method:'POST',body:{name:'Shared meal',kind:'expense'}});window.qaSharedCategory=category.id;const purchase=await finwiseAPI.request('transactions',{method:'POST',body:{event_type:'expense',amount:'1800.00',currency:'INR',effective_date:'2026-11-08',description:'Shared meal test',movements:[{account_id:bank.id,amount:'-1800.00'}],allocations:[{category_id:category.id,amount:'1800.00',scope:'family'}]}});window.qaSharedPurchase=purchase.id;await catalogs();await renderRoute();await paidOnBehalfEditor(purchase);const form=dialog.querySelector('#paid-on-behalf-form');form.elements.person.value='Alex';form.elements.paid_on_behalf_amount.value='900.00';form.requestSubmit();})()`);
+ await until(`!dialog.open`);
+ await run('renderRoute()');
+ assert.equal(await run('state.referenceCash.totals.behalf'),'900.00');
+ assert.ok(await run(`state.referenceCash.groups.purchases.some(r=>r.transaction.id===qaSharedPurchase&&r.amount==='900.00')`));
+ assert.ok(await run(`state.referenceCash.groups.behalf.some(r=>r.transaction.id===qaSharedPurchase&&r.amount==='900.00')`));
+ assert.equal(await run(`state.referenceDashboard.summary.breakdown.filter(r=>r.transaction_id===qaSharedPurchase).reduce((n,r)=>n+Number(r.spending),0)`),900);
+ assert.equal(await run(`(async()=>{const d=await finwiseAPI.request('analytics/dashboard?'+reportQuery(state.month,'INR'));return d.categories.data.find(c=>c.id===qaSharedCategory)?.amount})()`),'900.00');
+ await run(`root.querySelector('[data-reference-cash="behalf"]').click()`);await until('dialog.open');
+ assert.ok(await run(`dialog.textContent.includes('Shared meal test')&&dialog.textContent.includes('900.00')`));await run('dialog.close()');
+ console.log('PASS: a partially shared purchase updates dashboard spending, category totals, and both cash breakdown shares.');
  assert.deepEqual(errors,[]);
  console.log('PASS: cash surplus deducts bank purchases and card repayments once; card purchases/refunds remain consumption; partial prior-debt payments and next-month transfers use payment months; internal bank transfers cancel; due dates, 320–1500px layouts and lazy reports remain correct.');
 }catch(error){console.error(error.stack);process.exitCode=1;}finally{ws?.close();chrome.kill();server.kill();await pause(500);await fs.rm(temp,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

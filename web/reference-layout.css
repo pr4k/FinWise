@@ -167,6 +167,9 @@ body .transaction-drawer {width:var(--transaction-panel-width,440px);box-shadow:
 .transaction-drawer .transaction-editor-form [data-edit-allocation],
 .transaction-drawer .transaction-editor-form #allocation-fields:not([hidden]) {display:grid;gap:14px;padding:12px;background:#f7f9f5;border:1px solid var(--line);border-radius:8px}
 .transaction-drawer .transaction-editor-form .transaction-category-picker {font-size:11px;color:var(--muted)}
+.transaction-amount-tools {display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+.transaction-amount-tools button {min-width:44px;min-height:44px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:20px;cursor:pointer}
+.transaction-amount-tools span {line-height:1.4}
 .transaction-drawer .transaction-editor-form .transaction-category-picker>summary {cursor:pointer;padding:4px 0}
 .transaction-drawer .transaction-editor-form .transaction-category-picker[open]>summary {margin-bottom:12px}
 .transaction-drawer .transaction-editor-form .transaction-category-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
