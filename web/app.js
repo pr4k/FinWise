@@ -940,6 +940,28 @@ function updateDailyActivity(focus='') {
   if(focus==='filter')host.querySelector('select').focus();
   else if(focus)host.querySelector(`[data-date="${CSS.escape(focus)}"]`)?.focus();
 }
+function emiEditor(categoryId) {
+  const category=state.categories.find(c=>c.id===categoryId), terms=(state.emiTerms||[]).find(t=>t.category_id===categoryId)||{};
+  const input=(name,value,extra='')=>`<input name="${name}" value="${h(value??'')}" ${extra} required>`;
+  editor(`EMI terms · ${category.name}`,`<input type="hidden" name="category_id" value="${h(categoryId)}">`+
+    field('Original principal',input('principal',terms.principal,'type="number" min="0.01" step="0.01"'))+
+    field('Annual interest rate (%)',input('annual_rate',terms.annual_rate??'0','type="number" min="0" max="100" step="0.001"'))+
+    field('Monthly payment',input('monthly_payment',terms.monthly_payment,'type="number" min="0.01" step="0.01"'))+
+    field('First payment date',input('start_date',terms.start_date,'type="date"'))+
+    field('Currency',input('currency',terms.currency||state.me.household.base_currency,'pattern="[A-Z]{3}" maxlength="3"'))+
+    '<p class="helper">Use the original principal and first payment date. Payments recorded in this category from that date are included. One category represents one loan.</p>','emi-form');
+}
+function renderEmiSection(transactions,terms) {
+  const categories=state.categories.filter(c=>c.tracking_type==='emi'&&!c.archived);
+  const cards=categories.map(category=>{
+    const loan=terms.find(t=>t.category_id===category.id);
+    if(!loan)return `<article class="panel recurring-card"><h3>${h(categoryName(category.id))}</h3><p>Set up loan terms to see the schedule.</p>${button('Set up EMI','emi-edit',`data-id="${h(category.id)}"`)}</article>`;
+    const result=window.finwiseEmi.schedule(loan,transactions,householdDate());
+    const rows=result.rows.map(row=>`<tr><td>${h(row.month)}</td><td>${row.actual?'Recorded':'Projected'}</td><td>${amount(row.payment,loan.currency)}</td><td>${amount(row.interest,loan.currency)}</td><td>${amount(row.balance,loan.currency)}</td></tr>`).join('');
+    return `<article class="panel recurring-card"><h3>${h(categoryName(category.id))}</h3><p>Paid ${amount(result.paid,loan.currency)} · Estimated principal remaining ${amount(result.remaining,loan.currency)} · ${result.rows.filter(row=>!row.actual).length}${result.incomplete?'+':''} projected payments left</p><p class="helper">${h(loan.annual_rate)}% annual interest · ${amount(loan.monthly_payment,loan.currency)} planned monthly · ${h(loan.currency)}</p>${button('Edit EMI terms','emi-edit',`data-id="${h(category.id)}"`)}<details><summary>EMI schedule</summary><p class="helper">Monthly reducing balance estimate. Recorded category allocations are used through the latest due date; future payments are projections. Missing past payments accrue interest. Fees, rate changes and payment-day interest are not included.${result.incomplete?' The balance is not repaid within 600 months.':''}</p><div class="table-scroll"><table class="live-table"><thead><tr><th>Month</th><th>Status</th><th>Payment</th><th>Interest</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table></div></details></article>`;
+  }).join('');
+  return `<section class="emi-section"><h2>EMIs</h2><p class="helper">Track one loan per EMI category. Configure a category to get started.</p>${cards||'<p>No EMI categories yet. Set a category’s behavior to EMI in Categories.</p>'}</section>`;
+}
 const views = {
   async household(parts) {
     const currency=state.me.household.base_currency;
@@ -961,7 +983,9 @@ const views = {
     return heading('Household 360',`${monthLabel} · ${members.length} household member${members.length===1?'':'s'}`)+`<div class="household-grid">${cards||empty('No household members yet.')}</div>${detail}<p class="helper household-note">Spending and refunds are attributed to Paid by; income to the person who entered it. Your personal allocations and accessible family allocations are included. Other members’ private accounts and investments remain private; their invested amount covers holdings they chose to share. Net invested is contributions minus withdrawals, including tagged transactions once; it is not the portfolio’s observed value. All amounts use ${h(currency)} and recorded data only.</p>`;
   },
   async recurring() {
-    const [{data},taggedTransactions]=await Promise.all([api.request('recurring-transactions'),state.categories.some(c=>c.tracking_type==='subscription')?api.collection('transactions'):Promise.resolve({data:[]})]);
+    const [{data},taggedTransactions,emiTerms]=await Promise.all([api.request('recurring-transactions'),state.categories.some(c=>['subscription','emi'].includes(c.tracking_type))?api.collection('transactions'):Promise.resolve({data:[]}),api.request('emi-terms')]);
+    state.emiTerms=emiTerms.data;
+    const emiSection=renderEmiSection(taggedTransactions.data,emiTerms.data);
     const categoryRows=unlinkedSubscriptionRows(taggedTransactions.data,data);
     state.referenceRecurring={data,categoryRows};
     const review=data.filter(item=>!item.subscription&&!item.ignored);
@@ -979,7 +1003,7 @@ const views = {
     }).join('');
 
     const noRows={review:'No patterns need review. Import more months to find repeating payments.',subscriptions:'No subscriptions tagged yet. Mark a pattern as a subscription from To review.',ignored:'No ignored patterns.'};
-    return heading('Recurring payments','Track subscriptions and review repeating payments.',button('Connect payment / New subscription','subscription-link'))+tabs+`<details class="quiet-details"><summary>How repeating payments are found</summary><p class="helper">Patterns come from visible transactions and bank statements. Linked payments count once. Ignored patterns can be restored from the Ignored tab.</p></details>${state.recurringFilter==='subscriptions' && state.categories.some(c=>c.tracking_type==='subscription')?trackedCategoryPanel(categoryRows,'Subscriptions tracked by category',state.month):''}<div class="recurring-list">${rows||(state.recurringFilter==='subscriptions'&&categoryRows.length?'':empty(noRows[state.recurringFilter]||noRows.review))}</div>`;
+    return heading('Recurring payments','Track subscriptions and review repeating payments.',button('Connect payment / New subscription','subscription-link'))+tabs+emiSection+`<details class="quiet-details"><summary>How repeating payments are found</summary><p class="helper">Patterns come from visible transactions and bank statements. Linked payments count once. Ignored patterns can be restored from the Ignored tab.</p></details>${state.recurringFilter==='subscriptions' && state.categories.some(c=>c.tracking_type==='subscription')?trackedCategoryPanel(categoryRows,'Subscriptions tracked by category',state.month):''}<div class="recurring-list">${rows||(state.recurringFilter==='subscriptions'&&categoryRows.length?'':empty(noRows[state.recurringFilter]||noRows.review))}</div>`;
   },
   async overview() {
     const currency=state.overviewCurrency||state.me.household.base_currency;
@@ -1541,7 +1565,7 @@ function categoryEditor(key=null,parentKey=null) {
     input('category_id',`type="hidden" value="${h(key||'')}"`)+input('revision',`type="hidden" value="${current?.revision||''}"`)+
     field('Name',input('name',`required maxlength="100" value="${h(current?.name||'')}"`))+kindField+
     field('Parent category',`<select name="parent_id" id="category-parent">${option('','Top level',!parentId)}${categoryOptions(kind,parentId,key||'')}</select>`)+
-    field('Track transactions as',`<select name="tracking_type" id="category-tracking-type" ${kind==='income'?'disabled':''}>${option('regular','Regular expense',!current?.tracking_type||current.tracking_type==='regular')}${option('investment','Investment',current?.tracking_type==='investment')}${option('subscription','Subscription',current?.tracking_type==='subscription')}</select>`)+
+    field('Track transactions as',`<select name="tracking_type" id="category-tracking-type" ${kind==='income'?'disabled':''}>${option('regular','Regular expense',!current?.tracking_type||current.tracking_type==='regular')}${option('investment','Investment',current?.tracking_type==='investment')}${option('subscription','Subscription',current?.tracking_type==='subscription')}${option('emi','EMI',current?.tracking_type==='emi')}</select>`)+
     `<p class="helper">Tracking applies to transactions allocated directly to this expense category, including earlier transactions. Investment allocations stop counting as spending or budget use; account balances stay unchanged. Subscription allocations remain expenses.</p>`+
     (familyMode()?input('visibility','type="hidden" value="shared"'):field('Access',`<select name="visibility" ${current&&access==='shared'?'disabled':''}>${option('private','Personal',access==='private')}${option('shared','Household',access==='shared')}</select>`))+
     (current&&access==='shared'?input('visibility','type="hidden" value="shared"'):'')+
@@ -2360,6 +2384,7 @@ const actions = {
   'skip-plan':async el=>{const item=state.plannedItems.find(v=>v.id===el.dataset.id);if(!item)return;await api.request(`planned-items/${id(item.id)}`,{method:'PATCH',revision:item.revision,body:{status:item.status==='skipped'?'planned':'skipped'}});notify('Commitment updated.');await renderRoute();},
   'toggle-plan':async el=>{const item=state.plannedItems.find(v=>v.id===el.dataset.id);if(!item)return;await api.request(`planned-items/${id(item.id)}`,{method:'PATCH',revision:item.revision,body:{status:item.status==='planned'?'done':'planned'}});notify('Plan status updated.');await renderRoute();},
   'delete-plan':async el=>{const item=state.plannedItems.find(v=>v.id===el.dataset.id);if(!item||!window.confirm(`Remove the plan for ${item.title}?`))return;await api.request(`planned-items/${id(item.id)}`,{method:'DELETE',revision:item.revision,body:{}});notify('Plan removed.');await renderRoute();},
+  'emi-edit':el=>emiEditor(el.dataset.id),
   'recurring-filter':el=>{state.recurringFilter=el.dataset.filter;renderRoute();},
   'subscription-link':el=>subscriptionLinkEditor(el.dataset.id||'',el.dataset.key||''),
   'recurring-status':async el=>{const field=el.dataset.field,value=el.dataset.value==='true';if(!['subscription','ignored'].includes(field))return;await api.request(`recurring-transactions/${id(el.dataset.key)}`,{method:'PUT',body:{[field]:value}});notify(field==='ignored'?(value?'Pattern ignored.':'Pattern restored to review.'):(value?'Marked as subscription.':'Subscription tag removed.'));await renderRoute();},
@@ -2565,6 +2590,10 @@ document.addEventListener('submit',async event=>{
   const formData=new FormData(form);
   const data=Object.fromEntries(formData);
   try {
+    if(form.id==='emi-form') {
+      await api.request(`emi-terms/${id(data.category_id)}`,{method:'PUT',body:{principal:data.principal,annual_rate:data.annual_rate,monthly_payment:data.monthly_payment,start_date:data.start_date,currency:data.currency}});
+      dialog.close();notify('EMI terms saved.');await renderRoute();return;
+    }
     if(form.id==='paid-purchase-form') {await paidOnBehalfEditor(await api.request(`transactions/${id(data.transaction_id)}`));return;}
     if(form.id==='paid-on-behalf-form') {
       const t=state.paidOnBehalfTransaction;

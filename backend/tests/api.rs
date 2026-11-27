@@ -8060,3 +8060,23 @@ async fn cash_surplus_widget_requires_live_selected_member_and_explicit_exposure
     assert_eq!(revoked.0,StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(revoked.1["error"]["code"],"widget_unavailable");
 }
+
+#[tokio::test]
+async fn emi_terms_are_reachable_and_persist_through_http() {
+    let (client, _) = setup().await;
+    let initial = client.call("GET", "emi-terms", json!({}), None, None).await;
+    assert_eq!(initial.0, StatusCode::OK, "{}", initial.1);
+    assert_eq!(initial.1["data"], json!([]));
+    let category = client.create("categories", json!({"name":"Loan EMI","kind":"expense","tracking_type":"emi"})).await;
+    let path = format!("emi-terms/{}", category["id"].as_str().unwrap());
+    let terms = json!({"principal":"100000.00","annual_rate":"10","monthly_payment":"5000.00","start_date":"2026-01-05","currency":"INR"});
+    let saved = client.call("PUT", &path, terms.clone(), None, None).await;
+    assert_eq!(saved.0, StatusCode::OK, "{}", saved.1);
+    assert_eq!(saved.1["category_id"], category["id"]);
+    let listed = client.call("GET", "emi-terms", json!({}), None, None).await;
+    assert_eq!(listed.0, StatusCode::OK, "{}", listed.1);
+    assert_eq!(listed.1["data"][0]["principal"], terms["principal"]);
+    let invalid = client.call("PUT", &path, json!({"principal":"100000.00","annual_rate":"10","monthly_payment":"100.00","start_date":"2026-01-05","currency":"INR"}), None, None).await;
+    assert_eq!(invalid.0, StatusCode::BAD_REQUEST);
+    assert_eq!(client.call("GET", "recurring-transactions", json!({}), None, None).await.0, StatusCode::OK);
+}

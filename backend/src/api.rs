@@ -641,6 +641,36 @@ pub(crate) async fn route(
             storage::audit(db, p, id, "budget_commitment_unmatch_reason", None, Some(&json!({"reason":reason}))).await?;
             no_content()
         }
+        ("GET", ["emi-terms"]) => {
+            allowed_query(q, &[])?;
+            let rows: Vec<String> = sqlx::query_scalar("SELECT document FROM emi_terms WHERE household_id=? AND user_id=?")
+                .bind(&p.household_id).bind(&p.user_id).fetch_all(&mut *db).await?;
+            let mut data = Vec::new();
+            for row in rows {
+                let value: Value = serde_json::from_str(&row).map_err(|_| ApiError::invalid("Invalid EMI terms."))?;
+                if storage::get(db, p, "categories", text(&value, "category_id")?).await.is_ok() { data.push(value); }
+            }
+            ok(json!({"data":data,"page":{},"meta":{}}))
+        }
+        ("PUT", ["emi-terms", category_id]) => {
+            allowed_body(body, &["principal", "annual_rate", "monthly_payment", "start_date", "currency"])?;
+            let category = storage::get(db, p, "categories", category_id).await?;
+            if !storage::can_manage(db, p, &category).await? { return Err(ApiError::forbidden()); }
+            if category["tracking_type"] != "emi" { return Err(ApiError::invalid("Select an EMI category first.")); }
+            let currency = text(body, "currency")?;
+            let principal = domain::money(text(body, "principal")?, currency)?;
+            let payment = domain::money(text(body, "monthly_payment")?, currency)?;
+            let rate: f64 = text(body, "annual_rate")?.parse().map_err(|_| ApiError::invalid("Enter a valid annual interest rate."))?;
+            if principal <= 0 || payment <= 0 || !rate.is_finite() || !(0.0..=100.0).contains(&rate) || (payment as f64) <= (principal as f64) * rate / 1200.0 {
+                return Err(ApiError::invalid("Enter positive amounts and a rate from 0 to 100%. The monthly payment must exceed the first month's interest."));
+            }
+            domain::date(text(body, "start_date")?)?;
+            let mut value = body.clone(); value["category_id"] = json!(category_id);
+            sqlx::query("INSERT INTO emi_terms(household_id,user_id,category_id,document) VALUES(?,?,?,?) ON CONFLICT(household_id,user_id,category_id) DO UPDATE SET document=excluded.document")
+                .bind(&p.household_id).bind(&p.user_id).bind(category_id).bind(value.to_string()).execute(&mut *db).await?;
+            storage::audit(db, p, category_id, "emi_terms_saved", None, Some(&value)).await?;
+            ok(value)
+        }
         ("GET", ["recurring-transactions"]) => {
             allowed_query(q, &[])?;
             ok(recurring::list(db, p).await?)
@@ -1681,9 +1711,9 @@ async fn validate_category(
     domain::choice(v, "kind", &["expense", "income"])?;
     domain::choice(v, "visibility", &["private", "shared"])?;
     if let Some(tracking) = v.get("tracking_type") {
-        let tracking = tracking.as_str().ok_or_else(|| ApiError::invalid("tracking_type must be regular, investment, or subscription."))?;
-        if !["regular", "investment", "subscription"].contains(&tracking) || (v["kind"] != "expense" && tracking != "regular") {
-            return Err(ApiError::invalid("Only expense categories can track investments or subscriptions."));
+        let tracking = tracking.as_str().ok_or_else(|| ApiError::invalid("tracking_type must be regular, investment, subscription, or emi."))?;
+        if !["regular", "investment", "subscription", "emi"].contains(&tracking) || (v["kind"] != "expense" && tracking != "regular") {
+            return Err(ApiError::invalid("Only expense categories can track investments, subscriptions, or EMIs."));
         }
     }
     if v.get("parent_id")

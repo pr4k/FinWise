@@ -2409,6 +2409,101 @@
         }
       }
     },
+    "/emi-terms": {
+      "get": {
+        "operationId": "get_emi_terms",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmiTermsCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emi-terms/{category_id}": {
+      "put": {
+        "operationId": "put_emi_terms_category_id",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "category_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-implemented": true,
+        "responses": {
+          "default": {
+            "description": "Standard API error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmiTerms"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmiTermsInput"
+              }
+            }
+          }
+        }
+      }
+    },
     "/recurring-transactions": {
       "get": {
         "operationId": "get_recurring_transactions",
@@ -12969,7 +13064,8 @@
             "enum": [
               "regular",
               "investment",
-              "subscription"
+              "subscription",
+              "emi"
             ]
           }
         },
@@ -14710,7 +14806,8 @@
             "enum": [
               "regular",
               "investment",
-              "subscription"
+              "subscription",
+              "emi"
             ]
           },
           "id": {
@@ -14769,7 +14866,8 @@
             "enum": [
               "regular",
               "investment",
-              "subscription"
+              "subscription",
+              "emi"
             ]
           },
           "expected_revision": {
@@ -15519,6 +15617,100 @@
         "required": [
           "transaction_id",
           "key"
+        ]
+      },
+      "EmiTermsInput": {
+        "type": "object",
+        "properties": {
+          "principal": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "annual_rate": {
+            "type": "string"
+          },
+          "monthly_payment": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal",
+          "annual_rate",
+          "monthly_payment",
+          "start_date",
+          "currency"
+        ]
+      },
+      "EmiTerms": {
+        "type": "object",
+        "properties": {
+          "principal": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "annual_rate": {
+            "type": "string"
+          },
+          "monthly_payment": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$",
+            "description": "Exact decimal money; never a JSON number."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "category_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal",
+          "annual_rate",
+          "monthly_payment",
+          "start_date",
+          "currency",
+          "category_id"
+        ]
+      },
+      "EmiTermsCollection": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmiTerms"
+            }
+          },
+          "page": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          },
+          "meta": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        "required": [
+          "data",
+          "page",
+          "meta"
         ]
       },
       "DatedBalance": {
